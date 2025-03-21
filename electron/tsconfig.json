@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "outDir": "../dist/electron",
+    "baseUrl": ".",
+    "paths": {
+      "*": ["../node_modules/*"]
+    },
+    "strict": true
+  },
+  "include": ["**/*.ts"]
+}
+
