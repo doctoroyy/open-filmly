@@ -5,8 +5,8 @@ import { ThemeProvider } from "@/components/theme-provider"
 
 
 export const metadata: Metadata = {
-  title: "Open Filmly",
-  description: "Open Filmly is a media center that allows you to watch movies and TV shows on your computer.",
+  title: "Open Filmly (Beta)",
+  description: "Open Filmly is a media management platform similar to Plex, Emby, or Jellyfin that helps you organize and stream your media library with automatic categorization, poster fetching, and metadata retrieval. Currently in beta - some features under development.",
   metadataBase: new URL('file://'),
 }
 

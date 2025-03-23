@@ -482,7 +482,7 @@ export class SambaClient {
       const content = await client.readFile(formattedPath);
 
       // 创建临时文件
-      const tempDir = path.join(os.tmpdir(), "nas-poster-wall");
+      const tempDir = path.join(os.tmpdir(), "open-filmly");
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }

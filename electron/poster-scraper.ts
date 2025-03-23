@@ -24,7 +24,7 @@ export class PosterScraper {
     }
 
     // 创建海报缓存目录
-    this.posterCacheDir = path.join(os.homedir(), ".nas-poster-wall", "posters")
+    this.posterCacheDir = path.join(os.homedir(), ".open-filmly", "posters")
     if (!fs.existsSync(this.posterCacheDir)) {
       fs.mkdirSync(this.posterCacheDir, { recursive: true })
     }

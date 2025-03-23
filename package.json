@@ -1,7 +1,7 @@
 {
   "name": "open-filmly",
   "version": "1.0.0",
-  "description": "open filmly",
+  "description": "Open Filmly is a media management platform similar to Plex, Emby, or Jellyfin that helps you organize and stream your media library with automatic categorization, poster fetching, and metadata retrieval. Currently in beta - some features under development.",
   "main": "dist/electron/main.js",
   "private": true,
   "author": {
@@ -24,7 +24,7 @@
   },
   "build": {
     "appId": "com.example.open-filmly",
-    "productName": "open filmly",
+    "productName": "Open Filmly",
     "files": [
       "dist/**/*",
       "node_modules/**/*",
