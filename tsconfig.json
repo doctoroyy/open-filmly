@@ -22,11 +22,11 @@
       "@/*": ["./src/*"],
       "@app/*": ["./src/app/*"],
       "@components/*": ["./src/components/*"],
-      "@lib/*": ["./lib/*"],
-      "@types/*": ["./types/*"],
-      "@hooks/*": ["./hooks/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@types/*": ["./src/types/*"],
+      "@hooks/*": ["./src/hooks/*"],
       "@public/*": ["./public/*"],
-      "@styles/*": ["./styles/*"]
+      "@styles/*": ["./src/styles/*"]
     },
     "baseUrl": "."
   },

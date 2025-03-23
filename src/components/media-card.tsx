@@ -3,6 +3,7 @@
 import { useState } from "react"
 import Image from "next/image"
 import { Play, Star } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import type { Media } from "@/types/media"
 
@@ -11,15 +12,17 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ media }: MediaCardProps) {
+  const router = useRouter()
   const [isHovering, setIsHovering] = useState(false)
   const [imageError, setImageError] = useState(false)
 
-  const handlePlay = async () => {
+  const handlePlay = async (e: React.MouseEvent) => {
+    e.stopPropagation() // 防止触发卡片点击
     try {
-      const result = await window.electronAPI.playMedia(media.id)
+      const result = await window.electronAPI?.playMedia(media.id)
 
-      if (!result.success) {
-        console.error("Failed to play media:", result.error)
+      if (!result?.success) {
+        console.error("Failed to play media:", result?.error)
       }
     } catch (error) {
       console.error("Error playing media:", error)
@@ -40,12 +43,17 @@ export function MediaCard({ media }: MediaCardProps) {
     return media.posterPath
   }
 
+  // Format rating to one decimal place
+  const formattedRating = media.rating ? 
+    (typeof media.rating === 'number' ? media.rating.toFixed(1) : media.rating) 
+    : null;
+
   return (
     <div
       className="relative aspect-[2/3] rounded-lg overflow-hidden group cursor-pointer transition-transform duration-200 hover:scale-105"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
-      onClick={handlePlay}
+      onClick={() => router.push(`/${media.id}`)}
     >
       <Image
         src={getPosterPath() || "/placeholder.svg"}
@@ -66,16 +74,19 @@ export function MediaCard({ media }: MediaCardProps) {
         <h3 className="text-white font-medium line-clamp-2">{media.title}</h3>
         <p className="text-gray-300 text-sm">{media.year}</p>
 
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+        <div 
+          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
+          onClick={handlePlay}
+        >
           <div className="bg-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30">
             <Play className="w-8 h-8 text-white fill-white" />
           </div>
         </div>
       </div>
 
-      {media.rating && (
-        <div className="absolute top-2 right-2 bg-yellow-500 text-black font-bold rounded-full w-8 h-8 flex items-center justify-center">
-          {media.rating}
+      {formattedRating && (
+        <div className="absolute top-2 right-2 bg-yellow-600 text-white text-xs font-bold rounded w-8 h-5 flex items-center justify-center">
+          {formattedRating}
         </div>
       )}
     </div>

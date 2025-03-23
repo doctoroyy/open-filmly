@@ -5,6 +5,8 @@ interface ElectronAPI {
 
   // 媒体相关
   getMedia: (type: "movie" | "tv") => Promise<any[]>
+  getMediaById: (id: string) => Promise<any | null>
+  getRecentlyViewed: () => Promise<any[]>
   scanMedia: (type: "movie" | "tv") => Promise<{ success: boolean; count?: number; error?: string }>
   playMedia: (mediaId: string) => Promise<{ success: boolean; error?: string }>
 
@@ -16,5 +18,5 @@ interface ElectronAPI {
 }
 
 interface Window {
-  electronAPI: ElectronAPI
+  electronAPI?: ElectronAPI
 } 

@@ -6,6 +6,15 @@ import { PosterScraper } from "./poster-scraper"
 import { MediaDatabase } from "./media-database"
 import { MediaPlayer } from "./media-player"
 
+// 抑制 macOS 上的 IMK 相关警告
+if (process.platform === 'darwin') {
+  process.env.IMK_DISABLE_WAKEUP_RELIABLE = '1'
+  // 禁用硬件加速可以解决某些macOS上的渲染问题
+  if (process.platform === 'darwin') {
+    app.disableHardwareAcceleration()
+  }
+}
+
 // 全局变量
 let mainWindow: BrowserWindow | null = null
 let sambaClient: SambaClient
@@ -33,7 +42,7 @@ function createWindow() {
   console.log(`Running in ${isDev ? "development" : "production"} mode`)
   
   if (isDev) {
-    const serverUrl = "http://localhost:3000"
+    const serverUrl = "http://localhost:3001"
     console.log(`Loading from development server: ${serverUrl}`)
     mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()
@@ -73,6 +82,10 @@ async function initializeApp() {
     const config = await mediaDatabase.getConfig()
     if (config) {
       sambaClient.configure(config)
+      // 设置媒体扫描器的共享路径
+      if (config.sharePath) {
+        mediaScanner.setSharePath(config.sharePath)
+      }
     }
   } catch (error: unknown) {
     console.error("Failed to initialize app:", error)
@@ -109,6 +122,12 @@ ipcMain.handle("save-config", async (_, config) => {
   try {
     await mediaDatabase.saveConfig(config)
     sambaClient.configure(config)
+    
+    // 设置媒体扫描器的共享路径
+    if (config.sharePath) {
+      mediaScanner.setSharePath(config.sharePath)
+    }
+    
     return { success: true }
   } catch (error: unknown) {
     console.error("Failed to save config:", error)
@@ -127,13 +146,43 @@ ipcMain.handle("scan-media", async (_, type) => {
   }
 })
 
-// 获取媒体列表
+// 获取媒体
 ipcMain.handle("get-media", async (_, type) => {
   try {
-    const media = await mediaDatabase.getMediaByType(type)
-    return media
-  } catch (error: unknown) {
-    console.error("Failed to get media:", error)
+    return await mediaDatabase.getMediaByType(type)
+  } catch (error) {
+    console.error(`Error getting ${type} media:`, error)
+    return []
+  }
+})
+
+// 通过ID获取媒体
+ipcMain.handle("get-media-by-id", async (_, id) => {
+  try {
+    return await mediaDatabase.getMediaById(id)
+  } catch (error) {
+    console.error(`Error getting media with ID ${id}:`, error)
+    return null
+  }
+})
+
+// 获取最近观看
+ipcMain.handle("get-recently-viewed", async () => {
+  try {
+    // 这里我们可以获取最近观看的媒体（可以按最后观看时间排序）
+    // 如果数据库中没有专门的"最近观看"表，可以从现有数据中获取最近修改的项目
+    const movies = await mediaDatabase.getMediaByType("movie")
+    const tvShows = await mediaDatabase.getMediaByType("tv")
+    
+    // 合并电影和电视剧，按lastUpdated排序取最近的5个
+    const allMedia = [...movies, ...tvShows]
+    const recentlyViewed = allMedia
+      .sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime())
+      .slice(0, 5)
+    
+    return recentlyViewed
+  } catch (error) {
+    console.error("Error getting recently viewed media:", error)
     return []
   }
 })

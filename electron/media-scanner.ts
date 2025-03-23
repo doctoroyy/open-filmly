@@ -7,38 +7,42 @@ import type { Media } from "../types/media"
 export class MediaScanner {
   private sambaClient: SambaClient
   private mediaDatabase: MediaDatabase
+  private sharePath: string = ""
 
   constructor(sambaClient: SambaClient, mediaDatabase: MediaDatabase) {
     this.sambaClient = sambaClient
     this.mediaDatabase = mediaDatabase
   }
 
+  // 设置共享路径
+  public setSharePath(sharePath: string): void {
+    this.sharePath = sharePath
+  }
+
   // 扫描媒体文件
   public async scanMedia(type: "movie" | "tv"): Promise<Media[]> {
     try {
-      // 获取目录路径
-      const directoryPath = type === "movie" ? this.sambaClient.getMoviePath() : this.sambaClient.getTvPath()
+      if (!this.sharePath) {
+        throw new Error("共享路径未设置，请先配置共享路径")
+      }
 
-      // 列出目录中的文件
-      const files = await this.sambaClient.listFiles(directoryPath)
-
+      // 使用新的方法获取媒体文件
+      const mediaFiles = await this.sambaClient.getMediaByType(this.sharePath, type)
+      
       // 处理每个文件
       const mediaItems: Media[] = []
 
-      for (const file of files) {
-        // 跳过隐藏文件
-        if (file.startsWith(".")) continue
-
+      for (const mediaFile of mediaFiles) {
         // 解析文件名
-        const { title, year } = parseFileName(file)
+        const { title, year } = parseFileName(mediaFile.name)
 
         // 创建媒体项
         const mediaItem: Media = {
-          id: `${type}-${Buffer.from(file).toString("base64").slice(0, 12)}`,
-          title: title || file,
+          id: `${type}-${Buffer.from(mediaFile.path).toString("base64").slice(0, 12)}`,
+          title: title || mediaFile.name,
           year: year || "未知",
           type,
-          path: path.join(directoryPath, file),
+          path: mediaFile.path,
           posterPath: "",
           dateAdded: new Date().toISOString(),
           lastUpdated: new Date().toISOString(),

@@ -10,7 +10,10 @@ export interface Media {
   releaseDate?: string
   genres?: string[]
   rating?: number
-  filePath: string
+  filePath?: string
+  path?: string
   fileSize?: number
   lastModified?: number
+  dateAdded?: string
+  lastUpdated?: string
 } 

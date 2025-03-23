@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // 媒体相关
   getMedia: (type: "movie" | "tv") => ipcRenderer.invoke("get-media", type),
+  getMediaById: (id: string) => ipcRenderer.invoke("get-media-by-id", id),
+  getRecentlyViewed: () => ipcRenderer.invoke("get-recently-viewed"),
   scanMedia: (type: "movie" | "tv") => ipcRenderer.invoke("scan-media", type),
   playMedia: (mediaId: string) => ipcRenderer.invoke("play-media", mediaId),
 
