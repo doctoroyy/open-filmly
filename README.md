@@ -60,9 +60,6 @@ pnpm dist
 
 - Node.js 16+
 - pnpm
-- For Samba connectivity, smbclient must be installed on your system
-  - On Ubuntu/Debian: `sudo apt-get install smbclient`
-  - On macOS: `brew install samba`
 
 ## Project Structure
 
