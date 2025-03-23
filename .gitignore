@@ -10,6 +10,8 @@
 # production
 /build
 /dist/
+/release/
+.DS_Store
 
 # debug
 npm-debug.log*

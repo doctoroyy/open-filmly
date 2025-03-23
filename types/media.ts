@@ -5,6 +5,7 @@ export interface MediaItem {
   posterUrl: string
   path: string
   rating?: string
+  type?: "movie" | "tv"
 }
 
 export interface Media {
@@ -17,5 +18,16 @@ export interface Media {
   rating?: string
   dateAdded: string
   lastUpdated: string
+}
+
+export interface DataSource {
+  id: string
+  name: string
+  ip: string
+  path: string
+  username?: string
+  password?: string
+  dateAdded: string
+  lastScanned?: string
 }
 

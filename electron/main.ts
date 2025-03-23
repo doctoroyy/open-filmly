@@ -33,7 +33,7 @@ function createWindow() {
   console.log(`Running in ${isDev ? "development" : "production"} mode`)
   
   if (isDev) {
-    const serverUrl = "http://localhost:3001"
+    const serverUrl = "http://localhost:3000"
     console.log(`Loading from development server: ${serverUrl}`)
     mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()

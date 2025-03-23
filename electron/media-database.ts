@@ -1,12 +1,11 @@
 import * as path from "path"
 import * as fs from "fs"
-import * as sqlite3 from "sqlite3"
-import { open, type Database } from "sqlite"
+import Database from "better-sqlite3"
 import type { Media } from "../types/media"
 
 export class MediaDatabase {
   private dbPath: string
-  private db: Database | null = null
+  private db: Database.Database | null = null
 
   constructor(dbPath: string) {
     this.dbPath = dbPath
@@ -22,13 +21,10 @@ export class MediaDatabase {
   public async initialize(): Promise<void> {
     try {
       // 打开数据库连接
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-      })
+      this.db = new Database(this.dbPath)
 
       // 创建媒体表
-      await this.db.exec(`
+      this.db.exec(`
         CREATE TABLE IF NOT EXISTS media (
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
@@ -43,7 +39,7 @@ export class MediaDatabase {
       `)
 
       // 创建配置表
-      await this.db.exec(`
+      this.db.exec(`
         CREATE TABLE IF NOT EXISTS config (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -65,35 +61,29 @@ export class MediaDatabase {
 
     try {
       // 检查媒体项是否已存在
-      const existing = await this.db.get("SELECT id FROM media WHERE id = ?", media.id)
+      const existing = this.db.prepare("SELECT id FROM media WHERE id = ?").get(media.id)
 
       if (existing) {
         // 更新现有媒体项
-        await this.db.run(
-          `
+        this.db.prepare(`
           UPDATE media
           SET title = ?, year = ?, type = ?, path = ?, lastUpdated = ?
           WHERE id = ?
-        `,
-          [media.title, media.year, media.type, media.path, new Date().toISOString(), media.id],
-        )
+        `).run(media.title, media.year, media.type, media.path, new Date().toISOString(), media.id)
       } else {
         // 插入新媒体项
-        await this.db.run(
-          `
+        this.db.prepare(`
           INSERT INTO media (id, title, year, type, path, posterPath, dateAdded, lastUpdated)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-          [
-            media.id,
-            media.title,
-            media.year,
-            media.type,
-            media.path,
-            media.posterPath || "",
-            media.dateAdded,
-            media.lastUpdated,
-          ],
+        `).run(
+          media.id,
+          media.title,
+          media.year,
+          media.type,
+          media.path,
+          media.posterPath || "",
+          media.dateAdded,
+          media.lastUpdated
         )
       }
     } catch (error) {
@@ -109,14 +99,11 @@ export class MediaDatabase {
     }
 
     try {
-      await this.db.run(
-        `
+      this.db.prepare(`
         UPDATE media
         SET posterPath = ?, lastUpdated = ?
         WHERE id = ?
-      `,
-        [posterPath, new Date().toISOString(), mediaId],
-      )
+      `).run(posterPath, new Date().toISOString(), mediaId)
     } catch (error) {
       console.error(`Failed to update poster for ${mediaId}:`, error)
       throw error
@@ -130,14 +117,11 @@ export class MediaDatabase {
     }
 
     try {
-      await this.db.run(
-        `
+      this.db.prepare(`
         UPDATE media
         SET rating = ?, lastUpdated = ?
         WHERE id = ?
-      `,
-        [rating, new Date().toISOString(), mediaId],
-      )
+      `).run(rating, new Date().toISOString(), mediaId)
     } catch (error) {
       console.error(`Failed to update rating for ${mediaId}:`, error)
       throw error
@@ -151,7 +135,7 @@ export class MediaDatabase {
     }
 
     try {
-      const media = await this.db.get("SELECT * FROM media WHERE id = ?", id)
+      const media = this.db.prepare("SELECT * FROM media WHERE id = ?").get(id) as Media | undefined
       return media || null
     } catch (error) {
       console.error(`Failed to get media ${id}:`, error)
@@ -166,7 +150,7 @@ export class MediaDatabase {
     }
 
     try {
-      const media = await this.db.all("SELECT * FROM media WHERE type = ? ORDER BY title", type)
+      const media = this.db.prepare("SELECT * FROM media WHERE type = ? ORDER BY title").all(type) as Media[]
       return media || []
     } catch (error) {
       console.error(`Failed to get ${type} media:`, error)
@@ -185,14 +169,14 @@ export class MediaDatabase {
       const configJson = JSON.stringify(config)
 
       // 检查配置是否已存在
-      const existing = await this.db.get("SELECT key FROM config WHERE key = ?", "app_config")
+      const existing = this.db.prepare("SELECT key FROM config WHERE key = ?").get("app_config")
 
       if (existing) {
         // 更新现有配置
-        await this.db.run("UPDATE config SET value = ? WHERE key = ?", [configJson, "app_config"])
+        this.db.prepare("UPDATE config SET value = ? WHERE key = ?").run(configJson, "app_config")
       } else {
         // 插入新配置
-        await this.db.run("INSERT INTO config (key, value) VALUES (?, ?)", ["app_config", configJson])
+        this.db.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run("app_config", configJson)
       }
     } catch (error) {
       console.error("Failed to save config:", error)
@@ -207,7 +191,7 @@ export class MediaDatabase {
     }
 
     try {
-      const config = await this.db.get("SELECT value FROM config WHERE key = ?", "app_config")
+      const config = this.db.prepare("SELECT value FROM config WHERE key = ?").get("app_config") as { value: string } | undefined
 
       if (config && config.value) {
         return JSON.parse(config.value)
