@@ -33,6 +33,7 @@ export class MediaDatabase {
           path TEXT NOT NULL,
           posterPath TEXT,
           rating TEXT,
+          details TEXT,
           dateAdded TEXT NOT NULL,
           lastUpdated TEXT NOT NULL
         )
@@ -144,7 +145,7 @@ export class MediaDatabase {
   }
 
   // 获取指定类型的所有媒体
-  public async getMediaByType(type: "movie" | "tv"): Promise<Media[]> {
+  public async getMediaByType(type: "movie" | "tv" | "unknown"): Promise<Media[]> {
     if (!this.db) {
       throw new Error("Database not initialized")
     }
@@ -200,6 +201,67 @@ export class MediaDatabase {
       return null
     } catch (error) {
       console.error("Failed to get config:", error)
+      throw error
+    }
+  }
+
+  // 更新媒体详细信息
+  public async updateMediaDetails(mediaId: string, details: {
+    overview?: string;
+    backdropPath?: string;
+    rating?: number;
+    releaseDate?: string;
+    genres?: string[];
+  }): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      // 首先获取当前媒体项
+      const media = await this.getMediaById(mediaId)
+      if (!media) {
+        throw new Error(`Media not found: ${mediaId}`)
+      }
+      
+      // 创建一个用于存储额外详细信息的JSON字段
+      const existingDetails = media.details ? JSON.parse(media.details) : {}
+      const updatedDetails = {
+        ...existingDetails,
+        ...(details.overview !== undefined && { overview: details.overview }),
+        ...(details.backdropPath !== undefined && { backdropPath: details.backdropPath }),
+        ...(details.releaseDate !== undefined && { releaseDate: details.releaseDate }),
+        ...(details.genres !== undefined && { genres: details.genres }),
+      }
+      
+      // 更新数据库
+      const queries = []
+      const params = []
+      
+      // 构建UPDATE语句的SET部分
+      let updateSql = `UPDATE media SET lastUpdated = ?`
+      params.push(new Date().toISOString())
+      
+      // 添加rating字段更新（如果有）
+      if (details.rating !== undefined) {
+        updateSql += `, rating = ?`
+        params.push(details.rating.toString())
+      }
+      
+      // 为其他详细信息创建一个JSON字段
+      updateSql += `, details = ?`
+      params.push(JSON.stringify(updatedDetails))
+      
+      // 添加WHERE子句
+      updateSql += ` WHERE id = ?`
+      params.push(mediaId)
+      
+      // 执行更新
+      this.db.prepare(updateSql).run(...params)
+      
+      console.log(`Updated details for media ${mediaId}`)
+    } catch (error) {
+      console.error(`Failed to update details for ${mediaId}:`, error)
       throw error
     }
   }

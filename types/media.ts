@@ -5,19 +5,34 @@ export interface MediaItem {
   posterUrl: string
   path: string
   rating?: string
-  type?: "movie" | "tv"
+  type?: "movie" | "tv" | "unknown"
+}
+
+export interface MediaEpisode {
+  path: string
+  name: string
+  season: number
+  episode: number
 }
 
 export interface Media {
   id: string
   title: string
   year: string
-  type: "movie" | "tv"
+  type: "movie" | "tv" | "unknown"
   path: string
   posterPath?: string | null
   rating?: string
+  details?: string
   dateAdded: string
   lastUpdated: string
+  episodeCount?: number
+  episodes?: MediaEpisode[]
+  seasons?: number[]
+  overview?: string
+  backdropPath?: string
+  releaseDate?: string
+  genres?: string[]
 }
 
 export interface DataSource {

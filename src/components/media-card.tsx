@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Image from "next/image"
-import { Play, Star } from "lucide-react"
+import { Play, Star, Tv } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import type { Media } from "@/types/media"
@@ -18,14 +18,40 @@ export function MediaCard({ media }: MediaCardProps) {
 
   const handlePlay = async (e: React.MouseEvent) => {
     e.stopPropagation() // 防止触发卡片点击
+    
     try {
-      const result = await window.electronAPI?.playMedia(media.id)
-
-      if (!result?.success) {
-        console.error("Failed to play media:", result?.error)
+      // 如果是电视剧且有剧集，播放第一集
+      if (media.type === 'tv' && media.episodes && media.episodes.length > 0) {
+        // 获取第一季第一集，或者按照顺序排序后的第一集
+        const firstEpisode = media.episodes
+          .sort((a, b) => {
+            if (a.season !== b.season) return a.season - b.season;
+            return a.episode - b.episode;
+          })[0];
+          
+        // 创建一个临时媒体项以便播放该剧集
+        const episodeToPlay = {
+          id: `${media.id}-ep${firstEpisode.season}x${firstEpisode.episode}`,
+          path: firstEpisode.path
+        };
+        
+        console.log(`Playing TV episode: ${firstEpisode.path}`);
+        const result = await window.electronAPI?.playMedia(episodeToPlay.id, episodeToPlay.path);
+        
+        if (!result?.success) {
+          console.error("Failed to play TV episode:", result?.error);
+        }
+      } else {
+        // 电影或不含剧集的媒体，直接播放
+        console.log(`Playing media: ${media.path}`);
+        const result = await window.electronAPI?.playMedia(media.id);
+        
+        if (!result?.success) {
+          console.error("Failed to play media:", result?.error);
+        }
       }
     } catch (error) {
-      console.error("Error playing media:", error)
+      console.error("Error playing media:", error);
     }
   }
 
@@ -72,7 +98,15 @@ export function MediaCard({ media }: MediaCardProps) {
         style={{ transition: "opacity 0.3s ease" }}
       >
         <h3 className="text-white font-medium line-clamp-2">{media.title}</h3>
-        <p className="text-gray-300 text-sm">{media.year}</p>
+        <div className="flex items-center">
+          <p className="text-gray-300 text-sm">{media.year}</p>
+          {media.type === 'tv' && media.episodeCount && (
+            <div className="ml-2 flex items-center text-xs text-gray-300">
+              <Tv className="w-3 h-3 mr-1" />
+              <span>{media.episodeCount} 集</span>
+            </div>
+          )}
+        </div>
 
         <div 
           className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
