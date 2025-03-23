@@ -100,14 +100,26 @@ export class MediaDatabase {
     }
 
     try {
+      console.log(`更新媒体 ${mediaId} 的海报路径为: ${posterPath}`);
+      
+      // 首先检查媒体是否存在
+      const existingMedia = this.db.prepare("SELECT * FROM media WHERE id = ?").get(mediaId);
+      if (!existingMedia) {
+        console.error(`无法更新海报: 未找到ID为 ${mediaId} 的媒体`);
+        throw new Error(`Media with ID ${mediaId} not found`);
+      }
+      
+      // 更新海报路径
       this.db.prepare(`
         UPDATE media
         SET posterPath = ?, lastUpdated = ?
         WHERE id = ?
-      `).run(posterPath, new Date().toISOString(), mediaId)
+      `).run(posterPath, new Date().toISOString(), mediaId);
+      
+      console.log(`成功更新媒体 ${mediaId} 的海报路径`);
     } catch (error) {
-      console.error(`Failed to update poster for ${mediaId}:`, error)
-      throw error
+      console.error(`更新媒体 ${mediaId} 的海报路径失败:`, error);
+      throw error;
     }
   }
 
@@ -129,18 +141,41 @@ export class MediaDatabase {
     }
   }
 
-  // 获取媒体项
-  public async getMediaById(id: string): Promise<Media | null> {
+  // 通过ID获取媒体
+  public async getMediaById(id: string): Promise<any> {
     if (!this.db) {
       throw new Error("Database not initialized")
     }
 
     try {
-      const media = this.db.prepare("SELECT * FROM media WHERE id = ?").get(id) as Media | undefined
-      return media || null
+      console.log(`从数据库获取媒体ID: ${id}`);
+      
+      const media = this.db.prepare(`
+        SELECT * FROM media WHERE id = ?
+      `).get(id) as any;
+      
+      if (!media) {
+        console.log(`数据库中未找到ID为 ${id} 的媒体`);
+        return null;
+      }
+      
+      // 检查媒体的海报路径是否存在
+      if (media.posterPath) {
+        const posterExists = require('fs').existsSync(media.posterPath);
+        console.log(`媒体 ${id} 的海报路径 ${media.posterPath} ${posterExists ? '存在' : '不存在'}`);
+        
+        if (!posterExists) {
+          console.log(`警告: 媒体 ${id} 的海报文件不存在，但路径已记录在数据库中`);
+        }
+      } else {
+        console.log(`媒体 ${id} 没有海报路径`);
+      }
+      
+      console.log(`成功获取媒体 ${id}: ${media.title}`);
+      return media;
     } catch (error) {
-      console.error(`Failed to get media ${id}:`, error)
-      throw error
+      console.error(`获取媒体 ${id} 失败:`, error);
+      throw error;
     }
   }
 
@@ -205,6 +240,36 @@ export class MediaDatabase {
     }
   }
 
+  // 更新媒体类型
+  public async updateMediaType(mediaId: string, type: "movie" | "tv" | "unknown"): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`更新媒体 ${mediaId} 的类型为: ${type}`);
+      
+      // 首先检查媒体是否存在
+      const existingMedia = this.db.prepare("SELECT * FROM media WHERE id = ?").get(mediaId);
+      if (!existingMedia) {
+        console.error(`无法更新类型: 未找到ID为 ${mediaId} 的媒体`);
+        throw new Error(`Media with ID ${mediaId} not found`);
+      }
+      
+      // 更新媒体类型
+      this.db.prepare(`
+        UPDATE media
+        SET type = ?, lastUpdated = ?
+        WHERE id = ?
+      `).run(type, new Date().toISOString(), mediaId);
+      
+      console.log(`成功更新媒体 ${mediaId} 的类型`);
+    } catch (error) {
+      console.error(`更新媒体 ${mediaId} 的类型失败:`, error);
+      throw error;
+    }
+  }
+
   // 更新媒体详细信息
   public async updateMediaDetails(mediaId: string, details: {
     overview?: string;
@@ -263,6 +328,23 @@ export class MediaDatabase {
     } catch (error) {
       console.error(`Failed to update details for ${mediaId}:`, error)
       throw error
+    }
+  }
+
+  // 清空媒体缓存
+  public async clearMediaCache(): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      // 删除所有媒体记录
+      this.db.prepare("DELETE FROM media").run();
+      console.log("Media cache cleared");
+      return;
+    } catch (error) {
+      console.error("Failed to clear media cache:", error);
+      throw error;
     }
   }
 }

@@ -118,11 +118,15 @@ export default function HomePage() {
   }
 
   // 扫描媒体
-  const handleScan = async (type: "movie" | "tv") => {
+  const handleScan = async (type: "movie" | "tv" | "all") => {
     setScanning(true)
     try {
-      console.log(`开始扫描${type === "movie" ? "电影" : "电视剧"}...`)
-      const result = await window.electronAPI?.scanMedia(type)
+      let scanType = type;
+      let scanTypeText = type === "movie" ? "电影" : type === "tv" ? "电视剧" : "所有媒体";
+      
+      console.log(`开始扫描${scanTypeText}...`)
+      // 传递 false 作为第二个参数，强制重新扫描而不使用缓存
+      const result = await window.electronAPI?.scanMedia(scanType, false)
       console.log(`扫描结果:`, result)
 
       if (result?.success) {
@@ -133,7 +137,11 @@ export default function HomePage() {
         } else if (type === "tv") {
           description = `发现 ${result.count} 部电视剧`;
         } else {
-          description = `发现 ${result.count} 个媒体文件`;
+          if (result.movieCount !== undefined && result.tvCount !== undefined) {
+            description = `发现 ${result.movieCount} 部电影和 ${result.tvCount} 部电视剧`;
+          } else {
+            description = `发现 ${result.count} 个媒体文件`;
+          }
         }
         
         console.log(description)
@@ -151,6 +159,8 @@ export default function HomePage() {
           console.log(`扫描后电影数量: ${movies.length}`)
         } else if (type === "tv") {
           console.log(`扫描后电视剧数量: ${tvShows.length}`)
+        } else {
+          console.log(`扫描后媒体数量: 电影 ${movies.length}, 电视剧 ${tvShows.length}`)
         }
       } else {
         console.error("扫描失败:", result?.error)
@@ -379,11 +389,17 @@ export default function HomePage() {
             <section className="mb-12">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">最近观看 &rarr;</h3>
-                {recentlyViewed.length > 0 && !loading && (
-                  <div className="text-sm text-muted-foreground">
-                    显示 {recentlyViewed.length} 个最近项目
-                  </div>
-                )}
+                <div className="flex items-center gap-4">
+                  {recentlyViewed.length > 0 && !loading && (
+                    <div className="text-sm text-muted-foreground">
+                      显示 {recentlyViewed.length} 个最近项目
+                    </div>
+                  )}
+                  <Button variant="outline" size="sm" onClick={() => handleScan("all")} disabled={scanning} className="border-input text-foreground hover:text-foreground">
+                    <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
+                    全局扫描
+                  </Button>
+                </div>
               </div>
 
               {loading ? (

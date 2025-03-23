@@ -289,12 +289,38 @@ export class MediaScanner {
   }
 
   // 扫描所有媒体
-  public async scanAllMedia(): Promise<{ movies: Media[]; tvShows: Media[] }> {
-    const allMedia = await this.scanMedia();
-    const movies = allMedia.filter(media => media.type === "movie");
-    const tvShows = allMedia.filter(media => media.type === "tv");
-
-    return { movies, tvShows };
+  public async scanAllMedia() {
+    try {
+      // 直接使用scanMedia方法扫描所有媒体
+      console.log("扫描所有媒体文件...")
+      const allMedia = await this.scanMedia();
+      
+      // 从扫描结果中分离电影和电视剧
+      const movies = allMedia.filter(item => item.type === "movie");
+      const tvShows = allMedia.filter(item => item.type === "tv");
+      const unknownMedia = allMedia.filter(item => item.type === "unknown");
+      
+      console.log(`扫描结果: ${movies.length} 部电影, ${tvShows.length} 部电视剧, ${unknownMedia.length} 个未识别媒体`);
+      
+      // 如果有未识别的媒体，尝试使用TMDB API来确定它们的类型
+      if (unknownMedia.length > 0 && this.posterScraper) {
+        console.log(`尝试使用TMDB识别 ${unknownMedia.length} 个未分类的媒体文件...`);
+        const identifiedMediaIds = await this.posterScraper.identifyMediaType(unknownMedia.map(m => m.id));
+        console.log(`TMDB识别完成，成功识别 ${identifiedMediaIds.length} 个媒体`);
+      }
+      
+      // 重新获取最新的分类结果
+      const updatedMovies = await this.mediaDatabase.getMediaByType("movie");
+      const updatedTVShows = await this.mediaDatabase.getMediaByType("tv");
+      
+      return {
+        movies: updatedMovies,
+        tvShows: updatedTVShows
+      };
+    } catch (error) {
+      console.error("扫描所有媒体失败:", error);
+      throw error;
+    }
   }
   
   // 根据系列名称将电视剧分组

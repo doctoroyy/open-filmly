@@ -61,9 +61,20 @@ export function MediaCard({ media }: MediaCardProps) {
       return `/placeholder.svg?height=450&width=300&text=${encodeURIComponent(media.title)}`
     }
 
-    // 如果是本地文件路径，使用file://协议
-    if (media.posterPath.startsWith("/") || media.posterPath.includes(":\\")) {
-      return `file://${media.posterPath}`
+    // 如果是本地文件路径
+    if (media.posterPath.startsWith("/") || media.posterPath.includes(":\\") || media.posterPath.startsWith("\\")) {
+      // 确保路径格式正确
+      let path = media.posterPath;
+      // 如果还没有file://前缀，添加它
+      if (!path.startsWith("file://")) {
+        console.log(`Converting local path to file URL: ${path}`);
+        // 为Windows路径处理反斜杠
+        if (path.includes(":\\") || path.startsWith("\\")) {
+          path = path.replace(/\\/g, "/");
+        }
+        return `file://${path}`;
+      }
+      return path;
     }
 
     return media.posterPath

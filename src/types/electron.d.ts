@@ -29,7 +29,7 @@ export interface ElectronAPI {
   getMedia: (type: "movie" | "tv" | "unknown" | "all") => Promise<Media[]>;
   getMediaById: (id: string) => Promise<Media | null>;
   getRecentlyViewed: () => Promise<Media[]>;
-  scanMedia: (type?: "movie" | "tv" | "all") => Promise<{ 
+  scanMedia: (type?: "movie" | "tv" | "all", useCached?: boolean) => Promise<{ 
     success: boolean; 
     count?: number;
     movieCount?: number;
@@ -50,6 +50,25 @@ export interface ElectronAPI {
 
   // 文件选择
   selectFolder: () => Promise<{ canceled: boolean; filePaths?: string[] }>;
+  
+  // 缓存控制
+  clearMediaCache: () => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  // TMDB API相关方法
+  checkTmdbApi: () => Promise<{
+    success: boolean;
+    hasApiKey: boolean;
+    error?: string;
+  }>;
+  setTmdbApiKey: (apiKey: string) => Promise<{
+    success: boolean;
+    error?: string;
+  }>;
+
+  getMediaDetails: (mediaId: string) => Promise<MediaItem | null>;
 }
 
 export interface SambaConfig {

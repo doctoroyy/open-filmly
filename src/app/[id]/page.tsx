@@ -24,9 +24,25 @@ export default function MediaDetailPage() {
         if (!id) return
         
         // 首先尝试从本地数据库获取
-        let mediaData: Media | null = null
+        let mediaData = null
         try {
-          mediaData = await window.electronAPI?.getMediaById(id.toString())
+          const dbMedia = await window.electronAPI?.getMediaById(id.toString())
+          if (dbMedia) {
+            // 转换为兼容的Media类型
+            mediaData = {
+              id: dbMedia.id,
+              title: dbMedia.title,
+              type: dbMedia.type,
+              year: dbMedia.year,
+              posterPath: dbMedia.posterPath || undefined, // 确保posterPath不为null
+              path: dbMedia.path,
+              overview: dbMedia.details,
+              dateAdded: dbMedia.dateAdded,
+              lastUpdated: dbMedia.lastUpdated,
+              episodes: dbMedia.episodes,
+              episodeCount: dbMedia.episodeCount
+            }
+          }
         } catch (error) {
           console.log("Media not found in local database, trying online API")
         }
@@ -124,7 +140,7 @@ export default function MediaDetailPage() {
               {/* 海报 */}
               <div className="relative w-full md:w-[300px] h-[450px] rounded-lg overflow-hidden">
                 <Image
-                  src={media.posterPath || `/placeholder.svg?text=${encodeURIComponent(media.title)}`}
+                  src={getPosterPath(media)}
                   alt={media.title}
                   fill
                   className="object-cover"
@@ -193,4 +209,35 @@ export default function MediaDetailPage() {
       )}
     </main>
   )
+}
+
+// 处理海报路径，支持本地文件和URL
+const getPosterPath = (media: Media) => {
+  if (!media.posterPath) {
+    return `/placeholder.svg?text=${encodeURIComponent(media.title)}`
+  }
+
+  // 如果已经是http(s)链接，直接返回
+  if (media.posterPath.startsWith('http')) {
+    return media.posterPath
+  }
+
+  // 如果是本地文件路径
+  if (media.posterPath.startsWith("/") || media.posterPath.includes(":\\") || media.posterPath.startsWith("\\")) {
+    // 确保路径格式正确
+    let path = media.posterPath;
+    console.log(`详情页处理本地海报路径: ${path}`);
+    
+    // 如果还没有file://前缀，添加它
+    if (!path.startsWith("file://")) {
+      // 为Windows路径处理反斜杠
+      if (path.includes(":\\") || path.startsWith("\\")) {
+        path = path.replace(/\\/g, "/");
+      }
+      return `file://${path}`;
+    }
+    return path;
+  }
+
+  return media.posterPath
 } 

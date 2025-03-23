@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron"
-import * as path from "path"
-import { SambaClient } from "./smb-client"
-import { MediaScanner } from "./media-scanner"
-import { PosterScraper } from "./poster-scraper"
+import path from "path"
+import { app, BrowserWindow, ipcMain, dialog, protocol, net } from "electron"
+import { connect, createConnection } from "net"
 import { MediaDatabase } from "./media-database"
+import { MediaScanner } from "./media-scanner"
 import { MediaPlayer } from "./media-player"
+import { PosterScraper } from "./poster-scraper"
+import * as fs from "fs"
+import { SambaClient } from "./smb-client"
 
 // 抑制 macOS 上的 IMK 相关警告
 if (process.platform === 'darwin') {
@@ -26,12 +28,13 @@ let mediaPlayer: MediaPlayer
 // 创建主窗口
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
+    width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
       nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      webSecurity: false, // 允许加载本地文件
     },
     // 设置窗口图标
     icon: path.join(__dirname, "../public/icon.png"),
@@ -42,15 +45,18 @@ function createWindow() {
   console.log(`Running in ${isDev ? "development" : "production"} mode`)
   
   if (isDev) {
-    const serverUrl = "http://localhost:3001"
+    const serverUrl = "http://localhost:3000"
     console.log(`Loading from development server: ${serverUrl}`)
     mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()
   } else {
-    // 在生产模式下加载打包后的应用
-    const filePath = path.join(__dirname, "../.next/server/app/page.html")
+    // 在生产模式下加载打包后的HTML文件
+    const filePath = path.join(app.getAppPath(), "dist/.next/server/app/index.html")
     console.log(`Loading file from: ${filePath}`)
-    mainWindow.loadFile(filePath)
+    const fileUrl = `file://${filePath}`
+    mainWindow.loadURL(fileUrl)
+    // 在生产模式下也打开开发工具，方便调试
+    mainWindow.webContents.openDevTools()
   }
 
   // 窗口关闭时清除引用
@@ -70,7 +76,32 @@ async function initializeApp() {
     sambaClient = new SambaClient()
 
     // 初始化海报抓取器，使用TMDB API密钥
-    const tmdbApiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY
+    // 获取TMDB API密钥（从.env.local文件读取）
+    let tmdbApiKey
+    try {
+      const envPath = path.join(process.cwd(), '.env.local')
+      if (fs.existsSync(envPath)) {
+        const envContent = fs.readFileSync(envPath, 'utf8')
+        const matches = envContent.match(/NEXT_PUBLIC_TMDB_API_KEY=(.+)/)
+        if (matches && matches[1]) {
+          tmdbApiKey = matches[1].trim()
+          console.log(`Found TMDB API key in .env.local: ${tmdbApiKey.substring(0, 5)}...`)
+        } else {
+          console.error('TMDB API key not found in .env.local')
+        }
+      } else {
+        console.error('.env.local file not found')
+      }
+    } catch (error) {
+      console.error('Error reading TMDB API key:', error)
+    }
+
+    // 尝试从环境变量获取
+    if (!tmdbApiKey) {
+      tmdbApiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY
+      console.log(`Using TMDB API key from environment: ${tmdbApiKey ? 'found' : 'not found'}`)
+    }
+
     posterScraper = new PosterScraper(mediaDatabase, tmdbApiKey)
     
     // 初始化媒体扫描器，并传入海报抓取器
@@ -103,6 +134,14 @@ async function initializeApp() {
 
 // 应用准备就绪时创建窗口
 app.whenReady().then(() => {
+  // 注册file协议处理器
+  protocol.handle('file', (request) => {
+    const url = request.url.substring('file://'.length)
+    let filePath = decodeURIComponent(url)
+    console.log(`Protocol handler: loading file from ${filePath}`)
+    return net.fetch(filePath)
+  })
+
   createWindow()
   initializeApp()
 
@@ -309,7 +348,7 @@ ipcMain.handle("get-dir-contents", async (_, dirPath) => {
 })
 
 // 扫描媒体
-ipcMain.handle("scan-media", async (_, type) => {
+ipcMain.handle("scan-media", async (_, type, useCached = true) => {
   try {
     if (!sambaClient) {
       return { 
@@ -318,7 +357,7 @@ ipcMain.handle("scan-media", async (_, type) => {
       }
     }
     
-    console.log(`Starting to scan ${type || "all"} media...`)
+    console.log(`Starting to scan ${type || "all"} media... (useCached: ${useCached})`)
     
     const config = await mediaDatabase.getConfig()
     if (!config || !config.sharePath) {
@@ -335,6 +374,49 @@ ipcMain.handle("scan-media", async (_, type) => {
     }
     
     let result = { count: 0, movies: 0, tvShows: 0 };
+    
+    // 如果使用缓存，先检查数据库中是否有指定类型的媒体
+    if (useCached) {
+      if (type === "movie") {
+        const cachedMovies = await mediaDatabase.getMediaByType("movie");
+        if (cachedMovies && cachedMovies.length > 0) {
+          console.log(`Using cached data: ${cachedMovies.length} movies`);
+          return { 
+            success: true, 
+            count: cachedMovies.length,
+            movieCount: cachedMovies.length 
+          };
+        }
+      } else if (type === "tv") {
+        const cachedTvShows = await mediaDatabase.getMediaByType("tv");
+        if (cachedTvShows && cachedTvShows.length > 0) {
+          console.log(`Using cached data: ${cachedTvShows.length} TV shows`);
+          return { 
+            success: true, 
+            count: cachedTvShows.length,
+            tvCount: cachedTvShows.length 
+          };
+        }
+      } else if (!type || type === "all") {
+        const cachedMovies = await mediaDatabase.getMediaByType("movie");
+        const cachedTvShows = await mediaDatabase.getMediaByType("tv");
+        
+        if ((cachedMovies && cachedMovies.length > 0) || 
+            (cachedTvShows && cachedTvShows.length > 0)) {
+          console.log(`Using cached data: ${cachedMovies.length} movies, ${cachedTvShows.length} TV shows`);
+          return { 
+            success: true, 
+            count: cachedMovies.length + cachedTvShows.length,
+            movieCount: cachedMovies.length,
+            tvCount: cachedTvShows.length 
+          };
+        }
+      }
+      
+      console.log("No cached data found, performing full scan");
+    } else {
+      console.log("Cache disabled, performing full scan");
+    }
     
     if (type === "movie" || type === "tv") {
       // 扫描指定类型的媒体
@@ -393,10 +475,17 @@ ipcMain.handle("get-media", async (_, type) => {
 // 通过ID获取媒体
 ipcMain.handle("get-media-by-id", async (_, id) => {
   try {
-    return await mediaDatabase.getMediaById(id)
+    console.log(`获取媒体ID: ${id} 的详细信息`);
+    const media = await mediaDatabase.getMediaById(id);
+    if (media) {
+      console.log(`成功获取媒体: ${media.title}, 海报路径: ${media.posterPath || '无'}`);
+    } else {
+      console.log(`未找到ID为 ${id} 的媒体`);
+    }
+    return media;
   } catch (error) {
-    console.error(`Error getting media with ID ${id}:`, error)
-    return null
+    console.error(`Error getting media with ID ${id}:`, error);
+    return null;
   }
 })
 
@@ -504,7 +593,13 @@ ipcMain.handle("add-single-media", async (_, filePath) => {
 // 抓取海报
 ipcMain.handle("fetch-posters", async (_, mediaIds) => {
   try {
+    console.log(`Fetching posters for ${mediaIds.length} media items`)
+    if (!posterScraper.hasTmdbApiKey()) {
+      console.error("No TMDB API key available for poster scraper")
+    }
     const results = await posterScraper.fetchPosters(mediaIds)
+    const successCount = Array.isArray(results) ? results.filter((r: any) => r && r.posterPath).length : 0
+    console.log(`Finished fetching posters. Success: ${successCount}/${mediaIds.length}`)
     return { success: true, results }
   } catch (error: unknown) {
     console.error("Failed to fetch posters:", error)
@@ -521,5 +616,41 @@ ipcMain.handle("select-folder", async () => {
   })
 
   return result
+})
+
+// 清空媒体缓存
+ipcMain.handle("clear-media-cache", async () => {
+  try {
+    await mediaDatabase.clearMediaCache();
+    return { success: true };
+  } catch (error: unknown) {
+    console.error("Failed to clear media cache:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+})
+
+// 检查TMDB API密钥
+ipcMain.handle("check-tmdb-api", async () => {
+  try {
+    const hasApiKey = posterScraper.hasTmdbApiKey();
+    return { 
+      success: true, 
+      hasApiKey 
+    };
+  } catch (error: unknown) {
+    console.error("Failed to check TMDB API:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+})
+
+// 设置TMDB API密钥
+ipcMain.handle("set-tmdb-api-key", async (_, apiKey) => {
+  try {
+    posterScraper.setTmdbApiKey(apiKey);
+    return { success: true };
+  } catch (error: unknown) {
+    console.error("Failed to set TMDB API key:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 })
 

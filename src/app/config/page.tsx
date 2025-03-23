@@ -34,6 +34,10 @@ export default function ConfigPage() {
   const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
   const [currentBrowsePath, setCurrentBrowsePath] = useState<string>("/")
+  const [clearingCache, setClearingCache] = useState(false)
+  const [tmdbApiKey, setTmdbApiKey] = useState<string>("")
+  const [savingApiKey, setSavingApiKey] = useState(false)
+  const [hasTmdbApiKey, setHasTmdbApiKey] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -60,6 +64,9 @@ export default function ConfigPage() {
             setStep("connect")
           }
         }
+
+        // 检查TMDB API密钥状态
+        checkTmdbApiKey();
       } catch (error) {
         console.error("Error fetching configuration:", error)
         toast({
@@ -72,6 +79,57 @@ export default function ConfigPage() {
 
     fetchConfig()
   }, [])
+
+  // 检查TMDB API密钥
+  const checkTmdbApiKey = async () => {
+    try {
+      const result = await window.electronAPI?.checkTmdbApi();
+      if (result?.success) {
+        setHasTmdbApiKey(result.hasApiKey);
+      }
+    } catch (error) {
+      console.error("Error checking TMDB API key:", error);
+    }
+  }
+
+  // 设置TMDB API密钥
+  const handleSaveTmdbApiKey = async () => {
+    if (!tmdbApiKey) {
+      toast({
+        title: "请输入API密钥",
+        description: "TMDB API密钥不能为空",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingApiKey(true);
+    try {
+      const result = await window.electronAPI?.setTmdbApiKey(tmdbApiKey);
+      if (result?.success) {
+        setHasTmdbApiKey(true);
+        toast({
+          title: "API密钥已保存",
+          description: "TMDB API密钥已成功保存",
+        });
+      } else {
+        toast({
+          title: "保存失败",
+          description: result?.error || "无法保存TMDB API密钥",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error saving TMDB API key:", error);
+      toast({
+        title: "保存失败",
+        description: "发生错误，无法保存TMDB API密钥",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingApiKey(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -347,6 +405,35 @@ export default function ConfigPage() {
     });
   }
 
+  const handleClearCache = async () => {
+    setClearingCache(true)
+    try {
+      const result = await window.electronAPI?.clearMediaCache()
+      
+      if (result?.success) {
+        toast({
+          title: "缓存已清空",
+          description: "媒体库缓存已成功清空，下次扫描将重新获取所有媒体数据。",
+        })
+      } else {
+        toast({
+          title: "清空缓存失败",
+          description: result?.error || "无法清空缓存。",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("清空缓存失败:", error)
+      toast({
+        title: "清空缓存失败",
+        description: "发生错误，无法清空缓存。",
+        variant: "destructive",
+      })
+    } finally {
+      setClearingCache(false)
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 py-8">
@@ -614,6 +701,78 @@ export default function ConfigPage() {
             </CardFooter>
           </Card>
         )}
+
+        {/* 返回和重置部分 */}
+        <div className="mt-12 mb-8">
+          <div className="flex gap-4 items-center">
+            <Link href="/">
+              <Button variant="outline">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                返回首页
+              </Button>
+            </Link>
+            
+            <Button 
+              variant="outline" 
+              onClick={handleClearCache}
+              disabled={clearingCache}
+            >
+              <RefreshCw className={`mr-2 h-4 w-4 ${clearingCache ? "animate-spin" : ""}`} />
+              清空媒体缓存
+            </Button>
+          </div>
+          {/* 清空缓存说明 */}
+          <p className="text-sm text-muted-foreground mt-2">
+            清空媒体缓存将移除所有已扫描的媒体记录，下次扫描时将重新索引所有媒体文件。这不会删除您的媒体文件。
+          </p>
+        </div>
+
+        {/* TMDB API密钥配置 */}
+        <Card className="w-full max-w-md mx-auto mt-8 mb-8 bg-gray-900 border-gray-800">
+          <CardHeader>
+            <CardTitle>TMDB API配置</CardTitle>
+            <CardDescription>配置TMDB电影数据库API密钥，用于获取电影和电视剧的封面和详情</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="tmdbApiKey">TMDB API密钥</Label>
+              <Input
+                id="tmdbApiKey"
+                placeholder="输入您的TMDB API密钥"
+                value={tmdbApiKey}
+                onChange={(e) => setTmdbApiKey(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                {hasTmdbApiKey ? (
+                  <span className="text-green-500 flex items-center">
+                    <Check className="h-3 w-3 mr-1" /> API密钥已配置
+                  </span>
+                ) : (
+                  <span className="text-yellow-500 flex items-center">
+                    <X className="h-3 w-3 mr-1" /> API密钥未配置
+                  </span>
+                )}
+              </p>
+            </div>
+            <p className="text-sm text-gray-400">
+              访问 <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">TMDB API设置</a> 获取您的API密钥。API密钥用于获取电影和电视剧的封面图片和详细信息。
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Button 
+              onClick={handleSaveTmdbApiKey} 
+              disabled={savingApiKey || !tmdbApiKey} 
+              className="w-full"
+            >
+              {savingApiKey ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  保存中...
+                </>
+              ) : "保存API密钥"}
+            </Button>
+          </CardFooter>
+        </Card>
       </div>
     </main>
   )

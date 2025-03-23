@@ -2,16 +2,26 @@ import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 import axios from "axios"
+import { MovieDb, SearchMovieRequest, SearchTvRequest } from "moviedb-promise"
 import type { MediaDatabase } from "./media-database"
 
 export class PosterScraper {
   private mediaDatabase: MediaDatabase
   private posterCacheDir: string
   private tmdbApiKey: string | null = null
+  private movieDb: MovieDb | null = null
 
   constructor(mediaDatabase: MediaDatabase, tmdbApiKey?: string) {
     this.mediaDatabase = mediaDatabase
     this.tmdbApiKey = tmdbApiKey || process.env.TMDB_API_KEY || null
+
+    // 初始化 MovieDb 实例
+    if (this.tmdbApiKey) {
+      console.log(`Initializing MovieDb with API key ${this.tmdbApiKey.substring(0, 5)}...`)
+      this.movieDb = new MovieDb(this.tmdbApiKey)
+    } else {
+      console.error("No TMDB API key provided. Poster search functionality will be limited.")
+    }
 
     // 创建海报缓存目录
     this.posterCacheDir = path.join(os.homedir(), ".nas-poster-wall", "posters")
@@ -20,9 +30,16 @@ export class PosterScraper {
     }
   }
 
+  // 检查是否有TMDB API密钥
+  public hasTmdbApiKey(): boolean {
+    return !!this.tmdbApiKey;
+  }
+
   // 设置TMDB API Key
   public setTmdbApiKey(apiKey: string): void {
     this.tmdbApiKey = apiKey
+    console.log(`Setting new TMDB API key: ${apiKey.substring(0, 5)}...`)
+    this.movieDb = new MovieDb(apiKey)
   }
 
   // 为单个媒体项抓取海报
@@ -46,7 +63,7 @@ export class PosterScraper {
       let posterUrl = null
 
       // 尝试从TMDB抓取海报（如果有API Key）
-      if (this.tmdbApiKey) {
+      if (this.movieDb) {
         console.log(`Searching TMDB for poster for: ${media.title}`)
         posterUrl = await this.searchTmdbPoster(media.title, media.year, media.type as "movie" | "tv")
       }
@@ -61,11 +78,15 @@ export class PosterScraper {
         // 下载海报
         await this.downloadPoster(posterUrl, posterPath)
 
+        // 记录下载的海报路径
+        console.log(`Poster downloaded to: ${posterPath}`);
+
         // 更新数据库
         await this.mediaDatabase.updateMediaPoster(mediaId, posterPath)
+        console.log(`Media database updated with poster path for ${mediaId}: ${posterPath}`);
         
         // 获取并更新详细信息
-        if (this.tmdbApiKey) {
+        if (this.movieDb) {
           try {
             await this.updateMediaDetails(mediaId, media.title, media.year, media.type as "movie" | "tv")
           } catch (error) {
@@ -94,49 +115,93 @@ export class PosterScraper {
     return results
   }
 
-  // 从TMDB搜索海报和详细信息
+  // 搜索TMDB海报
   private async searchTmdbPoster(title: string, year: string, type: "movie" | "tv"): Promise<string | null> {
-    if (!this.tmdbApiKey) {
-      console.log("TMDB API Key not configured, skipping TMDB search")
+    if (!this.movieDb) {
+      console.error("TMDB API not initialized. Cannot search for posters.")
       return null
     }
     
     try {
-      // 清理标题，移除可能影响搜索的内容
-      const cleanTitle = title
-        .replace(/[.[(（].*?[)）\].]?/g, "") // 移除括号内容
-        .replace(/\d{4}/, "")               // 移除年份
-        .replace(/1080[pi]|720[pi]|2160[pi]|4K|UHD|HD|超清/i, "") // 移除分辨率
-        .replace(/BluRay|Blu-Ray|WEB-DL|HDTV|DVDRip|BDRip|HDRip|WEBRIP/i, "") // 移除来源
-        .replace(/[Ss]\d{1,2}[Ee]\d{1,2}/, "") // 移除季集信息
-        .replace(/第\d{1,2}[季集]/, "")     // 移除中文季集信息
-        .replace(/\s+/g, " ")               // 合并空格
-        .trim()
-
-      console.log(`Searching TMDB for: "${cleanTitle}" (${year}) [${type}]`)
+      // 使用 parse-torrent-name 库提取更干净的标题
+      const ptn = require('parse-torrent-name');
+      let cleanTitleInfo;
       
-      // 构建查询参数
-      const searchQuery = encodeURIComponent(cleanTitle)
-      const endpoint = type === "movie" ? "movie" : "tv"
-      const searchUrl = `https://api.themoviedb.org/3/search/${endpoint}?api_key=${this.tmdbApiKey}&query=${searchQuery}&language=zh-CN`
+      try {
+        // 尝试使用torrent解析器解析完整标题
+        cleanTitleInfo = ptn(title);
+        console.log(`PTN解析结果: `, JSON.stringify(cleanTitleInfo, null, 2));
+      } catch (parseError: any) {
+        console.error(`PTN解析失败: ${parseError.message}，将使用备用清理方法`);
+        cleanTitleInfo = { title };
+      }
       
-      // 如果有年份信息，添加年份过滤
-      const fullUrl = year && year !== "未知" 
-        ? `${searchUrl}&year=${year}`
-        : searchUrl
+      // 获取干净的标题
+      let cleanTitle = cleanTitleInfo.title || title;
       
-      // 发送请求
-      const response = await axios.get(fullUrl)
+      // 备用清理：如果parse-torrent-name没有成功解析或结果不理想
+      if (cleanTitle === title) {
+        console.log(`使用备用标题清理方法`);
+        cleanTitle = title
+          .replace(/[.[(（].*?[)）\].]?/g, "") // 移除括号内容
+          .replace(/\d{4}/, "")               // 移除年份
+          .replace(/1080[pi]|720[pi]|2160[pi]|4K|UHD|HD|超清/i, "") // 移除分辨率
+          .replace(/BluRay|Blu-Ray|WEB-DL|HDTV|DVDRip|BDRip|HDRip|WEBRIP/i, "") // 移除来源
+          .replace(/[Ss]\d{1,2}[Ee]\d{1,2}/, "") // 移除季集信息
+          .replace(/第\d{1,2}[季集]/, "")     // 移除中文季集信息
+          .replace(/\bDTS\b|\bAC3\b|\bx264\b|\bx265\b|\bHEVC\b|\bH\.?264\b|\bAAC\b/i, "") // 移除编码信息
+          .replace(/\bREMUX\b|\bPROPER\b|\bRERIP\b|\bREPACK\b|\bAMZN\b|\bNF\b/i, "") // 移除其他标签
+          .replace(/\.\s*$/, "") // 移除结尾的点
+          .replace(/\s+/g, " ")  // 合并空格
+          .trim();
+      }
+      
+      // 使用解析器获取的年份，如果有
+      if (cleanTitleInfo.year && (!year || year === "未知")) {
+        year = String(cleanTitleInfo.year);
+        console.log(`使用PTN解析的年份: ${year}`);
+      }
+      
+      console.log(`Searching TMDB for: "${cleanTitle}" (${year}) [${type}]`);
+      
+      // 搜索电影或电视剧
+      let results: any;
+      if (type === "movie") {
+        const searchParams: SearchMovieRequest = {
+          query: cleanTitle,
+          language: 'zh-CN'
+        }
+        
+        // 添加年份参数（如果有）
+        if (year && year !== "未知") {
+          searchParams.primary_release_year = parseInt(year, 10)
+        }
+        
+        console.log("TMDB search params:", JSON.stringify(searchParams));
+        results = await this.movieDb.searchMovie(searchParams)
+      } else {
+        const searchParams: SearchTvRequest = {
+          query: cleanTitle,
+          language: 'zh-CN'
+        }
+        
+        // 添加年份参数（如果有）
+        if (year && year !== "未知") {
+          searchParams.first_air_date_year = parseInt(year, 10)
+        }
+        
+        results = await this.movieDb.searchTv(searchParams)
+      }
       
       // 检查是否有结果
-      if (response.data.results && response.data.results.length > 0) {
+      if (results.results && results.results.length > 0) {
         // 如果有多个结果，尝试找到最匹配的
-        const results = response.data.results
-        let bestMatch = results[0]
+        const searchResults = results.results
+        let bestMatch = searchResults[0]
         
-        if (results.length > 1 && year && year !== "未知") {
+        if (searchResults.length > 1 && year && year !== "未知") {
           // 尝试通过年份匹配
-          const yearMatch = results.find((r: any) => {
+          const yearMatch = searchResults.find((r: any) => {
             const releaseYear = type === "movie" 
               ? r.release_date?.substring(0, 4)
               : r.first_air_date?.substring(0, 4)
@@ -163,44 +228,81 @@ export class PosterScraper {
   
   // 更新媒体详细信息
   private async updateMediaDetails(mediaId: string, title: string, year: string, type: "movie" | "tv"): Promise<void> {
-    if (!this.tmdbApiKey) return
+    if (!this.movieDb) return
     
     try {
       // 先搜索媒体
-      const searchQuery = encodeURIComponent(title)
-      const endpoint = type === "movie" ? "movie" : "tv"
-      const searchUrl = `https://api.themoviedb.org/3/search/${endpoint}?api_key=${this.tmdbApiKey}&query=${searchQuery}&language=zh-CN`
-      
-      // 如果有年份信息，添加年份过滤
-      const fullUrl = year && year !== "未知" 
-        ? `${searchUrl}&year=${year}`
-        : searchUrl
-      
-      // 发送搜索请求
-      const searchResponse = await axios.get(fullUrl)
+      let searchResponse
+      if (type === "movie") {
+        const searchParams: SearchMovieRequest = {
+          query: title,
+          language: 'zh-CN'
+        }
+        
+        // 添加年份参数（如果有）
+        if (year && year !== "未知") {
+          searchParams.primary_release_year = parseInt(year, 10)
+        }
+        
+        searchResponse = await this.movieDb.searchMovie(searchParams)
+      } else {
+        const searchParams: SearchTvRequest = {
+          query: title,
+          language: 'zh-CN'
+        }
+        
+        // 添加年份参数（如果有）
+        if (year && year !== "未知") {
+          searchParams.first_air_date_year = parseInt(year, 10)
+        }
+        
+        searchResponse = await this.movieDb.searchTv(searchParams)
+      }
       
       // 检查是否有结果
-      if (searchResponse.data.results && searchResponse.data.results.length > 0) {
-        const result = searchResponse.data.results[0]
+      if (searchResponse.results && searchResponse.results.length > 0) {
+        const result = searchResponse.results[0]
         const itemId = result.id
         
         // 获取详细信息
-        const detailsUrl = `https://api.themoviedb.org/3/${endpoint}/${itemId}?api_key=${this.tmdbApiKey}&language=zh-CN&append_to_response=credits`
-        const detailsResponse = await axios.get(detailsUrl)
-        
-        if (detailsResponse.data) {
-          const details = detailsResponse.data
+        if (type === "movie") {
+          const details = await this.movieDb.movieInfo({
+            id: itemId as number,
+            language: 'zh-CN',
+            append_to_response: 'credits'
+          })
           
-          // 构建更新数据
-          const updateData: any = {
-            overview: details.overview,
-            backdropPath: details.backdrop_path ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` : undefined,
-            rating: details.vote_average,
-            releaseDate: type === "movie" ? details.release_date : details.first_air_date
+          if (details) {
+            // 构建更新数据
+            const updateData: any = {
+              overview: details.overview,
+              backdropPath: details.backdrop_path ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` : undefined,
+              rating: details.vote_average,
+              releaseDate: details.release_date
+            }
+            
+            // 更新数据库
+            await this.mediaDatabase.updateMediaDetails(mediaId, updateData)
           }
+        } else {
+          const details = await this.movieDb.tvInfo({
+            id: itemId as number,
+            language: 'zh-CN',
+            append_to_response: 'credits'
+          })
           
-          // 更新数据库
-          await this.mediaDatabase.updateMediaDetails(mediaId, updateData)
+          if (details) {
+            // 构建更新数据
+            const updateData: any = {
+              overview: details.overview,
+              backdropPath: details.backdrop_path ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` : undefined,
+              rating: details.vote_average,
+              releaseDate: details.first_air_date
+            }
+            
+            // 更新数据库
+            await this.mediaDatabase.updateMediaDetails(mediaId, updateData)
+          }
         }
       }
     } catch (error) {
@@ -287,6 +389,15 @@ export class PosterScraper {
   // 下载海报
   private async downloadPoster(url: string, filePath: string): Promise<void> {
     try {
+      console.log(`Downloading poster from ${url} to ${filePath}`);
+      
+      // 确保目标目录存在
+      const dirPath = path.dirname(filePath);
+      if (!fs.existsSync(dirPath)) {
+        console.log(`Creating poster directory: ${dirPath}`);
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      
       const response = await axios({
         method: "GET",
         url,
@@ -295,19 +406,149 @@ export class PosterScraper {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         },
+        timeout: 30000, // 30秒超时
       })
 
-      const writer = fs.createWriteStream(filePath)
+      console.log(`Poster download response status: ${response.status}`);
+      
+      const writer = fs.createWriteStream(filePath);
 
       return new Promise((resolve, reject) => {
-        response.data.pipe(writer)
-        writer.on("finish", resolve)
-        writer.on("error", reject)
-      })
+        response.data.pipe(writer);
+        
+        // 处理结束事件
+        writer.on("finish", () => {
+          console.log(`Poster successfully written to ${filePath}`);
+          writer.close();
+          resolve();
+        });
+        
+        // 处理错误事件
+        writer.on("error", (err: Error) => {
+          console.error(`Error writing poster to ${filePath}:`, err);
+          fs.unlink(filePath, () => {}); // 删除可能部分写入的文件
+          reject(err);
+        });
+        
+        // 处理请求错误
+        response.data.on("error", (err: Error) => {
+          console.error(`Error in download stream for ${url}:`, err);
+          writer.close();
+          fs.unlink(filePath, () => {});
+          reject(err);
+        });
+      });
     } catch (error) {
-      console.error(`Error downloading poster from ${url}:`, error)
-      throw error
+      console.error(`Error downloading poster from ${url}:`, error);
+      throw error;
     }
+  }
+
+  // 尝试使用TMDB识别媒体类型（电影或电视剧）
+  public async identifyMediaType(mediaIds: string[]): Promise<string[]> {
+    if (!this.movieDb) {
+      console.error("TMDB API not initialized. Cannot identify media types.");
+      return [];
+    }
+
+    const identifiedIds: string[] = [];
+
+    for (const mediaId of mediaIds) {
+      try {
+        // 从数据库获取媒体项
+        const media = await this.mediaDatabase.getMediaById(mediaId);
+        if (!media) {
+          console.error(`Media not found: ${mediaId}`);
+          continue;
+        }
+
+        console.log(`尝试识别媒体类型: ${media.title}`);
+        
+        // 清理标题以提高搜索准确度
+        const cleanTitle = media.title
+          .replace(/[.[(（].*?[)）\].]?/g, "") // 移除括号内容
+          .replace(/\d{4}/, "")               // 移除年份
+          .replace(/1080[pi]|720[pi]|2160[pi]|4K|UHD|HD|超清/i, "") // 移除分辨率
+          .replace(/BluRay|Blu-Ray|WEB-DL|HDTV|DVDRip|BDRip|HDRip|WEBRIP/i, "") // 移除来源
+          .replace(/[Ss]\d{1,2}[Ee]\d{1,2}/, "") // 移除季集信息
+          .replace(/第\d{1,2}[季集]/, "")     // 移除中文季集信息
+          .replace(/\s+/g, " ")               // 合并空格
+          .trim();
+
+        // 首先尝试作为电影搜索
+        const movieResults = await this.movieDb.searchMovie({
+          query: cleanTitle,
+          language: 'zh-CN'
+        });
+
+        // 然后尝试作为电视剧搜索
+        const tvResults = await this.movieDb.searchTv({
+          query: cleanTitle,
+          language: 'zh-CN'
+        });
+
+        // 确定可能的类型
+        let detectedType: "movie" | "tv" | "unknown" = "unknown";
+        let confidence = 0; // 用于判断哪个结果更可靠
+
+        // 检查电影结果
+        if (movieResults.results && movieResults.results.length > 0) {
+          const movieConfidence = movieResults.results[0].popularity || 0;
+          confidence = movieConfidence;
+          detectedType = "movie";
+        }
+
+        // 检查电视剧结果，如果置信度更高则更新类型
+        if (tvResults.results && tvResults.results.length > 0) {
+          const tvConfidence = tvResults.results[0].popularity || 0;
+          if (tvConfidence > confidence) {
+            confidence = tvConfidence;
+            detectedType = "tv";
+          }
+        }
+
+        // 额外检查文件名和路径中的特征
+        if (detectedType === "unknown" || confidence < 5) {
+          // 检查文件路径和名称是否有电视剧特征
+          const path = media.path.toLowerCase();
+          const fileName = media.title.toLowerCase();
+          
+          if (
+            path.includes('/tv/') || 
+            path.includes('\\tv\\') ||
+            path.includes('season') || 
+            path.includes('episode') ||
+            /s\d+e\d+/i.test(fileName) || 
+            /season\s*\d+/i.test(fileName) || 
+            /episode\s*\d+/i.test(fileName)
+          ) {
+            detectedType = "tv";
+          }
+          // 检查是否有电影特征
+          else if (
+            path.includes('/movies/') || 
+            path.includes('\\movies\\') ||
+            path.includes('/movie/') ||
+            path.includes('\\movie\\')
+          ) {
+            detectedType = "movie";
+          }
+        }
+
+        // 更新数据库中的媒体类型
+        if (detectedType !== "unknown") {
+          console.log(`识别出媒体类型: ${media.title} => ${detectedType}`);
+          await this.mediaDatabase.updateMediaType(mediaId, detectedType);
+          identifiedIds.push(mediaId);
+        } else {
+          console.log(`无法识别媒体类型: ${media.title}`);
+        }
+      } catch (error) {
+        console.error(`Error identifying media type for ${mediaId}:`, error);
+      }
+    }
+
+    return identifiedIds;
   }
 }
 
