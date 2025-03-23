@@ -1,4 +1,4 @@
-import * as samba from "samba-client"
+import samba from "samba-client"
 import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
@@ -46,13 +46,13 @@ export class SambaClient {
       const { ip, username, password, domain } = this.config
 
       // 创建Samba客户端
-      this.client = new samba.Client({
+      this.client = new samba({
         address: `//${ip}`,
         username: username || "guest",
         password: password || "",
         domain: domain || "",
         maxProtocol: "SMB3",
-        autoCloseTimeout: 5000,
+        maskCmd: false
       })
     }
 
@@ -69,7 +69,7 @@ export class SambaClient {
       const client = this.getClient()
       const files = await client.listFiles(directory)
       return files
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error listing files in ${directory}:`, error)
       throw error
     }
@@ -85,7 +85,7 @@ export class SambaClient {
       const client = this.getClient()
       const content = await client.readFile(filePath)
       return content
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error reading file ${filePath}:`, error)
       throw error
     }
@@ -114,7 +114,7 @@ export class SambaClient {
       fs.writeFileSync(localPath, content)
 
       return localPath
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`Error downloading file ${remotePath}:`, error)
       throw error
     }

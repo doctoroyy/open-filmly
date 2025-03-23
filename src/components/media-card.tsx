@@ -2,9 +2,9 @@
 
 import { useState } from "react"
 import Image from "next/image"
-import { Play } from "lucide-react"
+import { Play, Star } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Media } from "../../types/media"
+import type { Media } from "@/types/media"
 
 interface MediaCardProps {
   media: Media

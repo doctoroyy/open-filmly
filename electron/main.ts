@@ -29,12 +29,19 @@ function createWindow() {
   })
 
   // 在开发模式下加载本地服务器
-  if (process.env.NODE_ENV === "development") {
-    mainWindow.loadURL("http://localhost:3000")
+  const isDev = process.env.NODE_ENV === "development"
+  console.log(`Running in ${isDev ? "development" : "production"} mode`)
+  
+  if (isDev) {
+    const serverUrl = "http://localhost:3001"
+    console.log(`Loading from development server: ${serverUrl}`)
+    mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()
   } else {
     // 在生产模式下加载打包后的应用
-    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"))
+    const filePath = path.join(__dirname, "../.next/server/app/page.html")
+    console.log(`Loading file from: ${filePath}`)
+    mainWindow.loadFile(filePath)
   }
 
   // 窗口关闭时清除引用
@@ -67,7 +74,7 @@ async function initializeApp() {
     if (config) {
       sambaClient.configure(config)
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to initialize app:", error)
   }
 }
@@ -103,9 +110,9 @@ ipcMain.handle("save-config", async (_, config) => {
     await mediaDatabase.saveConfig(config)
     sambaClient.configure(config)
     return { success: true }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to save config:", error)
-    return { success: false, error: error.message }
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 
@@ -114,9 +121,9 @@ ipcMain.handle("scan-media", async (_, type) => {
   try {
     const results = await mediaScanner.scanMedia(type)
     return { success: true, count: results.length }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to scan media:", error)
-    return { success: false, error: error.message }
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 
@@ -125,7 +132,7 @@ ipcMain.handle("get-media", async (_, type) => {
   try {
     const media = await mediaDatabase.getMediaByType(type)
     return media
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to get media:", error)
     return []
   }
@@ -141,9 +148,9 @@ ipcMain.handle("play-media", async (_, mediaId) => {
 
     await mediaPlayer.play(media.path)
     return { success: true }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to play media:", error)
-    return { success: false, error: error.message }
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 
@@ -152,9 +159,9 @@ ipcMain.handle("fetch-posters", async (_, mediaIds) => {
   try {
     const results = await posterScraper.fetchPosters(mediaIds)
     return { success: true, results }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Failed to fetch posters:", error)
-    return { success: false, error: error.message }
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
   }
 })
 

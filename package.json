@@ -4,10 +4,15 @@
   "description": "open filmly",
   "main": "dist/electron/main.js",
   "private": true,
+  "engines": {
+    "node": ">=16.0.0",
+    "pnpm": ">=7.0.0"
+  },
   "scripts": {
-    "dev": "concurrently \"npm run dev:next\" \"npm run dev:electron\"",
+    "preinstall": "npx only-allow pnpm",
+    "dev": "concurrently \"pnpm run dev:next\" \"pnpm run dev:electron\"",
     "dev:next": "next dev",
-    "dev:electron": "tsc -p electron/tsconfig.json && electron .",
+    "dev:electron": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .",
     "build": "next build && tsc -p electron/tsconfig.json",
     "start": "electron .",
     "pack": "electron-builder --dir",
@@ -17,7 +22,11 @@
   "build": {
     "appId": "com.example.open-filmly",
     "productName": "open filmly",
-    "files": ["dist/**/*", "node_modules/**/*", "package.json"],
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
     "directories": {
       "output": "release"
     },
@@ -32,14 +41,6 @@
     }
   },
   "dependencies": {
-    "axios": "^1.6.2",
-    "electron-is-dev": "^2.0.0",
-    "next": "14.0.3",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "samba-client": "^7.2.0",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.6",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-alert-dialog": "^1.1.4",
@@ -69,19 +70,27 @@
     "@radix-ui/react-toggle-group": "^1.1.1",
     "@radix-ui/react-tooltip": "^1.1.6",
     "autoprefixer": "^10.4.16",
+    "axios": "^1.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
+    "electron-is-dev": "^2.0.0",
     "embla-carousel-react": "8.5.1",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
+    "next": "14.0.3",
     "next-themes": "^0.4.4",
+    "react": "^18.2.0",
     "react-day-picker": "8.10.1",
+    "react-dom": "^18.2.0",
     "react-hook-form": "^7.54.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.0",
+    "samba-client": "^7.2.0",
     "sonner": "^1.7.1",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.6",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.6",
@@ -93,11 +102,17 @@
     "@types/react-dom": "^18.2.17",
     "autoprefixer": "^10.4.31",
     "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "electron": "^27.1.2",
     "electron-builder": "^24.6.4",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",
     "typescript": "^5.3.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "sqlite3"
+    ]
   }
 }
-

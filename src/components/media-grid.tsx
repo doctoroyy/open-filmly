@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react"
 import { MediaCard } from "./media-card"
-import type { Media } from "../../types/media"
+import type { Media } from "@/types/media"
+import { Card, CardContent } from "@/components/ui/card"
+import Image from "next/image"
+import Link from "next/link"
 
-interface MediaGridProps {
+export interface MediaGridProps {
   media: Media[]
 }
 
@@ -25,17 +28,20 @@ export function MediaGrid({ media }: MediaGridProps) {
 
         // 获取海报
         const mediaIds = mediaWithoutPosters.map((item) => item.id)
-        const results = await window.electronAPI.fetchPosters(mediaIds)
+        const response = await window.electronAPI.fetchPosters(mediaIds)
 
-        // 更新媒体数据
-        const updatedMedia = media.map((item) => {
-          if (results[item.id]) {
-            return { ...item, posterPath: results[item.id] }
-          }
-          return item
-        })
+        if (response.success && response.results) {
+          // 更新媒体数据
+          const updatedMedia = media.map((item) => {
+            const posterPath = response.results?.[item.id]
+            if (posterPath) {
+              return { ...item, posterPath } as Media
+            }
+            return item
+          })
 
-        setMediaWithPosters(updatedMedia)
+          setMediaWithPosters(updatedMedia)
+        }
       } catch (error) {
         console.error("Failed to fetch posters:", error)
       }
@@ -44,18 +50,41 @@ export function MediaGrid({ media }: MediaGridProps) {
     fetchPosters()
   }, [media])
 
+  if (media.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <h3 className="text-xl font-medium text-gray-400">没有找到媒体</h3>
+        <p className="mt-2 text-sm text-gray-500">请在设置中配置媒体路径并扫描</p>
+      </div>
+    )
+  }
+
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {mediaWithPosters.map((item) => (
-        <MediaCard key={item.id} media={item} />
+        <Link key={item.id} href={`/detail/${item.type}/${item.id}`}>
+          <Card className="overflow-hidden h-full transition-all duration-200 hover:scale-105 hover:shadow-xl bg-gray-900 border-gray-800">
+            <div className="relative aspect-[2/3] w-full">
+              {item.posterPath ? (
+                <Image
+                  src={`file://${item.posterPath}`}
+                  alt={item.title}
+                  fill
+                  className="object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                  <span className="text-gray-400">No Poster</span>
+                </div>
+              )}
+            </div>
+            <CardContent className="p-3">
+              <h3 className="font-medium text-sm line-clamp-1">{item.title}</h3>
+              <p className="text-xs text-gray-400 mt-1">{item.year}</p>
+            </CardContent>
+          </Card>
+        </Link>
       ))}
-
-      {mediaWithPosters.length === 0 && (
-        <div className="col-span-full text-center py-12">
-          <p className="text-gray-400">没有找到媒体文件</p>
-          <p className="text-gray-500 text-sm mt-2">点击"扫描"按钮以扫描媒体文件</p>
-        </div>
-      )}
     </div>
   )
 }

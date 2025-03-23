@@ -1,4 +1,4 @@
-import type { MediaItem } from "@/types/media"
+import type { MediaItem } from "../types/media"
 import { scrapeChinesePoster } from "./poster-scraper"
 import { parseFileName } from "./file-parser"
 

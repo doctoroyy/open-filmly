@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Image from "next/image"
-import { Play } from "lucide-react"
+import { Play, Star, Info } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { MediaItem } from "@/types/media"
 

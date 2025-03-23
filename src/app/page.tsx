@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import Link from "next/link"
-import type { Media } from "../../types/media"
+import type { Media } from "@/types/media"
 
 export default function HomePage() {
   const [movies, setMovies] = useState<Media[]>([])
