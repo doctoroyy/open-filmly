@@ -21,6 +21,7 @@ interface MediaFile {
   path: string
   type: 'movie' | 'tv' | 'unknown'
   name: string
+  fullPath: string
 }
 
 // 常见的SMB共享名称列表
@@ -375,6 +376,7 @@ export class SambaClient {
               const type = this.determineMediaType(filePath, fileName);
               mediaFiles.push({
                 path: filePath,
+                fullPath: `${this.config?.sharePath || '未知'} - ${filePath}`,
                 type,
                 name: path.basename(fileName, fileExt)
               });

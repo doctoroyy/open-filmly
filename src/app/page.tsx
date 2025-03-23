@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Settings, RefreshCw, Search, FolderOpen } from "lucide-react"
+import { Settings, RefreshCw, Search, FolderOpen, Home, Clock, Film, Tv, FolderHeart, ListChecks } from "lucide-react"
 import { MediaCard } from "@/components/media-card"
 import { LoadingGrid } from "@/components/loading-grid"
 import { Button } from "@/components/ui/button"
@@ -334,21 +334,24 @@ export default function HomePage() {
             <h1 className="text-xl font-bold text-sidebar-foreground">媒体库</h1>
           </div>
           
-          <nav className="space-y-1">
+          <nav className="w-full space-y-2 mb-8">
             <Link href="/" className="flex items-center p-3 bg-sidebar-accent rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground">
-              <span>首页</span>
+              <Home className="mr-2 h-5 w-5" /> 首页
             </Link>
             <Link href="/recently-viewed" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
-              <span>最近观看</span>
+              <Clock className="mr-2 h-5 w-5" /> 最近观看
             </Link>
             <Link href="/movies" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
-              <span>电影</span>
+              <Film className="mr-2 h-5 w-5" /> 电影
             </Link>
             <Link href="/tv" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
-              <span>电视剧</span>
+              <Tv className="mr-2 h-5 w-5" /> 电视剧
             </Link>
             <Link href="/other" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
-              <span>其他</span>
+              <FolderHeart className="mr-2 h-5 w-5" /> 收藏
+            </Link>
+            <Link href="/media-list" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+              <ListChecks className="mr-2 h-5 w-5" /> 媒体列表
             </Link>
           </nav>
         </aside>

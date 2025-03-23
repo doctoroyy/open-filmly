@@ -31,6 +31,7 @@ export class MediaDatabase {
           year TEXT,
           type TEXT NOT NULL,
           path TEXT NOT NULL,
+          fullPath TEXT,
           posterPath TEXT,
           rating TEXT,
           details TEXT,
@@ -38,6 +39,23 @@ export class MediaDatabase {
           lastUpdated TEXT NOT NULL
         )
       `)
+
+      // 检查并添加可能缺少的列
+      try {
+        // 尝试获取表信息
+        const tableInfo = this.db.prepare("PRAGMA table_info(media)").all() as any[];
+        const hasDetailsColumn = tableInfo.some(col => col.name === 'details');
+        
+        // 如果缺少details列，添加它
+        if (!hasDetailsColumn) {
+          console.log("Adding missing 'details' column to media table...");
+          this.db.exec("ALTER TABLE media ADD COLUMN details TEXT");
+          console.log("Successfully added 'details' column to media table");
+        }
+      } catch (alterError) {
+        console.error("Error checking or adding columns:", alterError);
+        // 继续初始化过程，不要让这个错误中断应用启动
+      }
 
       // 创建配置表
       this.db.exec(`
@@ -68,20 +86,21 @@ export class MediaDatabase {
         // 更新现有媒体项
         this.db.prepare(`
           UPDATE media
-          SET title = ?, year = ?, type = ?, path = ?, lastUpdated = ?
+          SET title = ?, year = ?, type = ?, path = ?, fullPath = ?, lastUpdated = ?
           WHERE id = ?
-        `).run(media.title, media.year, media.type, media.path, new Date().toISOString(), media.id)
+        `).run(media.title, media.year, media.type, media.path, media.fullPath || "", new Date().toISOString(), media.id)
       } else {
         // 插入新媒体项
         this.db.prepare(`
-          INSERT INTO media (id, title, year, type, path, posterPath, dateAdded, lastUpdated)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO media (id, title, year, type, path, fullPath, posterPath, dateAdded, lastUpdated)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           media.id,
           media.title,
           media.year,
           media.type,
           media.path,
+          media.fullPath || "",
           media.posterPath || "",
           media.dateAdded,
           media.lastUpdated
@@ -299,32 +318,64 @@ export class MediaDatabase {
         ...(details.genres !== undefined && { genres: details.genres }),
       }
       
-      // 更新数据库
-      const queries = []
-      const params = []
-      
-      // 构建UPDATE语句的SET部分
-      let updateSql = `UPDATE media SET lastUpdated = ?`
-      params.push(new Date().toISOString())
-      
-      // 添加rating字段更新（如果有）
-      if (details.rating !== undefined) {
-        updateSql += `, rating = ?`
-        params.push(details.rating.toString())
+      try {
+        // 更新数据库
+        const queries = []
+        const params = []
+        
+        // 构建UPDATE语句的SET部分
+        let updateSql = `UPDATE media SET lastUpdated = ?`
+        params.push(new Date().toISOString())
+        
+        // 添加rating字段更新（如果有）
+        if (details.rating !== undefined) {
+          updateSql += `, rating = ?`
+          params.push(details.rating.toString())
+        }
+        
+        // 为其他详细信息创建一个JSON字段
+        updateSql += `, details = ?`
+        params.push(JSON.stringify(updatedDetails))
+        
+        // 添加WHERE子句
+        updateSql += ` WHERE id = ?`
+        params.push(mediaId)
+        
+        // 执行更新
+        this.db.prepare(updateSql).run(...params)
+        
+        console.log(`Updated details for media ${mediaId}`)
+      } catch (error: any) {
+        // 检查是否是'details列不存在'的错误
+        if (error && error.code === 'SQLITE_ERROR' && error.message && error.message.includes('no such column: details')) {
+          console.log(`'details' column not found, attempting to add it...`);
+          
+          try {
+            // 添加details列
+            this.db.exec(`ALTER TABLE media ADD COLUMN details TEXT`);
+            console.log(`Successfully added 'details' column, retrying update...`);
+            
+            // 重试更新，但这次只设置details字段
+            this.db.prepare(`
+              UPDATE media 
+              SET details = ?, lastUpdated = ? 
+              WHERE id = ?
+            `).run(
+              JSON.stringify(updatedDetails),
+              new Date().toISOString(),
+              mediaId
+            );
+            
+            console.log(`Successfully updated details for media ${mediaId} after adding column`);
+          } catch (alterError) {
+            console.error(`Failed to add 'details' column:`, alterError);
+            throw alterError;
+          }
+        } else {
+          // 如果是其他错误，直接抛出
+          throw error;
+        }
       }
-      
-      // 为其他详细信息创建一个JSON字段
-      updateSql += `, details = ?`
-      params.push(JSON.stringify(updatedDetails))
-      
-      // 添加WHERE子句
-      updateSql += ` WHERE id = ?`
-      params.push(mediaId)
-      
-      // 执行更新
-      this.db.prepare(updateSql).run(...params)
-      
-      console.log(`Updated details for media ${mediaId}`)
     } catch (error) {
       console.error(`Failed to update details for ${mediaId}:`, error)
       throw error
@@ -344,6 +395,107 @@ export class MediaDatabase {
       return;
     } catch (error) {
       console.error("Failed to clear media cache:", error);
+      throw error;
+    }
+  }
+
+  // 通过路径搜索媒体
+  public async searchMediaByPath(searchTerm: string): Promise<Media[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`搜索路径包含 "${searchTerm}" 的媒体`);
+      
+      const media = this.db.prepare(`
+        SELECT * FROM media 
+        WHERE path LIKE ? OR fullPath LIKE ?
+        ORDER BY title
+      `).all(`%${searchTerm}%`, `%${searchTerm}%`) as Media[];
+      
+      console.log(`找到 ${media.length} 个匹配的媒体项`);
+      return media;
+    } catch (error) {
+      console.error(`通过路径搜索媒体时出错:`, error);
+      throw error;
+    }
+  }
+
+  // 综合搜索媒体（标题、路径和完整路径）
+  public async searchMedia(searchTerm: string): Promise<Media[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`综合搜索媒体: "${searchTerm}"`);
+      
+      const media = this.db.prepare(`
+        SELECT * FROM media 
+        WHERE title LIKE ? OR path LIKE ? OR fullPath LIKE ?
+        ORDER BY title
+      `).all(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`) as Media[];
+      
+      console.log(`找到 ${media.length} 个匹配的媒体项`);
+      return media;
+    } catch (error) {
+      console.error(`综合搜索媒体时出错:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 全面搜索媒体 - 搜索多个字段
+   * 搜索标题、路径、完整路径等多个字段
+   */
+  public async comprehensiveSearch(searchTerm: string): Promise<Media[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`全面搜索包含 "${searchTerm}" 的媒体`);
+      
+      // 将搜索词拆分为多个关键词，以支持多关键词搜索
+      const keywords = searchTerm.trim().split(/\s+/).filter(k => k.length > 0);
+      
+      if (keywords.length === 0) {
+        return [];
+      }
+      
+      // 构建 SQL 查询
+      let sql = `SELECT * FROM media WHERE`;
+      const params: string[] = [];
+      
+      // 为每个关键词构建条件
+      for (let i = 0; i < keywords.length; i++) {
+        const keyword = keywords[i];
+        
+        if (i > 0) {
+          sql += ` AND`;
+        }
+        
+        // 搜索多个字段
+        sql += ` (
+          title LIKE ? OR 
+          path LIKE ? OR 
+          fullPath LIKE ? OR
+          year LIKE ?
+        )`;
+        
+        // 添加参数
+        params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+      }
+      
+      sql += ` ORDER BY title`;
+      
+      const media = this.db.prepare(sql).all(...params) as Media[];
+      
+      console.log(`全面搜索找到 ${media.length} 个匹配的媒体项`);
+      return media;
+    } catch (error) {
+      console.error(`全面搜索媒体时出错:`, error);
       throw error;
     }
   }

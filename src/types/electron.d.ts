@@ -29,6 +29,15 @@ export interface ElectronAPI {
   getMedia: (type: "movie" | "tv" | "unknown" | "all") => Promise<Media[]>;
   getMediaById: (id: string) => Promise<Media | null>;
   getRecentlyViewed: () => Promise<Media[]>;
+  
+  // 新增：全文搜索媒体
+  searchMedia: (searchTerm: string) => Promise<{
+    success: boolean;
+    results: Media[];
+    count: number;
+    error?: string;
+  }>;
+  
   scanMedia: (type?: "movie" | "tv" | "all", useCached?: boolean) => Promise<{ 
     success: boolean; 
     count?: number;
@@ -87,6 +96,7 @@ export interface Media {
   year: string;
   type: "movie" | "tv" | "unknown";
   path: string;
+  fullPath?: string;
   posterPath?: string | null;
   rating?: string;
   details?: string;

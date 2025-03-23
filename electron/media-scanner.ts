@@ -3,19 +3,19 @@ import type { SambaClient } from "./smb-client"
 import type { MediaDatabase } from "./media-database"
 import { parseFileName } from "./file-parser"
 import type { Media, MediaEpisode } from "../types/media"
-import type { PosterScraper } from "./poster-scraper"
+import type { MetadataScraper } from "./metadata-scraper"
 
 export class MediaScanner {
   private sambaClient: SambaClient
   private mediaDatabase: MediaDatabase
-  private posterScraper?: PosterScraper
+  private metadataScraper?: MetadataScraper
   private sharePath: string = ""
   private selectedFolders: string[] = []
 
-  constructor(sambaClient: SambaClient, mediaDatabase: MediaDatabase, posterScraper?: PosterScraper) {
+  constructor(sambaClient: SambaClient, mediaDatabase: MediaDatabase, metadataScraper?: MetadataScraper) {
     this.sambaClient = sambaClient
     this.mediaDatabase = mediaDatabase
-    this.posterScraper = posterScraper
+    this.metadataScraper = metadataScraper
   }
 
   // 设置共享路径
@@ -28,126 +28,20 @@ export class MediaScanner {
     this.selectedFolders = folders
   }
 
-  // 设置海报抓取器
-  public setPosterScraper(posterScraper: PosterScraper): void {
-    this.posterScraper = posterScraper
+  // 设置元数据抓取器
+  public setMetadataScraper(metadataScraper: MetadataScraper): void {
+    this.metadataScraper = metadataScraper
   }
 
-  // 从选定的文件夹扫描指定类型的媒体文件
-  public async scanSelectedFolders(type: "movie" | "tv"): Promise<number> {
-    if (!this.sambaClient || !this.sharePath) {
-      throw new Error("Samba client or share path not configured")
-    }
-
-    let mediaFiles: any[] = []
-
-    // 检查是否有选定的文件夹
-    if (this.selectedFolders && this.selectedFolders.length > 0) {
-      // 有选定的文件夹，遍历每个文件夹进行扫描
-      for (const folder of this.selectedFolders) {
-        try {
-          console.log(`Scanning for ${type} in folder: ${folder}`)
-          // 获取指定文件夹中的媒体文件
-          const filesInFolder = await this.sambaClient.getMediaByType(folder, type)
-          mediaFiles = [...mediaFiles, ...filesInFolder]
-        } catch (error) {
-          console.error(`Error scanning folder ${folder}:`, error)
-          // 继续处理其他文件夹
-        }
-      }
-    } else {
-      // 没有选定的文件夹，使用共享根目录
-      console.log(`Scanning for ${type} in share: ${this.sharePath}`)
-      mediaFiles = await this.sambaClient.getMediaByType("/", type)
-    }
-
-    console.log(`Found ${mediaFiles.length} ${type} files`)
-
-    // 处理找到的媒体文件
-    const addedMediaIds: string[] = [];
-
-    if (type === "tv") {
-      // 处理电视剧时，按系列分组
-      const seriesMap = this.groupTvShowsBySeries(mediaFiles);
-      
-      // 处理每个系列
-      for (const [seriesName, episodes] of Object.entries(seriesMap)) {
-        try {
-          // 创建系列记录
-          const seriesId = `tv-series-${Buffer.from(seriesName).toString("base64").slice(0, 12)}`;
-          const firstEpisode = episodes[0];
-          const parsedInfo = parseFileName(firstEpisode.name);
-          
-          // 创建系列媒体记录
-          const seriesRecord: Media = {
-            id: seriesId,
-            title: seriesName,
-            type: "tv",
-            path: path.dirname(firstEpisode.path), // 使用第一集所在的目录
-            year: parsedInfo.year || "未知",
-            posterPath: "",
-            episodeCount: episodes.length,
-            episodes: episodes.map(ep => ({
-              path: ep.path,
-              name: ep.name,
-              season: this.extractSeasonNumber(ep.name),
-              episode: this.extractEpisodeNumber(ep.name)
-            })),
-            dateAdded: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-          };
-          
-          // 保存到数据库
-          await this.mediaDatabase.saveMedia(seriesRecord);
-          addedMediaIds.push(seriesId);
-        } catch (error) {
-          console.error(`Error processing TV series ${seriesName}:`, error);
-        }
-      }
-    } else {
-      // 处理电影
-      for (const file of mediaFiles) {
-        try {
-          // 解析文件名提取元数据
-          const parsedInfo = parseFileName(file.name);
-          
-          // 创建媒体记录
-          const mediaId = `${type}-${Buffer.from(file.path).toString("base64").slice(0, 12)}`;
-          const mediaRecord: Media = {
-            id: mediaId,
-            title: parsedInfo.title || file.name,
-            type,
-            path: file.path,
-            year: parsedInfo.year || "未知",
-            posterPath: "",
-            dateAdded: new Date().toISOString(),
-            lastUpdated: new Date().toISOString(),
-          };
-          
-          // 保存到数据库
-          await this.mediaDatabase.saveMedia(mediaRecord);
-          addedMediaIds.push(mediaId);
-        } catch (error) {
-          console.error(`Error processing media file ${file.path}:`, error);
-        }
-      }
-    }
-
-    // 抓取海报和详细信息
-    if (this.posterScraper && addedMediaIds.length > 0) {
-      console.log(`Fetching posters for ${addedMediaIds.length} items...`);
-      try {
-        await this.posterScraper.fetchPosters(addedMediaIds);
-      } catch (error) {
-        console.error("Error fetching posters:", error);
-      }
-    }
-
-    return mediaFiles.length;
-  }
-
-  // 自动扫描并分类媒体文件
-  public async scanMedia(type?: "movie" | "tv"): Promise<Media[]> {
+  /**
+   * 扫描所有媒体
+   * 统一的入口方法，会根据参数决定扫描电影或电视剧或两者
+   */
+  public async scanAllMedia(type?: "movie" | "tv"): Promise<{
+    movies: Media[];
+    tvShows: Media[];
+    total: number;
+  }> {
     try {
       if (!this.sharePath) {
         throw new Error("共享路径未设置，请先配置共享路径")
@@ -156,174 +50,229 @@ export class MediaScanner {
       console.log(`开始扫描共享 ${this.sharePath} 中的媒体文件...`)
       
       // 检查是否有选定的文件夹
-      const startPath = this.selectedFolders && this.selectedFolders.length > 0 
+      const startPaths = this.selectedFolders && this.selectedFolders.length > 0 
         ? this.selectedFolders // 使用选定的文件夹
         : [""];                // 默认使用根目录
       
-      const mediaItems: Media[] = [];
-      const addedMediaIds: string[] = [];
+      // 1. 收集所有媒体文件
+      const allMediaFiles = await this.collectMediaFiles(startPaths);
       
-      try {
-        let totalMediaFiles: any[] = [];
-        
-        // 遍历所有选定的文件夹
-        for (const folder of startPath) {
-          console.log(`扫描文件夹: ${folder || '/'}`);
-          
-          // 扫描所有媒体文件
-          const mediaFiles = await this.sambaClient.scanMediaFiles(folder);
-          totalMediaFiles = [...totalMediaFiles, ...mediaFiles];
-        }
-        
-        console.log(`扫描完成，找到 ${totalMediaFiles.length} 个媒体文件`)
-        
-        // 处理每个文件
-        let processedCount = 0;
-        let errorCount = 0;
-
-        // 将电视剧分组处理
-        const tvFiles = totalMediaFiles.filter(file => file.type === "tv");
-        const movieFiles = totalMediaFiles.filter(file => file.type === "movie");
-
-        // 处理电影
-        if (!type || type === "movie") {
-          for (const mediaFile of movieFiles) {
-            try {
-              // 解析文件名
-              const { title, year } = parseFileName(mediaFile.name);
-
-              // 创建媒体项
-              const mediaId = `${mediaFile.type}-${Buffer.from(mediaFile.path).toString("base64").slice(0, 12)}`;
-              const mediaItem: Media = {
-                id: mediaId,
-                title: title || mediaFile.name,
-                year: year || "未知",
-                type: mediaFile.type,
-                path: mediaFile.path,
-                posterPath: "",
-                dateAdded: new Date().toISOString(),
-                lastUpdated: new Date().toISOString(),
-              }
-
-              // 添加到列表
-              mediaItems.push(mediaItem);
-              addedMediaIds.push(mediaId);
-
-              // 保存到数据库
-              await this.mediaDatabase.saveMedia(mediaItem);
-              processedCount++;
-            } catch (itemError) {
-              errorCount++;
-              console.error(`处理媒体文件 ${mediaFile.path} 时出错:`, itemError);
-            }
-          }
-        }
-
-        // 处理电视剧
-        if (!type || type === "tv") {
-          const seriesMap = this.groupTvShowsBySeries(tvFiles);
-          
-          for (const [seriesName, episodes] of Object.entries(seriesMap)) {
-            try {
-              const seriesId = `tv-series-${Buffer.from(seriesName).toString("base64").slice(0, 12)}`;
-              const firstEpisode = episodes[0];
-              const parsedInfo = parseFileName(firstEpisode.name);
-              
-              // 创建系列媒体记录
-              const seriesItem: Media = {
-                id: seriesId,
-                title: seriesName,
-                type: "tv",
-                path: path.dirname(firstEpisode.path), // 使用第一集所在的目录
-                year: parsedInfo.year || "未知",
-                posterPath: "",
-                episodeCount: episodes.length,
-                episodes: episodes.map(ep => ({
-                  path: ep.path,
-                  name: ep.name,
-                  season: this.extractSeasonNumber(ep.name),
-                  episode: this.extractEpisodeNumber(ep.name)
-                })),
-                dateAdded: new Date().toISOString(),
-                lastUpdated: new Date().toISOString(),
-              };
-              
-              // 添加到列表
-              mediaItems.push(seriesItem);
-              addedMediaIds.push(seriesId);
-              
-              // 保存到数据库
-              await this.mediaDatabase.saveMedia(seriesItem);
-              processedCount++;
-            } catch (itemError) {
-              errorCount++;
-              console.error(`处理电视剧系列 ${seriesName} 时出错:`, itemError);
-            }
-          }
-        }
-
-        console.log(`媒体扫描完成: 成功处理 ${processedCount} 个文件, 失败 ${errorCount} 个文件`);
-        
-        // 抓取海报和详细信息
-        if (this.posterScraper && addedMediaIds.length > 0) {
-          console.log(`Fetching posters for ${addedMediaIds.length} items...`);
-          try {
-            await this.posterScraper.fetchPosters(addedMediaIds);
-          } catch (error) {
-            console.error("Error fetching posters:", error);
-          }
-        }
-        
-        return mediaItems;
-      } catch (scanError: any) {
-        if (scanError.code === 'STATUS_OBJECT_NAME_NOT_FOUND') {
-          throw new Error(`找不到共享 "${this.sharePath}" 或目录不存在，请检查配置`);
-        } else {
-          throw scanError;
+      console.log(`扫描完成，找到 ${allMediaFiles.length} 个媒体文件`);
+      
+      // 2. 对媒体文件进行分类和处理
+      const { mediaItems, mediaIds } = await this.processMediaFiles(allMediaFiles, type);
+      
+      // 3. 获取元数据
+      if (this.metadataScraper && mediaIds.length > 0) {
+        console.log(`正在获取 ${mediaIds.length} 个媒体项的元数据...`);
+        try {
+          await this.metadataScraper.fetchAllMetadata(mediaIds);
+        } catch (error) {
+          console.error("获取元数据时出错:", error);
         }
       }
-    } catch (error) {
-      console.error(`扫描媒体文件时出错:`, error);
-      throw error;
-    }
-  }
-
-  // 扫描所有媒体
-  public async scanAllMedia() {
-    try {
-      // 直接使用scanMedia方法扫描所有媒体
-      console.log("扫描所有媒体文件...")
-      const allMedia = await this.scanMedia();
       
-      // 从扫描结果中分离电影和电视剧
-      const movies = allMedia.filter(item => item.type === "movie");
-      const tvShows = allMedia.filter(item => item.type === "tv");
-      const unknownMedia = allMedia.filter(item => item.type === "unknown");
-      
-      console.log(`扫描结果: ${movies.length} 部电影, ${tvShows.length} 部电视剧, ${unknownMedia.length} 个未识别媒体`);
-      
-      // 如果有未识别的媒体，尝试使用TMDB API来确定它们的类型
-      if (unknownMedia.length > 0 && this.posterScraper) {
-        console.log(`尝试使用TMDB识别 ${unknownMedia.length} 个未分类的媒体文件...`);
-        const identifiedMediaIds = await this.posterScraper.identifyMediaType(unknownMedia.map(m => m.id));
-        console.log(`TMDB识别完成，成功识别 ${identifiedMediaIds.length} 个媒体`);
-      }
-      
-      // 重新获取最新的分类结果
-      const updatedMovies = await this.mediaDatabase.getMediaByType("movie");
-      const updatedTVShows = await this.mediaDatabase.getMediaByType("tv");
+      // 4. 获取最新的分类结果
+      const movies = await this.mediaDatabase.getMediaByType("movie");
+      const tvShows = await this.mediaDatabase.getMediaByType("tv");
       
       return {
-        movies: updatedMovies,
-        tvShows: updatedTVShows
+        movies,
+        tvShows,
+        total: mediaItems.length
       };
     } catch (error) {
-      console.error("扫描所有媒体失败:", error);
+      console.error("扫描媒体文件时出错:", error);
       throw error;
     }
   }
+
+  /**
+   * 收集所有媒体文件
+   * 遍历所有选定的路径，收集所有媒体文件
+   */
+  private async collectMediaFiles(startPaths: string[]): Promise<any[]> {
+    let allMediaFiles: any[] = [];
+    
+    try {
+      for (const folder of startPaths) {
+        console.log(`扫描文件夹: ${folder || '/'}`);
+        
+        try {
+          const mediaFiles = await this.sambaClient.scanMediaFiles(folder);
+          allMediaFiles = [...allMediaFiles, ...mediaFiles];
+        } catch (error: any) {
+          if (error.code === 'STATUS_OBJECT_NAME_NOT_FOUND') {
+            console.error(`找不到文件夹 "${folder}"，跳过`);
+          } else {
+            console.error(`扫描文件夹 ${folder} 时出错:`, error);
+          }
+          // 继续处理其他文件夹
+        }
+      }
+      
+      return allMediaFiles;
+    } catch (error) {
+      console.error("收集媒体文件时出错:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 处理所有媒体文件
+   * 将媒体文件分类为电影和电视剧，并保存到数据库
+   */
+  private async processMediaFiles(
+    mediaFiles: any[], 
+    type?: "movie" | "tv"
+  ): Promise<{ mediaItems: Media[]; mediaIds: string[] }> {
+    const mediaItems: Media[] = [];
+    const mediaIds: string[] = [];
+    
+    // 将文件按类型分组
+    const movieFiles = mediaFiles.filter(file => file.type === "movie");
+    const tvFiles = mediaFiles.filter(file => file.type === "tv");
+    const unknownFiles = mediaFiles.filter(file => file.type === "unknown");
+    
+    console.log(`分类结果: ${movieFiles.length} 部电影, ${tvFiles.length} 部电视剧, ${unknownFiles.length} 个未识别媒体`);
+    
+    // 处理电影
+    if (!type || type === "movie") {
+      await this.processMovies(movieFiles, mediaItems, mediaIds);
+      // 处理未知类型的文件，先当作电影处理
+      await this.processMovies(unknownFiles, mediaItems, mediaIds);
+    }
+    
+    // 处理电视剧
+    if (!type || type === "tv") {
+      await this.processTVShows(tvFiles, mediaItems, mediaIds);
+    }
+    
+    return { mediaItems, mediaIds };
+  }
+
+  /**
+   * 处理电影文件
+   */
+  private async processMovies(
+    movieFiles: any[], 
+    mediaItems: Media[], 
+    mediaIds: string[]
+  ): Promise<void> {
+    console.log(`处理 ${movieFiles.length} 个电影文件...`);
+    
+    let processedCount = 0;
+    let errorCount = 0;
+    
+    for (const mediaFile of movieFiles) {
+      try {
+        // 解析文件名
+        const { title, year } = parseFileName(mediaFile.name);
+        
+        // 创建媒体项
+        const mediaId = `movie-${Buffer.from(mediaFile.path).toString("base64").slice(0, 12)}`;
+        const mediaItem: Media = {
+          id: mediaId,
+          title: title || mediaFile.name,
+          year: year || "未知",
+          type: "movie",
+          path: mediaFile.path,
+          fullPath: mediaFile.fullPath || mediaFile.path, // 使用完整路径，如果可用
+          posterPath: "",
+          dateAdded: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+        }
+        
+        // 添加到列表
+        mediaItems.push(mediaItem);
+        mediaIds.push(mediaId);
+        
+        // 保存到数据库
+        await this.mediaDatabase.saveMedia(mediaItem);
+        processedCount++;
+      } catch (error) {
+        errorCount++;
+        console.error(`处理媒体文件 ${mediaFile.path} 时出错:`, error);
+      }
+    }
+    
+    console.log(`电影处理完成: 成功 ${processedCount} 个, 失败 ${errorCount} 个`);
+  }
+
+  /**
+   * 处理电视剧文件
+   */
+  private async processTVShows(
+    tvFiles: any[], 
+    mediaItems: Media[], 
+    mediaIds: string[]
+  ): Promise<void> {
+    console.log(`处理 ${tvFiles.length} 个电视剧文件...`);
+    
+    // 将电视剧按系列分组
+    const seriesMap = this.groupTvShowsBySeries(tvFiles);
+    console.log(`共有 ${Object.keys(seriesMap).length} 个电视剧系列`);
+    
+    let processedCount = 0;
+    let errorCount = 0;
+    
+    for (const [seriesName, episodes] of Object.entries(seriesMap)) {
+      try {
+        const seriesId = `tv-series-${Buffer.from(seriesName).toString("base64").slice(0, 12)}`;
+        const firstEpisode = episodes[0];
+        const parsedInfo = parseFileName(firstEpisode.name);
+        
+        // 获取父目录作为系列路径
+        const seriesPath = path.dirname(firstEpisode.path);
+        
+        // 创建系列媒体记录
+        const seriesItem: Media = {
+          id: seriesId,
+          title: seriesName,
+          type: "tv",
+          path: seriesPath,
+          fullPath: firstEpisode.fullPath ? 
+            path.dirname(firstEpisode.fullPath) : 
+            path.dirname(firstEpisode.path),
+          year: parsedInfo.year || "未知",
+          posterPath: "",
+          episodeCount: episodes.length,
+          episodes: episodes.map(ep => this.createEpisodeRecord(ep)),
+          dateAdded: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+        };
+        
+        // 添加到列表
+        mediaItems.push(seriesItem);
+        mediaIds.push(seriesId);
+        
+        // 保存到数据库
+        await this.mediaDatabase.saveMedia(seriesItem);
+        processedCount++;
+      } catch (error) {
+        errorCount++;
+        console.error(`处理电视剧系列 ${seriesName} 时出错:`, error);
+      }
+    }
+    
+    console.log(`电视剧处理完成: 成功 ${processedCount} 个系列, 失败 ${errorCount} 个系列`);
+  }
+
+  /**
+   * 创建剧集记录
+   */
+  private createEpisodeRecord(episode: any): MediaEpisode {
+    return {
+      path: episode.path,
+      name: episode.name,
+      season: this.extractSeasonNumber(episode.name),
+      episode: this.extractEpisodeNumber(episode.name)
+    };
+  }
   
-  // 根据系列名称将电视剧分组
+  /**
+   * 根据系列名称将电视剧分组
+   */
   private groupTvShowsBySeries(tvFiles: any[]): Record<string, any[]> {
     const seriesMap: Record<string, any[]> = {};
     
@@ -341,11 +290,11 @@ export class MediaScanner {
     return seriesMap;
   }
   
-  // 从文件名提取电视剧系列名称
+  /**
+   * 从文件名提取电视剧系列名称
+   */
   private extractSeriesName(fileName: string): string {
     // 尝试移除季、集信息，获取系列名称
-    // 常见模式: "系列名 S01E01", "系列名.S01.E01", "[系列名][S01][E01]"
-    
     let seriesName = parseFileName(fileName).title;
     
     // 移除季、集信息
@@ -356,7 +305,9 @@ export class MediaScanner {
     return seriesName.trim();
   }
   
-  // 从文件名提取季信息
+  /**
+   * 从文件名提取季信息
+   */
   private extractSeasonNumber(fileName: string): number {
     // 尝试匹配季号
     const seasonMatch = fileName.match(/S(\d+)E\d+/i) || 
@@ -366,7 +317,9 @@ export class MediaScanner {
     return seasonMatch ? parseInt(seasonMatch[1], 10) : 1;
   }
   
-  // 从文件名提取集信息
+  /**
+   * 从文件名提取集信息
+   */
   private extractEpisodeNumber(fileName: string): number {
     // 尝试匹配集号
     const episodeMatch = fileName.match(/S\d+E(\d+)/i) ||

@@ -174,8 +174,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0
       moviedb-promise:
-        specifier: ^3.4.0
-        version: 3.4.1
+        specifier: ^4.0.7
+        version: 4.0.7
       next:
         specifier: 14.0.3
         version: 14.0.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -188,9 +188,6 @@ importers:
       onetime:
         specifier: ^5.1.2
         version: 5.1.2
-      parse-torrent-name:
-        specifier: ^0.5.4
-        version: 0.5.4
       path-key:
         specifier: ^3.1.1
         version: 3.1.1
@@ -1352,9 +1349,6 @@ packages:
     peerDependencies:
       postcss: ^8.1.0
 
-  axios@0.26.1:
-    resolution: {integrity: sha512-fPwcX4EvnSHuInCMItEhAGnaSEXRBjtzh9fOtsE6E1G6p7vl7edEeZe11QHf18+6+9gR5PbKV/sGKNaD8YaMeA==}
-
   axios@1.8.4:
     resolution: {integrity: sha512-eBSYY4Y68NNlHbHBMdeDmKNtDgXWhQsJcGqzO3iLUM0GraQFSS9cVgPX5I9b3lbdFKyYoAEGAZF1DwhTaljNAw==}
 
@@ -2341,8 +2335,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  moviedb-promise@3.4.1:
-    resolution: {integrity: sha512-TQe6ntr3Ws8w3wgEzk4Qb7/2nUNvbR7lfv9i58A19qfCad2G7esJoGpKV+xc0QCIDvPYslloM+e0KIpmJl3VCg==}
+  moviedb-promise@4.0.7:
+    resolution: {integrity: sha512-BS5EemEcI9cmAG8vmpbmdhPoIHHDv/Ycjq4dikWmer9/4WvQm45r5UibDNuj8ZdsE9q0CObCPlZXbD7uOBHFOQ==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -2441,9 +2435,6 @@ packages:
   parse-json@5.2.0:
     resolution: {integrity: sha512-ayCKvm/phCGxOkYRSCM82iDwct8/EonSEgCSxWxD7ve6jHggsFl4fZVQBPRNgQoKiuV/odhFrGzQXZwbifC8Rg==}
     engines: {node: '>=8'}
-
-  parse-torrent-name@0.5.4:
-    resolution: {integrity: sha512-digWcT7Zp/oZX8I7iTQSfWd3z3C/0zszo/xYQsmogO2a6XDU0sTlQXYffHRhuwXNivBvMB8mS+EAwciyyVBlGQ==}
 
   path-is-absolute@1.0.1:
     resolution: {integrity: sha512-AVbw3UJ2e9bq64vSaS9Am0fje1Pa8pbGqTTsmXfaIiMpnr5DlDhfJOuLj9Sf95ZPVDAUerDfEk88MPmPe7UCQg==}
@@ -2583,6 +2574,9 @@ packages:
   promise-retry@2.0.1:
     resolution: {integrity: sha512-y+WKFlBR8BGXnsNlIHFGPZmyDf3DFMoLhaflAnyZgV6rG6xu+JwesTo2Q9R6XwYmtmwAFCkAk3e35jEdoeh/3g==}
     engines: {node: '>=10'}
+
+  promise-throttle@1.1.2:
+    resolution: {integrity: sha512-dij7vjyXNewuuN/gyr+TX2KRjw48mbV5FEtgyXaIoJjGYAKT0au23/voNvy9eS4UNJjx2KUdEcO5Yyfc1h7vWQ==}
 
   prop-types@15.8.1:
     resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
@@ -4379,12 +4373,6 @@ snapshots:
       postcss: 8.5.3
       postcss-value-parser: 4.2.0
 
-  axios@0.26.1:
-    dependencies:
-      follow-redirects: 1.15.9
-    transitivePeerDependencies:
-      - debug
-
   axios@1.8.4:
     dependencies:
       follow-redirects: 1.15.9
@@ -5408,10 +5396,11 @@ snapshots:
 
   mkdirp@1.0.4: {}
 
-  moviedb-promise@3.4.1:
+  moviedb-promise@4.0.7:
     dependencies:
-      axios: 0.26.1
+      axios: 1.8.4
       lodash: 4.17.21
+      promise-throttle: 1.1.2
     transitivePeerDependencies:
       - debug
 
@@ -5507,8 +5496,6 @@ snapshots:
       error-ex: 1.3.2
       json-parse-even-better-errors: 2.3.1
       lines-and-columns: 1.2.4
-
-  parse-torrent-name@0.5.4: {}
 
   path-is-absolute@1.0.1: {}
 
@@ -5640,6 +5627,8 @@ snapshots:
     dependencies:
       err-code: 2.0.3
       retry: 0.12.0
+
+  promise-throttle@1.1.2: {}
 
   prop-types@15.8.1:
     dependencies:

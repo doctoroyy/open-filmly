@@ -4,7 +4,7 @@ import { connect, createConnection } from "net"
 import { MediaDatabase } from "./media-database"
 import { MediaScanner } from "./media-scanner"
 import { MediaPlayer } from "./media-player"
-import { PosterScraper } from "./poster-scraper"
+import { MetadataScraper } from "./metadata-scraper"
 import * as fs from "fs"
 import { SambaClient } from "./smb-client"
 
@@ -21,7 +21,7 @@ if (process.platform === 'darwin') {
 let mainWindow: BrowserWindow | null = null
 let sambaClient: SambaClient
 let mediaScanner: MediaScanner
-let posterScraper: PosterScraper
+let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
 
@@ -102,10 +102,10 @@ async function initializeApp() {
       console.log(`Using TMDB API key from environment: ${tmdbApiKey ? 'found' : 'not found'}`)
     }
 
-    posterScraper = new PosterScraper(mediaDatabase, tmdbApiKey)
+    metadataScraper = new MetadataScraper(mediaDatabase, tmdbApiKey)
     
     // 初始化媒体扫描器，并传入海报抓取器
-    mediaScanner = new MediaScanner(sambaClient, mediaDatabase, posterScraper)
+    mediaScanner = new MediaScanner(sambaClient, mediaDatabase, metadataScraper)
 
     // 初始化媒体播放器
     mediaPlayer = new MediaPlayer()
@@ -420,17 +420,17 @@ ipcMain.handle("scan-media", async (_, type, useCached = true) => {
     
     if (type === "movie" || type === "tv") {
       // 扫描指定类型的媒体
-      const count = await mediaScanner.scanSelectedFolders(type)
+      const { movies, tvShows, total } = await mediaScanner.scanAllMedia(type as "movie" | "tv");
       result = { 
-        count, 
-        movies: type === "movie" ? count : 0, 
-        tvShows: type === "tv" ? count : 0 
+        count: total, 
+        movies: movies.length, 
+        tvShows: tvShows.length 
       };
     } else {
       // 扫描所有媒体
-      const { movies, tvShows } = await mediaScanner.scanAllMedia()
+      const { movies, tvShows, total } = await mediaScanner.scanAllMedia();
       result = { 
-        count: movies.length + tvShows.length,
+        count: total,
         movies: movies.length,
         tvShows: tvShows.length
       };
@@ -593,17 +593,17 @@ ipcMain.handle("add-single-media", async (_, filePath) => {
 // 抓取海报
 ipcMain.handle("fetch-posters", async (_, mediaIds) => {
   try {
-    console.log(`Fetching posters for ${mediaIds.length} media items`)
-    if (!posterScraper.hasTmdbApiKey()) {
-      console.error("No TMDB API key available for poster scraper")
+    console.log(`Fetching metadata for ${mediaIds.length} media items`)
+    if (!metadataScraper.hasTmdbApiKey()) {
+      console.error("No TMDB API key available for metadata scraper")
     }
-    const results = await posterScraper.fetchPosters(mediaIds)
-    const successCount = Array.isArray(results) ? results.filter((r: any) => r && r.posterPath).length : 0
-    console.log(`Finished fetching posters. Success: ${successCount}/${mediaIds.length}`)
+    const results = await metadataScraper.fetchAllMetadata(mediaIds)
+    const successCount = Object.values(results).filter(r => r !== null).length
+    console.log(`Finished fetching metadata. Success: ${successCount}/${mediaIds.length}`)
     return { success: true, results }
   } catch (error: unknown) {
-    console.error("Failed to fetch posters:", error)
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    console.error("Error fetching metadata:", error)
+    return { success: false, error: (error as Error).message }
   }
 })
 
@@ -629,10 +629,28 @@ ipcMain.handle("clear-media-cache", async () => {
   }
 })
 
+// 按路径搜索媒体
+ipcMain.handle("search-media-by-path", async (_, searchTerm) => {
+  try {
+    console.log(`Searching media with path containing: "${searchTerm}"`);
+    const results = await mediaDatabase.searchMediaByPath(searchTerm);
+    return { 
+      success: true, 
+      results 
+    };
+  } catch (error: unknown) {
+    console.error("Failed to search media by path:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : String(error) 
+    };
+  }
+})
+
 // 检查TMDB API密钥
 ipcMain.handle("check-tmdb-api", async () => {
   try {
-    const hasApiKey = posterScraper.hasTmdbApiKey();
+    const hasApiKey = metadataScraper.hasTmdbApiKey();
     return { 
       success: true, 
       hasApiKey 
@@ -646,11 +664,36 @@ ipcMain.handle("check-tmdb-api", async () => {
 // 设置TMDB API密钥
 ipcMain.handle("set-tmdb-api-key", async (_, apiKey) => {
   try {
-    posterScraper.setTmdbApiKey(apiKey);
+    metadataScraper.setTmdbApiKey(apiKey);
     return { success: true };
   } catch (error: unknown) {
     console.error("Failed to set TMDB API key:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 })
+
+// 搜索媒体
+ipcMain.handle("search-media", async (_, searchTerm) => {
+  try {
+    if (!searchTerm || typeof searchTerm !== "string" || searchTerm.trim() === "") {
+      return { success: true, results: [] };
+    }
+    
+    console.log(`搜索媒体: "${searchTerm}"`);
+    const results = await mediaDatabase.comprehensiveSearch(searchTerm);
+    
+    return { 
+      success: true, 
+      results,
+      count: results.length
+    };
+  } catch (error) {
+    console.error("搜索媒体时出错:", error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : String(error),
+      results: [] 
+    };
+  }
+});
 

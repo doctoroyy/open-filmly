@@ -4,6 +4,7 @@ export interface MediaItem {
   year: string
   posterUrl: string
   path: string
+  fullPath?: string
   rating?: string
   type?: "movie" | "tv" | "unknown"
 }
@@ -21,6 +22,7 @@ export interface Media {
   year: string
   type: "movie" | "tv" | "unknown"
   path: string
+  fullPath?: string
   posterPath?: string | null
   rating?: string
   details?: string
