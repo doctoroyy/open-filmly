@@ -1,7 +1,7 @@
 ---
 description: 
-globs: 
-alwaysApply: true
+globs: *
+alwaysApply: false
 ---
 # Network Storage and SMB
 
