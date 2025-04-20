@@ -36,8 +36,17 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: false, // 允许加载本地文件
     },
-    // 设置窗口图标
-    icon: path.join(__dirname, "../public/icon.png"),
+    // 设置窗口图标 - 根据平台使用正确的图标路径
+    icon: process.platform === 'darwin' 
+      ? path.join(__dirname, "../public/app-icons/mac/icon.icns") 
+      : process.platform === 'win32'
+        ? path.join(__dirname, "../public/app-icons/win/icon.ico")
+        : path.join(__dirname, "../public/app-icons/linux/512x512.png"),
+  })
+
+  // 窗口准备好后再显示，避免闪烁
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show()
   })
 
   // 在开发模式下加载本地服务器
@@ -51,10 +60,10 @@ function createWindow() {
     mainWindow.webContents.openDevTools()
   } else {
     // 在生产模式下加载打包后的HTML文件
-    const filePath = path.join(app.getAppPath(), "dist/.next/server/app/index.html")
+    const filePath = path.join(app.getAppPath(), "../next/server/app/index.html")
     console.log(`Loading file from: ${filePath}`)
-    const fileUrl = `file://${filePath}`
-    mainWindow.loadURL(fileUrl)
+      const fileUrl = `file://${filePath}`
+      mainWindow.loadURL(fileUrl)
     // 在生产模式下也打开开发工具，方便调试
     mainWindow.webContents.openDevTools()
   }
@@ -136,10 +145,30 @@ async function initializeApp() {
 app.whenReady().then(() => {
   // 注册file协议处理器
   protocol.handle('file', (request) => {
-    const url = request.url.substring('file://'.length)
-    let filePath = decodeURIComponent(url)
-    console.log(`Protocol handler: loading file from ${filePath}`)
-    return net.fetch(filePath)
+    try {
+      const url = request.url.substring('file://'.length)
+      let filePath = decodeURIComponent(url)
+      console.log(`Protocol handler: loading file from ${filePath}`)
+      
+      // 检查文件是否存在
+      if (fs.existsSync(filePath)) {
+        // 获取文件MIME类型
+        const mimeType = getMimeType(filePath)
+        const fileContent = fs.readFileSync(filePath)
+        return new Response(fileContent, {
+          headers: {
+            'Content-Type': mimeType,
+            'Access-Control-Allow-Origin': '*'
+          }
+        })
+      } else {
+        console.error(`File not found: ${filePath}`)
+        return new Response('File not found', { status: 404 })
+      }
+    } catch (error) {
+      console.error('Error in file protocol handler:', error)
+      return new Response('Error loading file', { status: 500 })
+    }
   })
 
   createWindow()
@@ -151,6 +180,24 @@ app.whenReady().then(() => {
     }
   })
 })
+
+// 获取文件的MIME类型
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+  }
+  return mimeTypes[ext] || 'application/octet-stream'
+}
 
 // 所有窗口关闭时退出应用（macOS除外）
 app.on("window-all-closed", () => {
@@ -696,4 +743,3 @@ ipcMain.handle("search-media", async (_, searchTerm) => {
     };
   }
 });
-
