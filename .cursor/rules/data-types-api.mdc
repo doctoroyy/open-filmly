@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Data Types and API
+
+The application uses TypeScript interfaces to define data structures and interacts with external APIs for metadata.
+
+## Core Data Types
+- [src/types/media.ts](mdc:src/types/media.ts) - Media and episode interfaces
+- [src/types/electron.d.ts](mdc:src/types/electron.d.ts) - Electron API type definitions
+
+## API Integration
+- [src/lib/api.ts](mdc:src/lib/api.ts) - API client for The Movie Database (TMDB)
+
+## Data Flow
+1. Media files are discovered by the scanner
+2. Basic information is parsed from filenames
+3. TMDB API is queried for additional metadata
+4. Data is transformed using the mapping functions
+5. Results are stored in the SQLite database
+6. Frontend components display the enriched data
+
+The application primarily uses The Movie Database (TMDB) API for fetching metadata about movies and TV shows.

@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Media Management System
+
+The media management system is responsible for scanning, categorizing, and retrieving metadata for media files.
+
+## Core Components
+- [electron/media-scanner.ts](mdc:electron/media-scanner.ts) - Scans directories for media files
+- [electron/media-database.ts](mdc:electron/media-database.ts) - SQLite database for storing media metadata
+- [electron/metadata-scraper.ts](mdc:electron/metadata-scraper.ts) - Fetches metadata from online sources
+- [electron/file-parser.ts](mdc:electron/file-parser.ts) - Parses file information
+
+## Related Frontend Components
+- [src/components/media-grid.tsx](mdc:src/components/media-grid.tsx) - Grid layout for displaying media items
+- [src/components/media-card.tsx](mdc:src/components/media-card.tsx) - Individual media item card
+
+## Data Flow
+1. Media scanner discovers files on the system or network storage
+2. File parser extracts initial information
+3. Metadata scraper enriches the data with online information
+4. Media database stores the information
+5. Frontend components display the media library

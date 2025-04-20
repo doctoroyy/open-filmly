@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Media Player Integration
+
+The media player system handles video playback, subtitle management, and progress tracking.
+
+## Core Components
+- [electron/media-player.ts](mdc:electron/media-player.ts) - Handles media playback functionality
+- [src/app/player/page.tsx](mdc:src/app/player/page.tsx) - Player page in the Next.js app
+
+## Features
+- Video playback for various formats
+- Subtitle detection and display
+- Playback progress tracking
+- Video quality selection
+
+Note: Some media player features are still under development according to the project roadmap.

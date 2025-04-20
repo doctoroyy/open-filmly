@@ -1,0 +1,26 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Development Workflow
+
+## Getting Started
+1. Install dependencies: `pnpm install`
+2. Start development server: `pnpm dev`
+3. Build for production: `pnpm build` then `pnpm dist`
+
+## Key Scripts
+- `pnpm dev` - Starts both Next.js and Electron in development mode
+- `pnpm dev:next` - Starts only the Next.js development server
+- `pnpm dev:electron` - Starts only the Electron app
+- `pnpm build` - Builds the Next.js app and Electron code
+- `pnpm dist` - Creates distributable packages
+
+## Important Files
+- [package.json](mdc:package.json) - Project configuration and scripts
+- [next.config.mjs](mdc:next.config.mjs) - Next.js configuration
+- [tailwind.config.ts](mdc:tailwind.config.ts) - TailwindCSS configuration
+- [tsconfig.json](mdc:tsconfig.json) - TypeScript configuration
+
+Always use `pnpm` as the package manager for this project.

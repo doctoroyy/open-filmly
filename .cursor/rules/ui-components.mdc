@@ -1,0 +1,26 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# UI Components and Styling
+
+Open Filmly uses a UI component library with TailwindCSS for styling.
+
+## Core UI Components
+- [src/components/ui/button.tsx](mdc:src/components/ui/button.tsx) - Button component
+- [src/components/ui/card.tsx](mdc:src/components/ui/card.tsx) - Card component
+- [src/components/ui/dialog.tsx](mdc:src/components/ui/dialog.tsx) - Dialog/Modal component
+- [src/components/ui/input.tsx](mdc:src/components/ui/input.tsx) - Input component
+- [src/components/ui/tabs.tsx](mdc:src/components/ui/tabs.tsx) - Tabs component
+
+## Media-Specific Components
+- [src/components/media-card.tsx](mdc:src/components/media-card.tsx) - Card for displaying media items
+- [src/components/media-grid.tsx](mdc:src/components/media-grid.tsx) - Grid layout for media items
+- [src/components/Movies.tsx](mdc:src/components/Movies.tsx) - Movies view component
+
+## Styling Configuration
+- [tailwind.config.ts](mdc:tailwind.config.ts) - TailwindCSS configuration
+- [src/app/globals.css](mdc:src/app/globals.css) - Global CSS styles
+
+Always follow the existing component patterns when creating new UI elements.

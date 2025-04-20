@@ -1,0 +1,18 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Network Storage and SMB
+
+Open Filmly supports connecting to network storage devices through SMB/CIFS protocol.
+
+## Core Components
+- [electron/smb-client.ts](mdc:electron/smb-client.ts) - Handles SMB/CIFS connections and file operations
+- [src/components/SMBFileBrowser.tsx](mdc:src/components/SMBFileBrowser.tsx) - UI component for browsing SMB shares
+
+## Usage Flow
+1. User connects to an SMB share by providing server address, share name, and credentials
+2. The SMB client establishes a connection and lists available directories
+3. User browses and selects media folders for scanning
+4. Media scanner processes the selected folders and indexes content

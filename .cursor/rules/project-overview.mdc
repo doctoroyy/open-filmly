@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Project Overview
+
+Open Filmly is a media management platform similar to Plex, Emby, or Jellyfin that helps you organize and stream your media library. It's built with Next.js for the frontend and Electron for cross-platform desktop support.
+
+## Main Entry Points
+- [src/app/page.tsx](mdc:src/app/page.tsx) - Main Next.js application page
+- [electron/main.ts](mdc:electron/main.ts) - Electron main process entry point
+- [electron/preload.ts](mdc:electron/preload.ts) - Electron preload script for exposing APIs to renderer
+
+## Project Structure
+- `/src/app` - Next.js pages and routes
+- `/src/components` - React UI components
+- `/src/lib` - Utility functions and services
+- `/src/types` - TypeScript type definitions
+- `/electron` - Electron main process code
+
+## Package Management
+This project uses pnpm as the package manager. Always use pnpm for installing dependencies.
