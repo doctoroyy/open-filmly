@@ -69,7 +69,7 @@ function createWindow() {
       console.log(`Started production server at: ${serverUrl}`)
       mainWindow.loadURL(serverUrl)
       // 在生产模式下也打开开发工具，方便调试
-      mainWindow.webContents.openDevTools()
+      // mainWindow.webContents.openDevTools()
     } catch (error) {
       console.error('Failed to start production server:', error)
       // 回退到文件协议
@@ -729,6 +729,20 @@ ipcMain.handle("check-tmdb-api", async () => {
     };
   } catch (error: unknown) {
     console.error("Failed to check TMDB API:", error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+})
+
+// 获取TMDB API密钥
+ipcMain.handle("get-tmdb-api-key", async () => {
+  try {
+    const apiKey = metadataScraper.getTmdbApiKey();
+    return { 
+      success: true, 
+      apiKey 
+    };
+  } catch (error: unknown) {
+    console.error("Failed to get TMDB API key:", error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 })

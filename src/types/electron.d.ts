@@ -72,6 +72,11 @@ export interface ElectronAPI {
     hasApiKey: boolean;
     error?: string;
   }>;
+  getTmdbApiKey: () => Promise<{
+    success: boolean;
+    apiKey?: string | null;
+    error?: string;
+  }>;
   setTmdbApiKey: (apiKey: string) => Promise<{
     success: boolean;
     error?: string;

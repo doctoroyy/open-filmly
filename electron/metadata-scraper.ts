@@ -55,6 +55,11 @@ export class MetadataScraper {
     return !!this.tmdbApiKey;
   }
 
+  // 获取TMDB API Key
+  public getTmdbApiKey(): string | null {
+    return this.tmdbApiKey;
+  }
+
   // 设置TMDB API Key
   public setTmdbApiKey(apiKey: string): void {
     this.tmdbApiKey = apiKey

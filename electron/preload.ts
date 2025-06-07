@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // TMDB API相关函数
   checkTmdbApi: () => ipcRenderer.invoke("check-tmdb-api"),
+  getTmdbApiKey: () => ipcRenderer.invoke("get-tmdb-api-key"),
   setTmdbApiKey: (apiKey: string) => ipcRenderer.invoke("set-tmdb-api-key", apiKey),
   
   // 从本地读取媒体详情

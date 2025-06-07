@@ -4,9 +4,44 @@ import axios from 'axios';
 const tmdbApi = axios.create({
   baseURL: 'https://api.themoviedb.org/3',
   params: {
-    api_key: import.meta.env.VITE_TMDB_API_KEY || '',  // TMDB API key should be added to your .env file
     language: 'zh-CN',  // Set to Chinese language
   },
+});
+
+// Add API key to requests dynamically
+const getApiKey = async (): Promise<string> => {
+  try {
+    // First try to get from environment for development
+    const envApiKey = (import.meta as any).env?.VITE_TMDB_API_KEY;
+    if (envApiKey) {
+      return envApiKey;
+    }
+
+    // Then try to get from electron store
+    if (window.electronAPI?.getTmdbApiKey) {
+      const result = await window.electronAPI.getTmdbApiKey();
+      if (result?.success && result.apiKey) {
+        return result.apiKey;
+      }
+    }
+    
+    return '';
+  } catch (error) {
+    console.error('Error getting API key:', error);
+    return '';
+  }
+};
+
+// Add request interceptor to include API key
+tmdbApi.interceptors.request.use(async (config) => {
+  const apiKey = await getApiKey();
+  if (apiKey) {
+    config.params = {
+      ...config.params,
+      api_key: apiKey,
+    };
+  }
+  return config;
 });
 
 // Get trending movies
