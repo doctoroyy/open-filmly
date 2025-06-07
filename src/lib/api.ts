@@ -4,7 +4,7 @@ import axios from 'axios';
 const tmdbApi = axios.create({
   baseURL: 'https://api.themoviedb.org/3',
   params: {
-    api_key: process.env.NEXT_PUBLIC_TMDB_API_KEY || '',  // TMDB API key should be added to your .env file
+    api_key: import.meta.env.VITE_TMDB_API_KEY || '',  // TMDB API key should be added to your .env file
     language: 'zh-CN',  // Set to Chinese language
   },
 });

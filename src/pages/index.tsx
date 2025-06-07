@@ -1,14 +1,11 @@
-"use client"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Settings, RefreshCw, Search, FolderOpen, Home, Clock, Film, Tv, FolderHeart, ListChecks } from "lucide-react"
 import { MediaCard } from "@/components/media-card"
 import { LoadingGrid } from "@/components/loading-grid"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { Input } from "@/components/ui/input"
-import Link from "next/link"
+import { Link } from "react-router-dom"
 import type { Media } from "@/types/media"
 import { getTrendingMovies, getTrendingTVShows, mapTMDBToMedia } from "@/lib/api"
 import { SMBFileBrowser } from "@/components/ui/smb-file-browser"
@@ -119,6 +116,15 @@ export default function HomePage() {
 
   // 扫描媒体
   const handleScan = async (type: "movie" | "tv" | "all") => {
+    if (!window.electronAPI) {
+      toast({
+        title: "功能不可用",
+        description: "扫描功能需要在桌面应用中使用",
+        variant: "destructive",
+      })
+      return
+    }
+    
     setScanning(true)
     try {
       let scanType = type;
@@ -195,7 +201,9 @@ export default function HomePage() {
     });
     
     // 重新加载媒体列表
-    await loadLocalMedia();
+    if (window.electronAPI) {
+      await loadLocalMedia();
+    }
     
     // 可选：关闭文件浏览器
     // setShowFileBrowser(false);
@@ -213,8 +221,18 @@ export default function HomePage() {
       
       setLoading(true)
       console.log("开始初始化应用...")
+      console.log("HomePage 组件已加载，开始检查 Electron API...")
+      console.log("window.electronAPI:", window.electronAPI)
       
       try {
+        // 检查是否在 Electron 环境中
+        if (!window.electronAPI) {
+          console.log("不在 Electron 环境中，跳过本地数据加载")
+          setLoading(false)
+          setInitialized(true)
+          return
+        }
+        
         // 首先尝试加载本地媒体数据
         const movieData = await window.electronAPI?.getMedia("movie") || []
         const tvData = await window.electronAPI?.getMedia("tv") || []
@@ -322,7 +340,6 @@ export default function HomePage() {
     }
 
     initializeApp()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
@@ -335,22 +352,22 @@ export default function HomePage() {
           </div>
           
           <nav className="w-full space-y-2 mb-8">
-            <Link href="/" className="flex items-center p-3 bg-sidebar-accent rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground">
+            <Link to="/" className="flex items-center p-3 bg-sidebar-accent rounded-md hover:bg-sidebar-accent text-sidebar-accent-foreground">
               <Home className="mr-2 h-5 w-5" /> 首页
             </Link>
-            <Link href="/recently-viewed" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+            <Link to="/recently-viewed" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
               <Clock className="mr-2 h-5 w-5" /> 最近观看
             </Link>
-            <Link href="/movies" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+            <Link to="/movies" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
               <Film className="mr-2 h-5 w-5" /> 电影
             </Link>
-            <Link href="/tv" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+            <Link to="/tv" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
               <Tv className="mr-2 h-5 w-5" /> 电视剧
             </Link>
-            <Link href="/other" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+            <Link to="/other" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
               <FolderHeart className="mr-2 h-5 w-5" /> 收藏
             </Link>
-            <Link href="/media-list" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
+            <Link to="/media-list" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground">
               <ListChecks className="mr-2 h-5 w-5" /> 媒体列表
             </Link>
           </nav>
@@ -379,7 +396,7 @@ export default function HomePage() {
                   <FolderOpen className="h-5 w-5" />
                   <span className="sr-only">浏览文件</span>
                 </Button>
-                <Link href="/config">
+                <Link to="/config">
                   <Button variant="outline" size="icon" className="border-input text-foreground hover:text-foreground">
                     <Settings className="h-5 w-5" />
                     <span className="sr-only">设置</span>
@@ -513,4 +530,3 @@ export default function HomePage() {
     </main>
   )
 }
-

@@ -1,9 +1,6 @@
-"use client"
-
 import { useState } from "react"
-import Image from "next/image"
 import { Play, Star, Tv } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import type { Media } from "@/types/media"
 
@@ -12,7 +9,7 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ media }: MediaCardProps) {
-  const router = useRouter()
+  const navigate = useNavigate()
   const [isHovering, setIsHovering] = useState(false)
   const [imageError, setImageError] = useState(false)
 
@@ -90,15 +87,13 @@ export function MediaCard({ media }: MediaCardProps) {
       className="relative aspect-[2/3] rounded-lg overflow-hidden group cursor-pointer transition-transform duration-200 hover:scale-105"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
-      onClick={() => router.push(`/${media.id}`)}
+      onClick={() => navigate(`/${media.id}`)}
     >
-      <Image
+      <img
         src={getPosterPath() || "/placeholder.svg"}
         alt={media.title}
-        fill
-        className="object-cover"
+        className="w-full h-full object-cover"
         onError={() => setImageError(true)}
-        unoptimized
       />
 
       <div

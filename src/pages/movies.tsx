@@ -1,7 +1,5 @@
-"use client"
-
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import React, { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,7 +9,7 @@ import { useToast } from "@/components/ui/use-toast"
 import type { Media } from "@/types/media"
 
 export default function MoviesPage() {
-  const router = useRouter()
+  const navigate = useNavigate()
   const [movies, setMovies] = useState<Media[]>([])
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
@@ -26,6 +24,14 @@ export default function MoviesPage() {
   const loadMovies = async () => {
     try {
       setLoading(true)
+      
+      if (!window.electronAPI) {
+        console.log("不在 Electron 环境中，无法加载电影数据")
+        setMovies([])
+        setLoading(false)
+        return
+      }
+      
       const data = await window.electronAPI?.getMedia("movie")
       if (data && data.length > 0) {
         console.log(`Loaded ${data.length} movies from database`)
@@ -64,6 +70,15 @@ export default function MoviesPage() {
 
   // Handle scanning
   const handleScan = async () => {
+    if (!window.electronAPI) {
+      toast({
+        title: "功能不可用",
+        description: "扫描功能需要在桌面应用中使用",
+        variant: "destructive",
+      })
+      return
+    }
+    
     setScanning(true)
     try {
       console.log("扫描所有媒体...")
@@ -112,7 +127,7 @@ export default function MoviesPage() {
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => router.push('/')}
+              onClick={() => navigate('/')}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               返回
@@ -171,4 +186,4 @@ export default function MoviesPage() {
       </div>
     </main>
   )
-} 
+}

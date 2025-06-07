@@ -7,6 +7,7 @@ import { MediaPlayer } from "./media-player"
 import { MetadataScraper } from "./metadata-scraper"
 import * as fs from "fs"
 import { SambaClient } from "./smb-client"
+import { createProductionServer } from "./server"
 
 // 抑制 macOS 上的 IMK 相关警告
 if (process.platform === 'darwin') {
@@ -24,6 +25,7 @@ let mediaScanner: MediaScanner
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
+let productionServer: any = null
 
 // 创建主窗口
 function createWindow() {
@@ -54,18 +56,29 @@ function createWindow() {
   console.log(`Running in ${isDev ? "development" : "production"} mode`)
   
   if (isDev) {
-    const serverUrl = "http://localhost:3000"
+    const serverUrl = "http://localhost:5173"
     console.log(`Loading from development server: ${serverUrl}`)
     mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()
   } else {
-    // 在生产模式下加载打包后的HTML文件
-    const filePath = path.join(app.getAppPath(), "../next/server/app/index.html")
-    console.log(`Loading file from: ${filePath}`)
+    // 在生产模式下启动 Hono 服务器
+    try {
+      const server = createProductionServer(3000)
+      productionServer = server.start()
+      const serverUrl = "http://localhost:3000"
+      console.log(`Started production server at: ${serverUrl}`)
+      mainWindow.loadURL(serverUrl)
+      // 在生产模式下也打开开发工具，方便调试
+      mainWindow.webContents.openDevTools()
+    } catch (error) {
+      console.error('Failed to start production server:', error)
+      // 回退到文件协议
+      const filePath = path.join(__dirname, "../renderer/index.html")
+      console.log(`Fallback to file protocol: ${filePath}`)
       const fileUrl = `file://${filePath}`
       mainWindow.loadURL(fileUrl)
-    // 在生产模式下也打开开发工具，方便调试
-    mainWindow.webContents.openDevTools()
+      mainWindow.webContents.openDevTools()
+    }
   }
 
   // 窗口关闭时清除引用
@@ -91,7 +104,7 @@ async function initializeApp() {
       const envPath = path.join(process.cwd(), '.env.local')
       if (fs.existsSync(envPath)) {
         const envContent = fs.readFileSync(envPath, 'utf8')
-        const matches = envContent.match(/NEXT_PUBLIC_TMDB_API_KEY=(.+)/)
+        const matches = envContent.match(/VITE_TMDB_API_KEY=(.+)/)
         if (matches && matches[1]) {
           tmdbApiKey = matches[1].trim()
           console.log(`Found TMDB API key in .env.local: ${tmdbApiKey.substring(0, 5)}...`)
@@ -107,7 +120,7 @@ async function initializeApp() {
 
     // 尝试从环境变量获取
     if (!tmdbApiKey) {
-      tmdbApiKey = process.env.NEXT_PUBLIC_TMDB_API_KEY || process.env.TMDB_API_KEY
+      tmdbApiKey = process.env.VITE_TMDB_API_KEY || process.env.TMDB_API_KEY
       console.log(`Using TMDB API key from environment: ${tmdbApiKey ? 'found' : 'not found'}`)
     }
 
@@ -203,6 +216,18 @@ function getMimeType(filePath: string): string {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit()
+  }
+})
+
+// 应用退出时清理资源
+app.on("before-quit", () => {
+  if (productionServer) {
+    try {
+      productionServer.close()
+      console.log("Production server closed")
+    } catch (error) {
+      console.error("Error closing production server:", error)
+    }
   }
 })
 

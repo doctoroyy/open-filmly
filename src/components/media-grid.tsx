@@ -1,11 +1,8 @@
-"use client"
-
 import { useEffect, useState } from "react"
 import { MediaCard } from "./media-card"
 import type { Media } from "@/types/media"
 import { Card, CardContent } from "@/components/ui/card"
-import Image from "next/image"
-import Link from "next/link"
+import { Link } from "react-router-dom"
 
 export interface MediaGridProps {
   media: Media[]
@@ -62,18 +59,17 @@ export function MediaGrid({ media }: MediaGridProps) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {mediaWithPosters.map((item) => (
-        <Link key={item.id} href={`/detail/${item.type}/${item.id}`}>
+        <Link key={item.id} to={`/${item.id}`}>
           <Card className="overflow-hidden h-full transition-all duration-200 hover:scale-105 hover:shadow-xl bg-gray-900 border-gray-800">
             <div className="relative aspect-[2/3] w-full">
               {item.posterPath ? (
-                <Image
+                <img
                   src={`file://${item.posterPath}`}
                   alt={item.title}
-                  fill
-                  className="object-cover"
+                  className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                <div className="w-full h-full flex items-center justify-center bg-gray-800">
                   <span className="text-gray-400">No Poster</span>
                 </div>
               )}

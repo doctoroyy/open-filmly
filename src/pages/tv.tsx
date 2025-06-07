@@ -1,7 +1,5 @@
-"use client"
-
-import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import React, { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,8 +8,8 @@ import { LoadingGrid } from "@/components/loading-grid"
 import { useToast } from "@/components/ui/use-toast"
 import type { Media } from "@/types/media"
 
-export default function TvPage() {
-  const router = useRouter()
+export default function TVPage() {
+  const navigate = useNavigate()
   const [tvShows, setTvShows] = useState<Media[]>([])
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
@@ -20,10 +18,10 @@ export default function TvPage() {
 
   // Load TV show data
   useEffect(() => {
-    loadTvShows()
+    loadTVShows()
   }, [])
 
-  const loadTvShows = async () => {
+  const loadTVShows = async () => {
     try {
       setLoading(true)
       const data = await window.electronAPI?.getMedia("tv")
@@ -43,6 +41,9 @@ export default function TvPage() {
           lastUpdated: media.lastUpdated,
           // 解析details字段（如果存在）
           ...(media.details ? JSON.parse(media.details) : {}),
+          // TV show specific fields
+          episodeCount: media.episodeCount,
+          episodes: media.episodes,
         })
         
         setTvShows(data.map(convertToFrontendMedia))
@@ -76,7 +77,7 @@ export default function TvPage() {
           title: "扫描完成",
           description: description,
         })
-        await loadTvShows()
+        await loadTVShows()
       } else {
         console.error("扫描失败:", result?.error)
         toast({
@@ -98,7 +99,7 @@ export default function TvPage() {
   }
 
   // Filter TV shows based on search term
-  const filteredTvShows = searchTerm 
+  const filteredTVShows = searchTerm 
     ? tvShows.filter(show => 
         show.title.toLowerCase().includes(searchTerm.toLowerCase())
       )
@@ -112,7 +113,7 @@ export default function TvPage() {
             <Button 
               variant="ghost" 
               size="sm" 
-              onClick={() => router.push('/')}
+              onClick={() => navigate('/')}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               返回
@@ -141,13 +142,13 @@ export default function TvPage() {
         
         {loading ? (
           <LoadingGrid />
-        ) : filteredTvShows.length > 0 ? (
+        ) : filteredTVShows.length > 0 ? (
           <>
             <div className="mb-4 text-sm text-muted-foreground">
-              显示 {filteredTvShows.length} 部电视剧
+              显示 {filteredTVShows.length} 部电视剧
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
-              {filteredTvShows.map((show) => (
+              {filteredTVShows.map((show) => (
                 <MediaCard key={show.id} media={show} />
               ))}
             </div>
@@ -171,4 +172,4 @@ export default function TvPage() {
       </div>
     </main>
   )
-} 
+}
