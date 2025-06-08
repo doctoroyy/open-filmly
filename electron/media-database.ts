@@ -86,24 +86,36 @@ export class MediaDatabase {
         // 更新现有媒体项
         this.db.prepare(`
           UPDATE media
-          SET title = ?, year = ?, type = ?, path = ?, fullPath = ?, lastUpdated = ?
+          SET title = ?, year = ?, type = ?, path = ?, fullPath = ?, rating = ?, details = ?, lastUpdated = ?
           WHERE id = ?
-        `).run(media.title, media.year, media.type, media.path, media.fullPath || "", new Date().toISOString(), media.id)
+        `).run(
+          media.title, 
+          media.year || "", 
+          media.type, 
+          media.path, 
+          media.fullPath || "", 
+          media.rating || "",
+          media.details || "",
+          new Date().toISOString(), 
+          media.id
+        )
       } else {
         // 插入新媒体项
         this.db.prepare(`
-          INSERT INTO media (id, title, year, type, path, fullPath, posterPath, dateAdded, lastUpdated)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO media (id, title, year, type, path, fullPath, posterPath, rating, details, dateAdded, lastUpdated)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           media.id,
           media.title,
-          media.year,
+          media.year || "",
           media.type,
           media.path,
           media.fullPath || "",
           media.posterPath || "",
-          media.dateAdded,
-          media.lastUpdated
+          media.rating || "",
+          media.details || "",
+          media.dateAdded || new Date().toISOString(),
+          media.lastUpdated || new Date().toISOString()
         )
       }
     } catch (error) {

@@ -48,12 +48,21 @@ export default function MediaDetailPage() {
   const handlePlay = async () => {
     if (media) {
       try {
-        await window.electronAPI?.playMedia(media.path)
-        toast({
-          title: "开始播放",
-          description: `正在播放：${media.title}`,
-        })
+        const result = await window.electronAPI?.playMedia(media.id)
+        if (result?.success) {
+          toast({
+            title: "开始播放",
+            description: `正在播放：${media.title}`,
+          })
+        } else {
+          toast({
+            title: "播放失败",
+            description: result?.error || "无法播放该媒体文件",
+            variant: "destructive",
+          })
+        }
       } catch (error) {
+        console.error("Play media error:", error)
         toast({
           title: "播放失败",
           description: "无法播放该媒体文件",
@@ -136,7 +145,7 @@ export default function MediaDetailPage() {
               {media.rating && (
                 <div className="flex items-center gap-1">
                   <Star className="h-4 w-4" />
-                  <span>{media.rating.toFixed(1)}</span>
+                  <span>{typeof media.rating === 'number' ? media.rating.toFixed(1) : media.rating}</span>
                 </div>
               )}
               

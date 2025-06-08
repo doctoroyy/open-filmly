@@ -244,8 +244,12 @@ export class MetadataScraper {
     }
 
     try {
+      // 清理标题，移除常见的无关字符
+      const cleanTitle = this.cleanTitle(title);
+      console.log(`Searching TMDB for: "${cleanTitle}" (${year})`);
+
       const searchParams: any = {
-        query: title,
+        query: cleanTitle,
         language: 'zh-CN'
       };
 
@@ -302,9 +306,79 @@ export class MetadataScraper {
 
       console.log(`[TMDB Search] No metadata found for: ${title}`);
       return null;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`[TMDB Search] Error fetching TMDB metadata for ${title}:`, error);
+      
+      // 检查是否是网络或API错误，可以重试
+      if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+        console.log(`[TMDB Search] Network error, trying simplified search...`);
+        return this.trySimplifiedSearch(cleanTitle);
+      }
+      
       return null;
     }
+  }
+
+  // 简化搜索，当标准搜索失败时使用
+  private async trySimplifiedSearch(title: string): Promise<any | null> {
+    if (!this.movieDb) {
+      return null;
+    }
+
+    try {
+      // 进一步简化标题，只保留基本词汇
+      const simplifiedTitle = title
+        .split(' ')
+        .slice(0, 3) // 只取前3个词
+        .join(' ')
+        .trim();
+
+      if (!simplifiedTitle) {
+        return null;
+      }
+
+      console.log(`[TMDB Search] Simplified search for: "${simplifiedTitle}"`);
+
+      const searchResponse = await this.movieDb.searchMulti({
+        query: simplifiedTitle,
+        language: 'en-US' // 使用英文搜索作为后备
+      });
+
+      if (searchResponse.results && searchResponse.results.length > 0) {
+        const result = searchResponse.results[0];
+        const type = result.media_type;
+        
+        if (type === 'movie' || type === 'tv') {
+          return mapTMDBToMedia(result, type);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`[TMDB Search] Simplified search also failed:`, error);
+      return null;
+    }
+  }
+
+  // 清理标题，移除常见的无关字符和信息
+  private cleanTitle(title: string): string {
+    return title
+      // 移除文件扩展名
+      .replace(/\.(mp4|mkv|avi|mov|wmv|m4v)$/i, '')
+      // 移除年份括号
+      .replace(/\(\d{4}\)/g, '')
+      // 移除分辨率信息
+      .replace(/\b(720p|1080p|4k|uhd|hd|sd)\b/gi, '')
+      // 移除编码信息
+      .replace(/\b(x264|x265|h264|h265|hevc|avc)\b/gi, '')
+      // 移除音频信息
+      .replace(/\b(aac|ac3|dts|mp3|flac)\b/gi, '')
+      // 移除发布组信息
+      .replace(/\[.*?\]/g, '')
+      // 移除多余的点、横线、下划线
+      .replace(/[._-]+/g, ' ')
+      // 移除多余的空格
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 } 

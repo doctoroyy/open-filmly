@@ -582,6 +582,29 @@ ipcMain.handle("get-recently-viewed", async () => {
   }
 })
 
+// 获取媒体详情
+ipcMain.handle("get-media-details", async (_, mediaId) => {
+  try {
+    console.log(`Getting details for media ID: ${mediaId}`);
+    const media = await mediaDatabase.getMediaById(mediaId);
+    if (!media) {
+      console.error(`Media not found: ${mediaId}`);
+      return null;
+    }
+    
+    // 确保 posterPath 存在且可访问
+    if (media.posterPath && fs.existsSync(media.posterPath)) {
+      // 将本地文件路径转换为 file:// 协议
+      media.posterPath = `file://${media.posterPath}`;
+    }
+    
+    return media;
+  } catch (error: unknown) {
+    console.error("Failed to get media details:", error);
+    return null;
+  }
+})
+
 // 播放媒体
 ipcMain.handle("play-media", async (_, mediaId, filePath) => {
   try {

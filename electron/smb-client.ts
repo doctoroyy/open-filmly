@@ -329,7 +329,11 @@ export class SambaClient {
 
   // 获取SMB2客户端实例
   private getClient(): any {
-    if (!this.client && this.config) {
+    if (!this.config) {
+      throw new Error("SMB client not configured");
+    }
+    
+    if (!this.client) {
       this.client = this.createSMBClient(this.config);
     }
 
