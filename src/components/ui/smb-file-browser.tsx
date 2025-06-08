@@ -125,8 +125,11 @@ export function SMBFileBrowser({
 
   // 处理点击项目
   const handleItemClick = (item: FileItem) => {
-    if (item.isDirectory) {
-      // 如果是目录，导航到该目录
+    if (selectionMode && item.isDirectory) {
+      // 在选择模式下，点击目录应该切换选择状态
+      toggleDirectorySelection(item.name);
+    } else if (item.isDirectory && !selectionMode) {
+      // 非选择模式下，点击目录导航到该目录
       const newPath = currentPath === "/" 
         ? `/${item.name}` 
         : `${currentPath}/${item.name}`

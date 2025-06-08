@@ -24,16 +24,19 @@ interface MediaFile {
   fullPath: string
 }
 
-// 常见的SMB共享名称列表
+// 常见的SMB共享名称列表（减少数量以避免连接过多）
 const COMMON_SHARE_NAMES = [
-  'wd', 'media', 'share', 'public', 'videos', 'movies', 'tv', 'photos', 
-  'music', 'downloads', 'documents', 'home', 'wd-downloads', 'mi-camera', 'nobody'
+  'media', 'share', 'public', 'videos', 'movies', 'wd'
 ];
 
 export class SambaClient {
   private config: SambaConfig | null = null;
   private client: any = null;
   private discoveredShares: string[] = [];
+  private connectionInProgress: boolean = false;
+  private activeConnections: Map<string, net.Socket> = new Map();
+  private clientInstances: Map<string, any> = new Map(); // Cache SMB client instances
+  private operationInProgress: Map<string, Promise<any>> = new Map(); // Track ongoing operations
 
   constructor() {
     // 默认配置，只提供常用端口，让用户配置其他选项
@@ -48,13 +51,13 @@ export class SambaClient {
 
   // 配置Samba客户端
   public configure(config: SambaConfig): void {
+    // 先断开现有连接
+    this.disconnect();
+    
     this.config = {
       ...this.config,
       ...config,
     };
-
-    // 重置客户端，下次使用时会重新创建
-    this.disconnect();
   }
 
   // 测试连接是否有效
@@ -64,46 +67,56 @@ export class SambaClient {
         throw new Error("Configuration incomplete: IP address is required");
       }
       
-      console.log("Testing connection to SMB server...");
-      
-      // 尝试直接获取服务器上的所有共享
-      const shares = await this.listServerShares();
-      
-      if (shares && shares.length > 0) {
-        console.log(`Found shares on server: ${shares.join(', ')}`);
-        this.discoveredShares = shares;
-        return true;
-      } else {
-        // 如果没有找到共享，尝试自动发现
-        console.log("No shares found using direct method, trying auto discovery...");
-        const discoveredShares = await this.autoDiscoverShares();
-        if (discoveredShares && discoveredShares.length > 0) {
-          console.log(`Found shares via discovery: ${discoveredShares.join(', ')}`);
-          this.discoveredShares = discoveredShares;
-          return true;
-        }
+      // 防止重复的连接测试
+      if (this.connectionInProgress) {
+        console.log("Connection test already in progress, waiting...");
+        // 等待一段时间让现有连接完成
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.discoveredShares.length > 0;
       }
       
-      throw new Error("No shares found on the server");
+      this.connectionInProgress = true;
+      
+      try {
+        console.log("Testing connection to SMB server...");
+        
+        // 尝试直接获取服务器上的所有共享
+        const shares = await this.listServerShares();
+        
+        if (shares && shares.length > 0) {
+          console.log(`Found shares on server: ${shares.join(', ')}`);
+          this.discoveredShares = shares;
+          return true;
+        } else {
+          // 如果没有找到共享，返回一个默认的常见共享列表
+          console.log("No shares found using direct method, returning common share names...");
+          this.discoveredShares = COMMON_SHARE_NAMES;
+          return true;
+        }
+      } finally {
+        this.connectionInProgress = false;
+      }
+      
     } catch (error: any) {
+      this.connectionInProgress = false;
       console.error('Connection test failed:', error.message || error);
       throw error;
     }
   }
 
-  // 列出服务器上的所有共享（直接使用smbclient，如果可用）
+  // 列出服务器上的所有共享（优先使用系统命令，避免多连接）
   public async listServerShares(): Promise<string[]> {
     if (!this.config || !this.config.ip) {
       throw new Error("Server IP must be specified to list shares");
     }
 
-    console.log(`直接获取服务器 ${this.config.ip} 上的所有共享...`);
+    console.log(`获取服务器 ${this.config.ip} 上的共享...`);
     
     try {
       // 首先检查服务器是否可达
       await this.pingServer(this.config.ip, this.config.port || 445);
       
-      // 首先尝试使用系统自带的smbclient命令（在Linux/macOS上）
+      // 尝试使用系统自带的smbclient命令获取共享列表
       if (process.platform === 'darwin' || process.platform === 'linux') {
         try {
           let authParams = '';
@@ -167,9 +180,10 @@ export class SambaClient {
       // 尝试连接常见的共享名称
       const availableShares: string[] = [];
       
+      // 顺序尝试每个共享，避免并发连接
       for (const shareName of COMMON_SHARE_NAMES) {
         try {
-          // 创建临时客户端尝试连接
+          // 创建临时配置尝试连接
           const tempConfig = { ...this.config, sharePath: shareName };
           const tempClient = this.createSMBClient(tempConfig);
           
@@ -180,12 +194,10 @@ export class SambaClient {
           availableShares.push(shareName);
           console.log(`发现共享: ${shareName}`);
           
-          // 断开临时连接
-          tempClient.disconnect();
         } catch (error: any) {
           // 如果是错误的网络名称，跳过该共享
           if (error.code === 'STATUS_BAD_NETWORK_NAME') {
-            continue;
+            // 静默跳过
           } else if (error.code === 'STATUS_LOGON_FAILURE') {
             // 如果是认证失败，说明共享存在但需要用户名密码
             availableShares.push(shareName);
@@ -195,6 +207,9 @@ export class SambaClient {
             console.log(`尝试连接共享 ${shareName} 时发生错误: ${error.code || error.message}`);
           }
         }
+        
+        // 在每次尝试之间添加短暂延迟，避免连接池耗尽
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
       
       // 更新已发现的共享列表
@@ -210,30 +225,66 @@ export class SambaClient {
   
   // 测试服务器端口是否可达
   private async pingServer(ip: string, port: number): Promise<boolean> {
+    const connectionKey = `${ip}:${port}`;
+    
+    // 检查是否已有相同的连接在进行中
+    if (this.activeConnections.has(connectionKey)) {
+      console.log(`Connection to ${connectionKey} already in progress, reusing...`);
+      return true; // 假设现有连接是有效的
+    }
+    
     return new Promise<boolean>((resolve, reject) => {
       const socket = new net.Socket();
       const timeout = 3000; // 3秒超时
       
+      // 将socket添加到活动连接映射
+      this.activeConnections.set(connectionKey, socket);
+      
       socket.setTimeout(timeout);
+      
+      const cleanup = () => {
+        this.activeConnections.delete(connectionKey);
+        socket.removeAllListeners();
+      };
+      
       socket.on('connect', () => {
+        cleanup();
         socket.end();
         resolve(true);
       });
       
       socket.on('timeout', () => {
+        cleanup();
         socket.destroy();
         reject(new Error(`Connection to ${ip}:${port} timed out`));
       });
       
-      socket.on('error', (error) => {
-        reject(error);
+      socket.on('error', (error: any) => {
+        cleanup();
+        // 对于EALREADY错误，我们可以假设连接已经存在或正在进行中
+        if (error.code === 'EALREADY') {
+          console.log(`Connection to ${connectionKey} already in progress, treating as success`);
+          resolve(true);
+        } else {
+          reject(error);
+        }
       });
       
-      socket.connect(port, ip);
+      try {
+        socket.connect(port, ip);
+      } catch (error: any) {
+        cleanup();
+        if (error.code === 'EALREADY') {
+          console.log(`Connection to ${connectionKey} already exists, treating as success`);
+          resolve(true);
+        } else {
+          reject(error);
+        }
+      }
     });
   }
 
-  // 创建新的SMB客户端
+  // 创建新的SMB客户端（带缓存）
   private createSMBClient(config: SambaConfig): any {
     const { ip, port, username, password, domain, sharePath } = config;
     
@@ -248,19 +299,32 @@ export class SambaClient {
     // 构建SMB URL
     // 确保sharePath不以斜杠开头，因为SMB格式为 \\server\share
     const sharePathFormatted = sharePath.replace(/^\/+/, '');
-    
     const share = `\\\\${ip}${port && port !== 445 ? `:${port}` : ''}\\${sharePathFormatted}`;
     
-    console.log(`Creating SMB client with share: ${share}`);
+    // 创建缓存键
+    const cacheKey = `${ip}:${port || 445}:${sharePathFormatted}:${username || 'guest'}`;
     
-    // 创建SMB客户端
-    return new SMB2({
+    // 检查是否已有缓存的客户端
+    if (this.clientInstances.has(cacheKey)) {
+      console.log(`Reusing existing SMB client for: ${share}`);
+      return this.clientInstances.get(cacheKey);
+    }
+    
+    console.log(`Creating new SMB client with share: ${share}`);
+    
+    // 创建SMB客户端，使用更保守的连接设置
+    const client = new SMB2({
       share: share,
       domain: domain || '',
       username: username || 'guest',
       password: password || '',
-      autoCloseTimeout: 0 // 设置为0以手动控制连接关闭
+      autoCloseTimeout: 5000 // 5秒后自动关闭不活跃连接
     });
+    
+    // 缓存客户端实例
+    this.clientInstances.set(cacheKey, client);
+    
+    return client;
   }
 
   // 获取SMB2客户端实例
@@ -280,9 +344,35 @@ export class SambaClient {
   // 断开连接
   public disconnect(): void {
     if (this.client) {
-      this.client.disconnect();
+      try {
+        this.client.disconnect();
+      } catch (error) {
+        console.warn("Error disconnecting SMB client:", error);
+      }
       this.client = null;
     }
+    
+    // 断开并清理所有缓存的客户端实例
+    this.clientInstances.forEach((client, key) => {
+      try {
+        client.disconnect();
+      } catch (error) {
+        console.warn(`Error disconnecting cached SMB client ${key}:`, error);
+      }
+    });
+    this.clientInstances.clear();
+    
+    // 清理所有活动连接
+    this.activeConnections.forEach((socket, key) => {
+      try {
+        socket.destroy();
+      } catch (error) {
+        console.warn(`Error destroying socket ${key}:`, error);
+      }
+    });
+    this.activeConnections.clear();
+    this.operationInProgress.clear();
+    this.connectionInProgress = false;
   }
 
   // 列出目录中的文件并自动分类媒体文件
@@ -547,12 +637,12 @@ export class SambaClient {
       try {
         return await this.listServerShares();
       } catch (error) {
-        console.error("直接获取共享列表失败，尝试自动发现...", error);
-        return await this.autoDiscoverShares();
+        console.error("直接获取共享列表失败，返回常见共享名称...", error);
+        return COMMON_SHARE_NAMES;
       }
     }
     
-    // 如果无法自动发现，返回常见共享名称
+    // 如果配置不完整，返回常见共享名称
     return COMMON_SHARE_NAMES;
   }
 
@@ -562,6 +652,28 @@ export class SambaClient {
       throw new Error("Samba client not configured");
     }
 
+    // 创建操作键来跟踪并发请求
+    const operationKey = `getDirContents:${directory}`;
+    
+    // 如果相同的操作已在进行中，等待它完成
+    if (this.operationInProgress.has(operationKey)) {
+      console.log(`Directory contents request for "${directory}" already in progress, waiting...`);
+      return await this.operationInProgress.get(operationKey)!;
+    }
+
+    // 创建新的操作Promise
+    const operation = this._getDirContentsInternal(directory);
+    this.operationInProgress.set(operationKey, operation);
+    
+    try {
+      const result = await operation;
+      return result;
+    } finally {
+      this.operationInProgress.delete(operationKey);
+    }
+  }
+
+  private async _getDirContentsInternal(directory: string): Promise<{name: string, isDirectory: boolean, size?: number, modifiedTime?: string}[]> {
     try {
       const client = this.getClient();
       

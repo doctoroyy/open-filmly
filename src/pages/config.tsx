@@ -25,8 +25,6 @@ export default function ConfigPage() {
   })
   const [shares, setShares] = useState<ShareSelection[]>([])
   const [loading, setLoading] = useState(false)
-  const [discoveringShares, setDiscoveringShares] = useState(false)
-  const [manualShareInput, setManualShareInput] = useState(false)
   const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
   const [clearingCache, setClearingCache] = useState(false)
@@ -217,6 +215,79 @@ export default function ConfigPage() {
     }
   }
 
+  const handleSelectShare = (shareIndex: number) => {
+    setShares(prev => prev.map((share, index) => ({
+      ...share,
+      selected: index === shareIndex
+    })))
+  }
+
+  const handleFinishConfiguration = async () => {
+    try {
+      const selectedShare = shares.find(share => share.selected)
+      if (!selectedShare) {
+        toast({
+          title: "请选择共享",
+          description: "请选择一个共享文件夹",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // 构建完整配置
+      const finalConfig = {
+        ...config,
+        sharePath: selectedShare.name,
+        selectedFolders: selectedFolders
+      }
+
+      // 保存配置到数据库
+      const result = await window.electronAPI?.saveConfig(finalConfig)
+      if (result?.success) {
+        toast({
+          title: "配置已保存",
+          description: "Samba配置已成功保存",
+        })
+        setStep("complete")
+      } else {
+        toast({
+          title: "保存失败",
+          description: result?.error || "无法保存配置",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error saving configuration:", error)
+      toast({
+        title: "保存失败",
+        description: "发生错误，无法保存配置",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // 设置临时共享路径，用于文件浏览器
+  const handleSelectShareAndSetup = async (shareIndex: number) => {
+    handleSelectShare(shareIndex)
+    
+    const selectedShare = shares[shareIndex]
+    if (selectedShare) {
+      // 延迟保存配置，以便文件浏览器可以工作
+      // 改进的SMB客户端现在应该正确处理连接管理
+      const tempConfig = {
+        ...config,
+        sharePath: selectedShare.name
+      }
+      
+      try {
+        // 使用现有的保存配置API，但现在SMB客户端会正确断开旧连接
+        await window.electronAPI?.saveConfig(tempConfig)
+      } catch (error) {
+        console.error("Error setting temporary config:", error)
+      }
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 py-8">
@@ -302,6 +373,125 @@ export default function ConfigPage() {
               </CardFooter>
             </form>
           </Card>
+        )}
+
+        {step === "select" && (
+          <div className="w-full max-w-4xl mx-auto space-y-6">
+            <Card className="bg-gray-900 border-gray-800">
+              <CardHeader>
+                <CardTitle>选择共享文件夹</CardTitle>
+                <CardDescription>选择要用于媒体扫描的共享文件夹</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  {shares.map((share, index) => (
+                    <div 
+                      key={share.name} 
+                      className="flex items-center space-x-3 p-3 rounded-lg border border-gray-700 hover:border-gray-600 cursor-pointer"
+                      onClick={() => handleSelectShareAndSetup(index)}
+                    >
+                      <Checkbox 
+                        checked={share.selected} 
+                        onChange={() => handleSelectShareAndSetup(index)}
+                      />
+                      <div className="flex-1">
+                        <p className="font-medium">{share.name}</p>
+                        <p className="text-sm text-gray-400">SMB共享文件夹</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+                  <p className="text-sm text-gray-300 mb-2">
+                    配置信息：
+                  </p>
+                  <div className="text-xs text-gray-400 space-y-1">
+                    <p>服务器: {config.ip}:{config.port}</p>
+                    <p>用户名: {config.username || "guest"}</p>
+                    <p>已发现 {shares.length} 个共享</p>
+                  </div>
+                </div>
+
+                {shares.some(share => share.selected) && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm text-gray-300">选择要扫描的文件夹（可选）：</p>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setShowFileBrowser(!showFileBrowser)}
+                      >
+                        {showFileBrowser ? "隐藏" : "浏览文件夹"}
+                      </Button>
+                    </div>
+                    
+                    {selectedFolders.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-400 mb-2">已选择的文件夹：</p>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedFolders.map((folder, index) => (
+                            <span 
+                              key={index}
+                              className="inline-flex items-center px-2 py-1 rounded text-xs bg-blue-500/20 text-blue-300"
+                            >
+                              {folder}
+                              <button
+                                className="ml-1 hover:text-red-300"
+                                onClick={() => setSelectedFolders(prev => prev.filter((_, i) => i !== index))}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+              <CardFooter className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setStep("connect")}
+                  className="flex-1"
+                >
+                  返回
+                </Button>
+                <Button 
+                  onClick={handleFinishConfiguration}
+                  className="flex-1"
+                >
+                  完成配置
+                </Button>
+              </CardFooter>
+            </Card>
+
+            {showFileBrowser && shares.some(share => share.selected) && (
+              <Card className="bg-gray-900 border-gray-800">
+                <CardHeader>
+                  <CardTitle>浏览共享文件夹</CardTitle>
+                  <CardDescription>选择要扫描的具体文件夹</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <SMBFileBrowser
+                    initialPath="/"
+                    selectionMode={true}
+                    selectedFolders={selectedFolders}
+                    onSelect={(selectedPaths) => {
+                      setSelectedFolders(selectedPaths)
+                      setShowFileBrowser(false)
+                      toast({
+                        title: "文件夹已选择",
+                        description: `已选择 ${selectedPaths.length} 个文件夹`,
+                      })
+                    }}
+                    onCancel={() => setShowFileBrowser(false)}
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
         )}
         
         {step === "complete" && (
