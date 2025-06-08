@@ -76,7 +76,7 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.blockmap
-            release/*.yml
+          if-no-files-found: ignore
 
   publish:
     needs: release
@@ -99,7 +99,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
+            artifacts/**/*.blockmap
           draft: false
           prerelease: false
           fail_on_unmatched_files: false
