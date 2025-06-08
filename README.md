@@ -43,11 +43,17 @@ pnpm install
 
 ### Run in development mode
 
+For frontend development only:
 ```bash
 pnpm dev
 ```
 
-This will start both the Next.js frontend and the Electron app.
+For full Electron app development:
+```bash
+pnpm dev:electron
+```
+
+This will start both the Vite development server and the Electron app with hot reload.
 
 ### Build for production
 
@@ -56,14 +62,35 @@ pnpm build
 pnpm dist
 ```
 
+The `dist` command will clean, build, and create distributable packages for all platforms.
+
 ## Requirements
 
 - Node.js 16+
-- pnpm
+- pnpm 7+
+
+## Tech Stack
+
+- **Frontend**: React + TypeScript + Vite
+- **Backend**: Electron main process with Node.js
+- **Database**: SQLite with better-sqlite3
+- **UI**: Tailwind CSS + Radix UI components
+- **Network Storage**: SMB/CIFS client for NAS access
+- **Metadata**: TMDB API integration
+- **Build**: electron-builder for cross-platform packaging
 
 ## Project Structure
 
-- `/app` - Next.js application
+- `/src` - React frontend application
+  - `/components` - Reusable UI components
+  - `/pages` - Route components
+  - `/lib` - Utility functions and API clients
+  - `/types` - TypeScript type definitions
 - `/electron` - Electron main process code
-- `/components` - React components
-- `/types` - TypeScript type definitions 
+  - `main.ts` - Application entry point and IPC handlers
+  - `media-database.ts` - SQLite database layer
+  - `media-scanner.ts` - Media file scanning and classification
+  - `metadata-scraper.ts` - TMDB API integration
+  - `smb-client.ts` - SMB/CIFS network storage client
+- `/public` - Static assets and app icons
+- `/types` - Shared TypeScript definitions 
