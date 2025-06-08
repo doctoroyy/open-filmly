@@ -71,7 +71,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-release
-          path: release/
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.blockmap
+            release/*.yml
 
   publish:
     needs: release
