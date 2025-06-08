@@ -38,7 +38,12 @@
       "icon": "public/app-icons/win/icon.ico"
     },
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
       "icon": "public/app-icons/mac/icon.icns",
       "hardenedRuntime": true,
       "gatekeeperAssess": false
