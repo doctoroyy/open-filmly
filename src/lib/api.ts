@@ -11,23 +11,30 @@ const tmdbApi = axios.create({
 // Add API key to requests dynamically
 const getApiKey = async (): Promise<string> => {
   try {
-    // First try to get from environment for development
-    const envApiKey = (import.meta as any).env?.VITE_TMDB_API_KEY;
-    if (envApiKey) {
-      return envApiKey;
-    }
-
-    // Then try to get from electron store
+    console.log('[API] Attempting to get TMDB API key...');
+    
+    // First try to get from electron store (primary source)
     if (window.electronAPI?.getTmdbApiKey) {
       const result = await window.electronAPI.getTmdbApiKey();
-      if (result?.success && result.apiKey) {
-        return result.apiKey;
+      console.log('[API] Electron API result:', result);
+      
+      if (result?.success && result.data?.apiKey) {
+        console.log(`[API] Got API key from Electron: ${result.data.apiKey.substring(0, 5)}...`);
+        return result.data.apiKey;
       }
     }
+
+    // Fallback to environment variable for development
+    const envApiKey = (import.meta as any).env?.VITE_TMDB_API_KEY;
+    if (envApiKey) {
+      console.log(`[API] Got API key from environment: ${envApiKey.substring(0, 5)}...`);
+      return envApiKey;
+    }
     
+    console.log('[API] No API key found');
     return '';
   } catch (error) {
-    console.error('Error getting API key:', error);
+    console.error('[API] Error getting API key:', error);
     return '';
   }
 };
@@ -40,6 +47,9 @@ tmdbApi.interceptors.request.use(async (config) => {
       ...config.params,
       api_key: apiKey,
     };
+    console.log(`[API] Request to ${config.url} with API key: ${apiKey.substring(0, 5)}...`);
+  } else {
+    console.warn(`[API] Request to ${config.url} without API key!`);
   }
   return config;
 });

@@ -333,6 +333,10 @@ export class SambaClient {
       throw new Error("SMB client not configured");
     }
     
+    if (!this.config.sharePath || this.config.sharePath.trim() === '') {
+      throw new Error("Share path not configured");
+    }
+    
     if (!this.client) {
       this.client = this.createSMBClient(this.config);
     }
@@ -343,6 +347,20 @@ export class SambaClient {
   // 始终返回true，因为不再依赖系统安装的smbclient
   public isSmbclientAvailable(): boolean {
     return true;
+  }
+
+  // 调试方法：获取当前配置状态
+  public getConfigurationStatus(): { configured: boolean, hasSharePath: boolean, details: any } {
+    return {
+      configured: !!this.config,
+      hasSharePath: !!(this.config?.sharePath && this.config.sharePath.trim() !== ''),
+      details: {
+        ip: this.config?.ip || 'not set',
+        sharePath: this.config?.sharePath || 'not set',
+        username: this.config?.username || 'not set',
+        hasPassword: !!(this.config?.password && this.config.password.trim() !== '')
+      }
+    };
   }
 
   // 断开连接
@@ -656,6 +674,10 @@ export class SambaClient {
       throw new Error("Samba client not configured");
     }
 
+    if (!this.config.sharePath || this.config.sharePath.trim() === '') {
+      throw new Error("Share path not configured. Please configure the SMB share path first.");
+    }
+
     // 创建操作键来跟踪并发请求
     const operationKey = `getDirContents:${directory}`;
     
@@ -691,7 +713,19 @@ export class SambaClient {
       
       console.log(`Getting directory contents: "${formattedDirectory}"`);
       
-      const files = await client.readdir(formattedDirectory);
+      let files: any[] = [];
+      try {
+        files = await client.readdir(formattedDirectory);
+      } catch (error: any) {
+        console.error(`Error reading directory "${formattedDirectory}":`, error);
+        // 如果是根目录访问失败，可能需要重新连接
+        if (formattedDirectory === "" && error.code === 'STATUS_OBJECT_NAME_NOT_FOUND') {
+          console.log("Root directory access failed, attempting to reconnect...");
+          throw new Error("无法访问共享根目录，请检查配置");
+        }
+        throw error;
+      }
+      
       const contentItems = [];
       
       for (const fileEntry of files) {

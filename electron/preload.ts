@@ -1,46 +1,57 @@
 import { contextBridge, ipcRenderer } from "electron"
+import { createIPCClient, ElectronAPI } from "./ipc-client"
+
+// 创建类型安全的IPC客户端
+const ipcClient = createIPCClient(ipcRenderer)
+const electronAPI = new ElectronAPI(ipcClient)
 
 // 暴露安全的API给渲染进程
 contextBridge.exposeInMainWorld("electronAPI", {
   // 配置相关
-  getConfig: () => ipcRenderer.invoke("get-config"),
-  saveConfig: (config: any) => ipcRenderer.invoke("save-config", config),
-  connectServer: (serverConfig: any) => ipcRenderer.invoke("connect-server", serverConfig),
-  listShares: () => ipcRenderer.invoke("list-shares"),
-  listFolders: (shareName: string) => ipcRenderer.invoke("list-folders", shareName),
+  getConfig: () => electronAPI.config.getConfig(),
+  saveConfig: (config: any) => electronAPI.config.saveConfig(config),
+  connectServer: (serverConfig: any) => electronAPI.server.connectServer(serverConfig),
+  listShares: () => electronAPI.server.listShares(),
+  listFolders: (shareName: string) => electronAPI.server.listFolders(shareName),
   
-  // 新增：获取目录内容（包括文件和文件夹），用于浏览目录
-  getDirContents: (dirPath: string) => ipcRenderer.invoke("get-dir-contents", dirPath),
+  // 获取目录内容（包括文件和文件夹），用于浏览目录
+  getDirContents: (dirPath: string) => electronAPI.server.getDirContents(dirPath),
   
   // 媒体相关
-  getMedia: (type: string) => ipcRenderer.invoke("get-media", type),
+  getMedia: (type: string) => electronAPI.media.getMedia(type),
   
   // 根据ID获取媒体
-  getMediaById: (id: string) => ipcRenderer.invoke("get-media-by-id", id),
+  getMediaById: (id: string) => electronAPI.media.getMediaById(id),
   
   // 获取最近观看的媒体
-  getRecentlyViewed: () => ipcRenderer.invoke("get-recently-viewed"),
-  scanMedia: (type: "movie" | "tv", useCached: boolean = true) => ipcRenderer.invoke("scan-media", type, useCached),
-  playMedia: (mediaId: string) => ipcRenderer.invoke("play-media", mediaId),
+  getRecentlyViewed: () => electronAPI.media.getRecentlyViewed(),
+  scanMedia: (type: "movie" | "tv", useCached: boolean = true) => electronAPI.media.scanMedia(type, useCached),
+  playMedia: (mediaId: string) => electronAPI.media.playMedia(mediaId),
   
-  // 新增：添加单个媒体文件
-  addSingleMedia: (filePath: string) => ipcRenderer.invoke("add-single-media", filePath),
+  // 添加单个媒体文件
+  addSingleMedia: (filePath: string) => electronAPI.media.addSingleMedia(filePath),
 
   // 海报相关
-  fetchPosters: (mediaIds: string[]) => ipcRenderer.invoke("fetch-posters", mediaIds),
+  fetchPosters: (mediaIds: string[]) => electronAPI.metadata.fetchPosters(mediaIds),
 
   // 文件选择
-  selectFolder: () => ipcRenderer.invoke("select-folder"),
+  selectFolder: () => electronAPI.filesystem.selectFolder(),
   
   // 缓存控制
-  clearMediaCache: () => ipcRenderer.invoke("clear-media-cache"),
+  clearMediaCache: () => electronAPI.media.clearMediaCache(),
 
   // TMDB API相关函数
-  checkTmdbApi: () => ipcRenderer.invoke("check-tmdb-api"),
-  getTmdbApiKey: () => ipcRenderer.invoke("get-tmdb-api-key"),
-  setTmdbApiKey: (apiKey: string) => ipcRenderer.invoke("set-tmdb-api-key", apiKey),
+  checkTmdbApi: () => electronAPI.config.checkTmdbApi(),
+  getTmdbApiKey: () => electronAPI.config.getTmdbApiKey(),
+  setTmdbApiKey: (apiKey: string) => electronAPI.config.setTmdbApiKey(apiKey),
   
   // 从本地读取媒体详情
-  getMediaDetails: (mediaId: string) => ipcRenderer.invoke("get-media-details", mediaId),
+  getMediaDetails: (mediaId: string) => electronAPI.media.getMediaDetails(mediaId),
+
+  // 暴露原始客户端供高级用法
+  _client: ipcClient,
+  
+  // 暴露类型化API对象供高级用法
+  _api: electronAPI,
 })
 

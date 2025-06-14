@@ -1,7 +1,22 @@
+/**
+ * Electron API接口定义 - 类型安全的IPC通信
+ * 
+ * 这个接口使用了新的类型安全IPC架构，提供了：
+ * - ✅ 集中化的通道定义，避免字符串硬编码
+ * - ✅ 完整的类型安全支持
+ * - ✅ 统一的错误处理
+ * - ✅ 调试友好的日志输出
+ * - ✅ 更好的代码可维护性
+ */
 export interface ElectronAPI {
-  // 配置相关
+  // 配置相关 - 使用ConfigChannels
   getConfig: () => Promise<SambaConfig | null>;
   saveConfig: (config: SambaConfig) => Promise<{ success: boolean; error?: string }>;
+  checkTmdbApi: () => Promise<{ success: boolean; hasApiKey: boolean; error?: string }>;
+  getTmdbApiKey: () => Promise<{ success: boolean; apiKey?: string | null; error?: string }>;
+  setTmdbApiKey: (apiKey: string) => Promise<{ success: boolean; error?: string }>;
+
+  // 服务器连接相关 - 使用ServerChannels
   connectServer: (serverConfig: SambaConfig) => Promise<{
     success: boolean;
     files?: string[];
@@ -12,8 +27,6 @@ export interface ElectronAPI {
   }>;
   listShares: () => Promise<{ success: boolean; shares: string[]; error?: string }>;
   listFolders: (shareName: string) => Promise<{ success: boolean; folders: string[]; error?: string }>;
-
-  // 新增：获取目录内容
   getDirContents: (dirPath: string) => Promise<{ 
     success: boolean; 
     items?: Array<{
@@ -25,19 +38,11 @@ export interface ElectronAPI {
     error?: string 
   }>;
 
-  // 媒体相关
+  // 媒体相关 - 使用MediaChannels
   getMedia: (type: "movie" | "tv" | "unknown" | "all") => Promise<Media[]>;
   getMediaById: (id: string) => Promise<Media | null>;
+  getMediaDetails: (mediaId: string) => Promise<MediaItem | null>;
   getRecentlyViewed: () => Promise<Media[]>;
-  
-  // 新增：全文搜索媒体
-  searchMedia: (searchTerm: string) => Promise<{
-    success: boolean;
-    results: Media[];
-    count: number;
-    error?: string;
-  }>;
-  
   scanMedia: (type?: "movie" | "tv" | "all", useCached?: boolean) => Promise<{ 
     success: boolean; 
     count?: number;
@@ -45,44 +50,29 @@ export interface ElectronAPI {
     tvCount?: number;
     error?: string;
   }>;
-  playMedia: (mediaId: string, filePath?: string) => Promise<{ success: boolean; error?: string }>;
-  
-  // 新增：直接添加媒体文件
   addSingleMedia: (filePath: string) => Promise<{ 
     success: boolean; 
     media?: Media; 
     error?: string 
   }>;
+  playMedia: (mediaId: string, filePath?: string) => Promise<{ success: boolean; error?: string }>;
+  searchMedia: (searchTerm: string) => Promise<{
+    success: boolean;
+    results: Media[];
+    count: number;
+    error?: string;
+  }>;
+  clearMediaCache: () => Promise<{ success: boolean; error?: string }>;
 
-  // 海报相关
+  // 元数据相关 - 使用MetadataChannels
   fetchPosters: (mediaIds: string[]) => Promise<{ success: boolean; results: any; error?: string }>;
 
-  // 文件选择
+  // 文件系统相关 - 使用FileSystemChannels
   selectFolder: () => Promise<{ canceled: boolean; filePaths?: string[] }>;
-  
-  // 缓存控制
-  clearMediaCache: () => Promise<{
-    success: boolean;
-    error?: string;
-  }>;
 
-  // TMDB API相关方法
-  checkTmdbApi: () => Promise<{
-    success: boolean;
-    hasApiKey: boolean;
-    error?: string;
-  }>;
-  getTmdbApiKey: () => Promise<{
-    success: boolean;
-    apiKey?: string | null;
-    error?: string;
-  }>;
-  setTmdbApiKey: (apiKey: string) => Promise<{
-    success: boolean;
-    error?: string;
-  }>;
-
-  getMediaDetails: (mediaId: string) => Promise<MediaItem | null>;
+  // 高级API访问（用于调试和扩展）
+  _client?: any; // IPCClient类型，用于直接IPC调用
+  _api?: any;    // ElectronAPI类型，用于组织化的API访问
 }
 
 export interface SambaConfig {

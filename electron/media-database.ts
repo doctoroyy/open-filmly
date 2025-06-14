@@ -511,5 +511,67 @@ export class MediaDatabase {
       throw error;
     }
   }
+
+  // 保存TMDB API密钥
+  public async saveTmdbApiKey(apiKey: string): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`[DB] Saving TMDB API key: ${apiKey.substring(0, 5)}...`)
+      
+      // 先检查config表是否存在
+      const tableCheck = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='config'").all()
+      console.log(`[DB] Config table exists: ${tableCheck.length > 0}`)
+      
+      // 检查API密钥是否已存在
+      const existing = this.db.prepare("SELECT key FROM config WHERE key = ?").get("tmdb_api_key")
+      console.log(`[DB] Existing API key entry: ${existing ? 'found' : 'not found'}`)
+
+      if (existing) {
+        // 更新现有API密钥
+        console.log(`[DB] Updating existing API key`)
+        const updateResult = this.db.prepare("UPDATE config SET value = ? WHERE key = ?").run(apiKey, "tmdb_api_key")
+        console.log(`[DB] Update result:`, updateResult)
+      } else {
+        // 插入新API密钥
+        console.log(`[DB] Inserting new API key`)
+        const insertResult = this.db.prepare("INSERT INTO config (key, value) VALUES (?, ?)").run("tmdb_api_key", apiKey)
+        console.log(`[DB] Insert result:`, insertResult)
+      }
+      
+      // 验证保存是否成功
+      const verification = this.db.prepare("SELECT value FROM config WHERE key = ?").get("tmdb_api_key") as { value: string } | undefined
+      console.log(`[DB] Verification - saved value: ${verification?.value?.substring(0, 5)}...`)
+      
+      console.log("[DB] TMDB API key saved successfully")
+    } catch (error) {
+      console.error("[DB] Failed to save TMDB API key:", error)
+      throw error
+    }
+  }
+
+  // 获取TMDB API密钥
+  public async getTmdbApiKey(): Promise<string | null> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      const result = this.db.prepare("SELECT value FROM config WHERE key = ?").get("tmdb_api_key") as { value: string } | undefined
+
+      if (result && result.value) {
+        console.log(`Retrieved TMDB API key: ${result.value.substring(0, 5)}...`)
+        return result.value
+      }
+
+      console.log("No TMDB API key found in database")
+      return null
+    } catch (error) {
+      console.error("Failed to get TMDB API key:", error)
+      throw error
+    }
+  }
 }
 
