@@ -312,7 +312,7 @@ export class MetadataScraper {
       // 检查是否是网络或API错误，可以重试
       if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
         console.log(`[TMDB Search] Network error, trying simplified search...`);
-        return this.trySimplifiedSearch(cleanTitle);
+        return this.trySimplifiedSearch(this.cleanTitle(title));
       }
       
       return null;
