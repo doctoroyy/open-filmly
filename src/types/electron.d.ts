@@ -55,7 +55,14 @@ export interface ElectronAPI {
     media?: Media; 
     error?: string 
   }>;
-  playMedia: (mediaId: string, filePath?: string) => Promise<{ success: boolean; error?: string }>;
+  playMedia: (request: string | { mediaId: string; filePath?: string }) => Promise<{ 
+    success: boolean; 
+    error?: string; 
+    message?: string;
+    streamUrl?: string;
+    title?: string;
+    filePath?: string;
+  }>;
   searchMedia: (searchTerm: string) => Promise<{
     success: boolean;
     results: Media[];
@@ -92,6 +99,7 @@ export interface Media {
   type: "movie" | "tv" | "unknown";
   path: string;
   fullPath?: string;
+  filePath?: string;
   posterPath?: string | null;
   rating?: string;
   details?: string;
@@ -104,6 +112,16 @@ export interface Media {
     season: number;
     episode: number;
   }[];
+}
+
+export interface MediaItem extends Media {
+  originalTitle?: string;
+  overview?: string;
+  releaseDate?: string;
+  genres?: string[];
+  backdropPath?: string;
+  fileSize?: number;
+  lastModified?: number;
 }
 
 declare global {

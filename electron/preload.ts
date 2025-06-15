@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 获取最近观看的媒体
   getRecentlyViewed: () => electronAPI.media.getRecentlyViewed(),
   scanMedia: (type: "movie" | "tv", useCached: boolean = true) => electronAPI.media.scanMedia(type, useCached),
-  playMedia: (mediaId: string) => electronAPI.media.playMedia(mediaId),
+  playMedia: (request: string | { mediaId: string; filePath?: string }) => electronAPI.media.playMedia(request),
   
   // 添加单个媒体文件
   addSingleMedia: (filePath: string) => electronAPI.media.addSingleMedia(filePath),

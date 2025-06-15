@@ -6,6 +6,7 @@ import { MediaPlayer } from "./media-player"
 import { MetadataScraper } from "./metadata-scraper"
 import * as fs from "fs"
 import { SambaClient } from "./smb-client"
+import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
 // 抑制 macOS 上的 IMK 相关警告
@@ -24,6 +25,7 @@ let mediaScanner: MediaScanner
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
+let mediaProxyServer: MediaProxyServer
 let productionServer: any = null
 
 // 创建主窗口
@@ -160,6 +162,15 @@ async function initializeApp() {
     // 初始化媒体播放器
     mediaPlayer = new MediaPlayer()
 
+    // 初始化媒体代理服务器
+    mediaProxyServer = new MediaProxyServer(sambaClient)
+    try {
+      const proxyPort = await mediaProxyServer.start()
+      console.log(`Media proxy server started on port ${proxyPort}`)
+    } catch (error) {
+      console.error("Failed to start media proxy server:", error)
+    }
+
     // 从数据库加载配置
     const config = await mediaDatabase.getConfig()
     if (config) {
@@ -192,6 +203,7 @@ async function initializeIPCHandlers() {
     mediaPlayer,
     metadataScraper,
     sambaClient,
+    mediaProxyServer,
     mainWindow
   })
 }
@@ -264,15 +276,26 @@ app.on("window-all-closed", () => {
   }
 })
 
-// 应用退出时清理资源
-app.on("before-quit", () => {
-  if (productionServer) {
-    try {
-      productionServer.close()
-      console.log("Production server closed")
-    } catch (error) {
-      console.error("Error closing production server:", error)
+// 应用退出前清理资源
+app.on("before-quit", async () => {
+  try {
+    // 停止代理服务器
+    if (mediaProxyServer) {
+      await mediaProxyServer.stop()
     }
+    
+    // 停止生产服务器
+    if (productionServer) {
+      productionServer.close?.()
+    }
+    
+    // 断开Samba连接
+    if (sambaClient) {
+      sambaClient.disconnect()
+    }
+  } catch (error) {
+    console.error("Error during cleanup:", error)
   }
 })
+
 

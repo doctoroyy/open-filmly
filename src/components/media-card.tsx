@@ -2,6 +2,8 @@ import { useState } from "react"
 import { Play, Star, Tv } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import { useVideoPlayer } from "@/contexts/video-player-context"
+import { useToast } from "@/components/ui/use-toast"
 import type { Media } from "@/types/media"
 
 interface MediaCardProps {
@@ -10,6 +12,8 @@ interface MediaCardProps {
 
 export function MediaCard({ media }: MediaCardProps) {
   const navigate = useNavigate()
+  const { openPlayer } = useVideoPlayer()
+  const { toast } = useToast()
   const [isHovering, setIsHovering] = useState(false)
   const [imageError, setImageError] = useState(false)
 
@@ -17,6 +21,8 @@ export function MediaCard({ media }: MediaCardProps) {
     e.stopPropagation() // 防止触发卡片点击
     
     try {
+      console.log(`[MediaCard] Playing media:`, media)
+      
       // 如果是电视剧且有剧集，播放第一集
       if (media.type === 'tv' && media.episodes && media.episodes.length > 0) {
         // 获取第一季第一集，或者按照顺序排序后的第一集
@@ -26,30 +32,65 @@ export function MediaCard({ media }: MediaCardProps) {
             return a.episode - b.episode;
           })[0];
           
-        // 创建一个临时媒体项以便播放该剧集
-        const episodeToPlay = {
-          id: `${media.id}-ep${firstEpisode.season}x${firstEpisode.episode}`,
-          path: firstEpisode.path
-        };
+        console.log(`[MediaCard] Playing TV episode:`, firstEpisode);
         
-        console.log(`Playing TV episode: ${firstEpisode.path}`);
-        const result = await window.electronAPI?.playMedia(episodeToPlay.id, episodeToPlay.path);
+        // 获取流媒体URL
+        const result = await window.electronAPI?.playMedia({
+          mediaId: `${media.id}-ep${firstEpisode.season}x${firstEpisode.episode}`,
+          filePath: firstEpisode.path
+        });
         
-        if (!result?.success) {
-          console.error("Failed to play TV episode:", result?.error);
+        if (result?.success && result.streamUrl) {
+          // 打开内置播放器
+          openPlayer(
+            result.streamUrl, 
+            `${media.title} - S${firstEpisode.season}E${firstEpisode.episode}`,
+            media.posterPath || undefined
+          );
+          console.log("TV episode stream opened successfully");
+        } else {
+          toast({
+            title: "播放失败",
+            description: result?.error || "无法获取视频流",
+            variant: "destructive",
+          });
         }
       } else {
         // 电影或不含剧集的媒体，直接播放
-        console.log(`Playing media: ${media.path}`);
+        console.log(`[MediaCard] Playing media:`, media);
+        
+        // 获取流媒体URL
         const result = await window.electronAPI?.playMedia(media.id);
         
-        if (!result?.success) {
-          console.error("Failed to play media:", result?.error);
+        if (result?.success && result.streamUrl) {
+          // 打开内置播放器
+          openPlayer(
+            result.streamUrl, 
+            result.title || media.title,
+            media.posterPath || undefined
+          );
+          console.log("Media stream opened successfully");
+        } else {
+          toast({
+            title: "播放失败",
+            description: result?.error || "无法获取视频流",
+            variant: "destructive",
+          });
         }
       }
     } catch (error) {
       console.error("Error playing media:", error);
+      toast({
+        title: "播放失败",
+        description: "播放时发生错误",
+        variant: "destructive",
+      });
     }
+  }
+
+  const handleCardClick = () => {
+    console.log(`Navigating to media detail: /${media.id}`)
+    navigate(`/${media.id}`)
   }
 
   // 获取海报路径
@@ -87,7 +128,7 @@ export function MediaCard({ media }: MediaCardProps) {
       className="relative aspect-[2/3] rounded-lg overflow-hidden group cursor-pointer transition-transform duration-200 hover:scale-105"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
-      onClick={() => navigate(`/${media.id}`)}
+      onClick={handleCardClick}
     >
       <img
         src={getPosterPath() || "/placeholder.svg"}

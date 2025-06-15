@@ -119,8 +119,8 @@ export class MediaAPI {
     return this.client.invoke(IPCChannels.ADD_SINGLE_MEDIA, filePath)
   }
 
-  async playMedia(mediaId: string, filePath?: string) {
-    return this.client.invoke(IPCChannels.PLAY_MEDIA, { mediaId, filePath })
+  async playMedia(request: string | { mediaId: string; filePath?: string }) {
+    return this.client.invoke(IPCChannels.PLAY_MEDIA, request)
   }
 
   async searchMedia(searchTerm: string) {

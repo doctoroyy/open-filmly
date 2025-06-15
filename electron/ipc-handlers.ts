@@ -11,6 +11,7 @@ import { MediaScanner } from './media-scanner'
 import { MediaPlayer } from './media-player'
 import { MetadataScraper } from './metadata-scraper'
 import { SambaClient } from './smb-client'
+import { MediaProxyServer } from './media-proxy-server'
 import { registerIPCHandler } from './ipc-handler'
 import { IPCChannels } from './ipc-channels'
 
@@ -24,6 +25,7 @@ export function initializeIPCHandlers(services: {
   mediaPlayer: MediaPlayer
   metadataScraper: MetadataScraper
   sambaClient: SambaClient
+  mediaProxyServer: MediaProxyServer
   mainWindow: Electron.BrowserWindow | null
 }) {
   const {
@@ -32,6 +34,7 @@ export function initializeIPCHandlers(services: {
     mediaPlayer,
     metadataScraper,
     sambaClient,
+    mediaProxyServer,
     mainWindow
   } = services
 
@@ -525,27 +528,79 @@ export function initializeIPCHandlers(services: {
 
   registerIPCHandler(IPCChannels.PLAY_MEDIA, async (_, request) => {
     try {
-      const { mediaId, filePath } = request
+      console.log(`[PLAY_MEDIA] Request received:`, request)
       
-      // 如果提供了文件路径，直接播放该文件
-      if (filePath) {
-        console.log(`Playing media with direct path: ${filePath}`)
-        await mediaPlayer.play(filePath)
-        return { success: true }
+      let filePath: string
+      let mediaId: string
+      let mediaTitle: string = 'Unknown Media'
+      
+      // 处理不同的请求格式
+      if (typeof request === 'string') {
+        // 如果请求是字符串，可能是mediaId
+        mediaId = request
+        const media = await mediaDatabase.getMediaById(mediaId)
+        if (!media) {
+          throw new Error(`Media with ID '${mediaId}' not found in database`)
+        }
+        
+        // 优先使用path，然后fullPath，最后filePath
+        filePath = media.path || media.fullPath || media.filePath
+        if (!filePath) {
+          throw new Error(`No valid file path found for media ID '${mediaId}'`)
+        }
+        
+        mediaTitle = media.title
+        console.log(`[PLAY_MEDIA] Found media: ${media.title}, path: ${filePath}`)
+      } else if (typeof request === 'object' && request) {
+        // 如果是对象，可能包含mediaId和filePath
+        if (request.filePath) {
+          filePath = request.filePath
+          mediaId = request.mediaId || 'direct-play'
+          console.log(`[PLAY_MEDIA] Direct file path provided: ${filePath}`)
+        } else if (request.mediaId) {
+          mediaId = request.mediaId
+          const media = await mediaDatabase.getMediaById(mediaId)
+          if (!media) {
+            throw new Error(`Media with ID '${mediaId}' not found in database`)
+          }
+          
+          filePath = media.path || media.fullPath || media.filePath
+          if (!filePath) {
+            throw new Error(`No valid file path found for media ID '${mediaId}'`)
+          }
+          
+          mediaTitle = media.title
+          console.log(`[PLAY_MEDIA] Found media: ${media.title}, path: ${filePath}`)
+        } else {
+          throw new Error("Invalid request: must provide either mediaId or filePath")
+        }
+      } else {
+        throw new Error("Invalid request format")
       }
       
-      // 否则，从数据库获取媒体项
-      const media = await mediaDatabase.getMediaById(mediaId)
-      if (!media) {
-        throw new Error("Media not found")
+      // 检查代理服务器状态
+      if (!mediaProxyServer.isRunning()) {
+        throw new Error("Media proxy server is not running")
       }
-
-      console.log(`Playing media with ID ${mediaId}: ${media.path}`)
-      await mediaPlayer.play(media.path)
-      return { success: true }
+      
+      // 生成代理URL
+      const proxyUrl = mediaProxyServer.getProxyUrl(filePath)
+      console.log(`[PLAY_MEDIA] Generated proxy URL: ${proxyUrl}`)
+      
+      return { 
+        success: true, 
+        streamUrl: proxyUrl,
+        title: mediaTitle,
+        filePath: filePath,
+        message: `Stream URL generated successfully`
+      }
     } catch (error: unknown) {
-      console.error("Failed to play media:", error)
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error("[PLAY_MEDIA] Failed to generate stream URL:", errorMessage)
+      return { 
+        success: false, 
+        error: errorMessage
+      }
     }
   })
 

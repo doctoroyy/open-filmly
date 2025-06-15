@@ -3,37 +3,63 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Play, Star, Calendar, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/components/ui/use-toast'
+import { useVideoPlayer } from '@/contexts/video-player-context'
 import type { Media } from '@/types/media'
 
 export default function MediaDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { openPlayer } = useVideoPlayer()
   const [media, setMedia] = useState<Media | null>(null)
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
   useEffect(() => {
+    console.log('MediaDetailPage mounted with id:', id)
     if (id) {
       loadMediaDetails(id)
+    } else {
+      console.warn('No media ID provided in URL parameters')
     }
   }, [id])
 
   const loadMediaDetails = async (mediaId: string) => {
     try {
+      console.log('[MediaDetail] Loading media details for ID:', mediaId)
       setLoading(true)
-      const details = await window.electronAPI?.getMediaDetails(mediaId)
+      
+      // 首先尝试从getMediaDetails获取详情
+      let details = await window.electronAPI?.getMediaDetails(mediaId)
+      console.log('[MediaDetail] getMediaDetails response:', details)
+      
+      // 如果没有详情，尝试从getMediaById获取基本信息
+      if (!details) {
+        console.log('[MediaDetail] Trying getMediaById as fallback...')
+        details = await window.electronAPI?.getMediaById(mediaId)
+        console.log('[MediaDetail] getMediaById response:', details)
+      }
+      
       if (details) {
+        // 确保海报路径格式正确
+        if (details.posterPath && !details.posterPath.startsWith('http') && !details.posterPath.startsWith('file://')) {
+          if (details.posterPath.startsWith('/') || details.posterPath.includes(':\\')) {
+            details.posterPath = `file://${details.posterPath}`
+          }
+        }
+        
         setMedia(details)
+        console.log('[MediaDetail] Media loaded successfully:', details.title)
       } else {
+        console.warn('[MediaDetail] No media found for ID:', mediaId)
         toast({
           title: "媒体未找到",
-          description: "无法找到指定的媒体内容",
+          description: `无法找到ID为 ${mediaId} 的媒体内容`,
           variant: "destructive",
         })
         navigate('/')
       }
     } catch (error) {
-      console.error("Failed to load media details:", error)
+      console.error("[MediaDetail] Failed to load media details:", error)
       toast({
         title: "加载失败",
         description: "无法加载媒体详情",
@@ -46,29 +72,42 @@ export default function MediaDetailPage() {
   }
 
   const handlePlay = async () => {
-    if (media) {
-      try {
-        const result = await window.electronAPI?.playMedia(media.id)
-        if (result?.success) {
-          toast({
-            title: "开始播放",
-            description: `正在播放：${media.title}`,
-          })
-        } else {
-          toast({
-            title: "播放失败",
-            description: result?.error || "无法播放该媒体文件",
-            variant: "destructive",
-          })
-        }
-      } catch (error) {
-        console.error("Play media error:", error)
+    if (!media) return
+    
+    try {
+      console.log('[MediaDetail] Playing media:', media)
+      
+      const result = await window.electronAPI?.playMedia(media.id)
+      
+      if (result?.success && result.streamUrl) {
+        // 打开内置播放器
+        openPlayer(
+          result.streamUrl, 
+          result.title || media.title,
+          media.posterPath || undefined
+        )
+        
+        toast({
+          title: "开始播放",
+          description: `正在播放：${media.title}`,
+        })
+        console.log('[MediaDetail] Media stream opened successfully')
+      } else {
+        const errorMessage = result?.error || "无法获取视频流"
+        console.error('[MediaDetail] Playback failed:', errorMessage)
         toast({
           title: "播放失败",
-          description: "无法播放该媒体文件",
+          description: errorMessage,
           variant: "destructive",
         })
       }
+    } catch (error) {
+      console.error("[MediaDetail] Play media error:", error)
+      toast({
+        title: "播放失败",
+        description: "播放时发生错误",
+        variant: "destructive",
+      })
     }
   }
 
@@ -167,6 +206,12 @@ export default function MediaDetailPage() {
                 <Play className="h-5 w-5 mr-2" />
                 播放
               </Button>
+              <div className="text-sm text-gray-500 flex items-center">
+                {media.path || media.filePath ? 
+                  "✓ 有资源文件" : 
+                  "⚠ 仅展示信息，无实际文件"
+                }
+              </div>
             </div>
 
             {/* 文件信息 */}

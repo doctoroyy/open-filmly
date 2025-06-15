@@ -138,8 +138,13 @@ export interface MediaTypes {
     response: IPCResponse<{ media: any }>
   }
   [MediaChannels.PLAY_MEDIA]: {
-    request: { mediaId: string; filePath?: string }
-    response: IPCResponse<void>
+    request: string | { mediaId: string; filePath?: string }
+    response: IPCResponse<{ 
+      message?: string;
+      streamUrl?: string;
+      title?: string;
+      filePath?: string;
+    }>
   }
   [MediaChannels.SEARCH_MEDIA]: {
     request: string
