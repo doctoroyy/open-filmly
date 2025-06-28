@@ -9,6 +9,78 @@ import { SambaClient } from "./smb-client"
 import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
+// 初始化 MPV.js - 使用动态路径查找
+let mpvPluginInitialized = false
+try {
+  // 动态查找 mpv.js 模块路径
+  const mpvModulePath = require.resolve('mpv.js')
+  const mpvDir = path.dirname(mpvModulePath)
+  const buildDir = path.join(mpvDir, 'build')
+  const releaseBuildDir = path.join(buildDir, 'Release')
+  const mpvBinaryPath = path.join(releaseBuildDir, 'mpvjs.node')
+  
+  console.log('[MPV] Looking for MPV binary at:', mpvBinaryPath)
+  
+  // 确保二进制文件存在
+  if (!fs.existsSync(mpvBinaryPath)) {
+    console.log('[MPV] Binary not found, extracting from prebuilt package...')
+    
+    // 创建目录
+    if (!fs.existsSync(releaseBuildDir)) {
+      fs.mkdirSync(releaseBuildDir, { recursive: true })
+    }
+    
+    // 提取预构建的二进制文件
+    const { execSync } = require('child_process')
+    
+    // 根据平台选择正确的预构建包
+    let prebuiltFile = ''
+    if (process.platform === 'darwin') {
+      prebuiltFile = 'mpv.js-v0.3.0-node-v42-darwin-x64.tar.gz'
+    } else if (process.platform === 'win32') {
+      prebuiltFile = process.arch === 'x64' ? 
+        'mpv.js-v0.3.0-node-v42-win32-x64.tar.gz' : 
+        'mpv.js-v0.3.0-node-v42-win32-ia32.tar.gz'
+    } else {
+      prebuiltFile = 'mpv.js-v0.3.0-node-v42-linux-x64.tar.gz'
+    }
+    
+    const prebuiltPath = path.join(mpvDir, 'prebuilds', prebuiltFile)
+    
+    if (fs.existsSync(prebuiltPath)) {
+      try {
+        execSync(`cd "${mpvDir}" && tar -xzf "${prebuiltPath}"`, { stdio: 'pipe' })
+        console.log('[MPV] Successfully extracted prebuilt binary')
+      } catch (extractError) {
+        console.warn('[MPV] Failed to extract prebuilt binary:', extractError)
+        throw extractError
+      }
+    } else {
+      throw new Error(`Prebuilt binary not found: ${prebuiltPath}`)
+    }
+  }
+
+  const { getPluginEntry } = require('mpv.js')
+  
+  // 注册 pepper 插件
+  app.commandLine.appendSwitch('register-pepper-plugins', getPluginEntry(buildDir))
+  
+  // 允许运行不安全的内容 (PPAPI 插件需要)
+  app.commandLine.appendSwitch('allow-running-insecure-content')
+  
+  // 禁用网络安全策略，以支持本地插件
+  app.commandLine.appendSwitch('disable-web-security')
+  
+  // 启用插件支持
+  app.commandLine.appendSwitch('enable-plugins')
+  
+  console.log('[MPV] MPV.js plugin registered successfully')
+  mpvPluginInitialized = true
+} catch (error) {
+  console.error('[MPV] Failed to initialize MPV.js plugin:', error)
+  mpvPluginInitialized = false
+}
+
 // 抑制 macOS 上的 IMK 相关警告
 if (process.platform === 'darwin') {
   process.env.IMK_DISABLE_WAKEUP_RELIABLE = '1'
@@ -37,7 +109,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      webSecurity: false, // 允许加载本地文件
+      webSecurity: false, // 允许加载本地文件和MPV插件
+      plugins: true, // 启用插件支持 (PPAPI)
+      experimentalFeatures: true, // 启用实验性功能
     },
     // 设置窗口图标 - 根据平台使用正确的图标路径
     icon: process.platform === 'darwin' 

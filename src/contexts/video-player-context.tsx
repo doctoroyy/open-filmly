@@ -1,6 +1,6 @@
 /**
  * 视频播放器上下文
- * 管理全局的视频播放器状态
+ * 管理全局的MPV播放器状态
  */
 
 import React, { createContext, useContext, useState, ReactNode } from 'react'
@@ -29,6 +29,7 @@ export function VideoPlayerProvider({ children }: { children: ReactNode }) {
   })
 
   const openPlayer = (src: string, title: string, poster?: string) => {
+    console.log('[VideoPlayerContext] Opening MPV player with:', { src, title, poster })
     setPlayerState({
       isOpen: true,
       src,
@@ -38,6 +39,7 @@ export function VideoPlayerProvider({ children }: { children: ReactNode }) {
   }
 
   const closePlayer = () => {
+    console.log('[VideoPlayerContext] Closing MPV player')
     setPlayerState({
       isOpen: false,
       src: '',

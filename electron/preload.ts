@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 从本地读取媒体详情
   getMediaDetails: (mediaId: string) => electronAPI.media.getMediaDetails(mediaId),
 
+  // MPV 相关
+  checkMpvAvailability: () => electronAPI.media.checkMpvAvailability(),
+
   // 暴露原始客户端供高级用法
   _client: ipcClient,
   

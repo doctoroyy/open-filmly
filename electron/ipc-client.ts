@@ -134,6 +134,10 @@ export class MediaAPI {
   async clearMediaCache() {
     return this.client.invoke(IPCChannels.CLEAR_MEDIA_CACHE)
   }
+
+  async checkMpvAvailability() {
+    return this.client.invoke(IPCChannels.CHECK_MPV_AVAILABILITY)
+  }
 }
 
 /**

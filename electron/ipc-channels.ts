@@ -32,6 +32,7 @@ export const MediaChannels = {
   SEARCH_MEDIA: 'media:search',
   SEARCH_MEDIA_BY_PATH: 'media:search-by-path',
   CLEAR_MEDIA_CACHE: 'media:cache:clear',
+  CHECK_MPV_AVAILABILITY: 'media:mpv:check',
 } as const
 
 // 海报/元数据相关的IPC通道
@@ -157,6 +158,10 @@ export interface MediaTypes {
   [MediaChannels.CLEAR_MEDIA_CACHE]: {
     request: void
     response: IPCResponse<void>
+  }
+  [MediaChannels.CHECK_MPV_AVAILABILITY]: {
+    request: void
+    response: IPCResponse<{ available: boolean; reason?: string }>
   }
 }
 

@@ -70,6 +70,9 @@ export interface ElectronAPI {
     error?: string;
   }>;
   clearMediaCache: () => Promise<{ success: boolean; error?: string }>;
+  
+  // MPV 相关
+  checkMpvAvailability: () => Promise<{ success: boolean; available: boolean; reason?: string; error?: string }>;
 
   // 元数据相关 - 使用MetadataChannels
   fetchPosters: (mediaIds: string[]) => Promise<{ success: boolean; results: any; error?: string }>;

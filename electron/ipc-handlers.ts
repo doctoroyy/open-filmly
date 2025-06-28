@@ -685,5 +685,41 @@ export function initializeIPCHandlers(services: {
     return result
   })
 
+  // MPV 可用性检查
+  registerIPCHandler(IPCChannels.CHECK_MPV_AVAILABILITY, async () => {
+    try {
+      // 检查 mpv.js 模块是否可用
+      const mpvModule = require('mpv.js')
+      if (!mpvModule || !mpvModule.ReactMPV) {
+        return {
+          success: true,
+          data: {
+            available: false,
+            reason: 'mpv.js module not found or ReactMPV component unavailable'
+          }
+        }
+      }
+
+      // mpv.js 包含了预构建的二进制文件，不需要系统安装
+      console.log('[MPV] mpv.js is available with bundled binaries')
+      return {
+        success: true,
+        data: {
+          available: true,
+          reason: 'MPV is available with bundled binaries (mpv.js)'
+        }
+      }
+    } catch (error: unknown) {
+      console.error('[MPV] Error checking MPV availability:', error)
+      return {
+        success: true,
+        data: {
+          available: false,
+          reason: error instanceof Error ? error.message : 'Unknown error checking MPV availability'
+        }
+      }
+    }
+  })
+
   console.log('[IPC] All handlers initialized successfully')
 }
