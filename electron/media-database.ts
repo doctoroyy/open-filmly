@@ -45,12 +45,20 @@ export class MediaDatabase {
         // 尝试获取表信息
         const tableInfo = this.db.prepare("PRAGMA table_info(media)").all() as any[];
         const hasDetailsColumn = tableInfo.some(col => col.name === 'details');
+        const hasFileHashColumn = tableInfo.some(col => col.name === 'fileHash');
         
         // 如果缺少details列，添加它
         if (!hasDetailsColumn) {
           console.log("Adding missing 'details' column to media table...");
           this.db.exec("ALTER TABLE media ADD COLUMN details TEXT");
           console.log("Successfully added 'details' column to media table");
+        }
+
+        // 如果缺少fileHash列，添加它
+        if (!hasFileHashColumn) {
+          console.log("Adding missing 'fileHash' column to media table...");
+          this.db.exec("ALTER TABLE media ADD COLUMN fileHash TEXT");
+          console.log("Successfully added 'fileHash' column to media table");
         }
       } catch (alterError) {
         console.error("Error checking or adding columns:", alterError);
@@ -86,7 +94,7 @@ export class MediaDatabase {
         // 更新现有媒体项
         this.db.prepare(`
           UPDATE media
-          SET title = ?, year = ?, type = ?, path = ?, fullPath = ?, rating = ?, details = ?, lastUpdated = ?
+          SET title = ?, year = ?, type = ?, path = ?, fullPath = ?, rating = ?, details = ?, fileHash = ?, lastUpdated = ?
           WHERE id = ?
         `).run(
           media.title, 
@@ -96,14 +104,15 @@ export class MediaDatabase {
           media.fullPath || "", 
           media.rating || "",
           media.details || "",
+          media.fileHash || "",
           new Date().toISOString(), 
           media.id
         )
       } else {
         // 插入新媒体项
         this.db.prepare(`
-          INSERT INTO media (id, title, year, type, path, fullPath, posterPath, rating, details, dateAdded, lastUpdated)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO media (id, title, year, type, path, fullPath, posterPath, rating, details, fileHash, dateAdded, lastUpdated)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           media.id,
           media.title,
@@ -114,6 +123,7 @@ export class MediaDatabase {
           media.posterPath || "",
           media.rating || "",
           media.details || "",
+          media.fileHash || "",
           media.dateAdded || new Date().toISOString(),
           media.lastUpdated || new Date().toISOString()
         )
@@ -570,6 +580,188 @@ export class MediaDatabase {
       return null
     } catch (error) {
       console.error("Failed to get TMDB API key:", error)
+      throw error
+    }
+  }
+
+  // 文件Hash相关方法
+
+  // 通过文件Hash查找媒体
+  public async getMediaByFileHash(fileHash: string): Promise<Media | null> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`Searching for media with file hash: ${fileHash}`)
+      
+      const media = this.db.prepare(`
+        SELECT * FROM media WHERE fileHash = ?
+      `).get(fileHash) as Media | undefined
+      
+      if (media) {
+        console.log(`Found media by hash: ${media.title}`)
+        return media
+      } else {
+        console.log(`No media found with hash: ${fileHash}`)
+        return null
+      }
+    } catch (error) {
+      console.error(`Error searching media by hash ${fileHash}:`, error)
+      throw error
+    }
+  }
+
+  // 获取所有已知的文件Hash
+  public async getAllFileHashes(): Promise<{ fileHash: string; mediaId: string; title: string }[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      const hashes = this.db.prepare(`
+        SELECT fileHash, id as mediaId, title 
+        FROM media 
+        WHERE fileHash IS NOT NULL AND fileHash != ''
+      `).all() as { fileHash: string; mediaId: string; title: string }[]
+      
+      console.log(`Retrieved ${hashes.length} file hashes from database`)
+      return hashes
+    } catch (error) {
+      console.error("Error getting all file hashes:", error)
+      throw error
+    }
+  }
+
+  // 批量查找Hash对应的媒体信息
+  public async batchGetMediaByHashes(hashes: string[]): Promise<Map<string, Media>> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    const result = new Map<string, Media>()
+
+    try {
+      for (const hash of hashes) {
+        const media = await this.getMediaByFileHash(hash)
+        if (media) {
+          result.set(hash, media)
+        }
+      }
+
+      console.log(`Batch hash lookup: found ${result.size}/${hashes.length} matches`)
+      return result
+    } catch (error) {
+      console.error("Error in batch hash lookup:", error)
+      throw error
+    }
+  }
+
+  // 更新媒体项的文件Hash
+  public async updateMediaFileHash(mediaId: string, fileHash: string): Promise<void> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      console.log(`Updating file hash for media ${mediaId}: ${fileHash}`)
+      
+      const updateResult = this.db.prepare(`
+        UPDATE media
+        SET fileHash = ?, lastUpdated = ?
+        WHERE id = ?
+      `).run(fileHash, new Date().toISOString(), mediaId)
+      
+      if (updateResult.changes === 0) {
+        throw new Error(`Media with ID ${mediaId} not found`)
+      }
+      
+      console.log(`Successfully updated file hash for media ${mediaId}`)
+    } catch (error) {
+      console.error(`Error updating file hash for ${mediaId}:`, error)
+      throw error
+    }
+  }
+
+  // 查找重复的文件Hash（可能的重复文件）
+  public async findDuplicateHashes(): Promise<{ fileHash: string; medias: Media[] }[]> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      // 找出有重复hash的文件
+      const duplicateHashes = this.db.prepare(`
+        SELECT fileHash, COUNT(*) as count
+        FROM media 
+        WHERE fileHash IS NOT NULL AND fileHash != ''
+        GROUP BY fileHash
+        HAVING COUNT(*) > 1
+      `).all() as { fileHash: string; count: number }[]
+
+      const result: { fileHash: string; medias: Media[] }[] = []
+
+      for (const dup of duplicateHashes) {
+        const medias = this.db.prepare(`
+          SELECT * FROM media WHERE fileHash = ?
+        `).all(dup.fileHash) as Media[]
+
+        result.push({
+          fileHash: dup.fileHash,
+          medias
+        })
+      }
+
+      console.log(`Found ${result.length} duplicate file hashes`)
+      return result
+    } catch (error) {
+      console.error("Error finding duplicate hashes:", error)
+      throw error
+    }
+  }
+
+  // 获取数据库统计信息
+  public async getDatabaseStats(): Promise<{
+    totalMedia: number
+    moviesCount: number
+    tvShowsCount: number
+    unknownCount: number
+    withHashCount: number
+    withoutHashCount: number
+    duplicateHashCount: number
+  }> {
+    if (!this.db) {
+      throw new Error("Database not initialized")
+    }
+
+    try {
+      const totalMedia = this.db.prepare("SELECT COUNT(*) as count FROM media").get() as { count: number }
+      const moviesCount = this.db.prepare("SELECT COUNT(*) as count FROM media WHERE type = 'movie'").get() as { count: number }
+      const tvShowsCount = this.db.prepare("SELECT COUNT(*) as count FROM media WHERE type = 'tv'").get() as { count: number }
+      const unknownCount = this.db.prepare("SELECT COUNT(*) as count FROM media WHERE type = 'unknown'").get() as { count: number }
+      const withHashCount = this.db.prepare("SELECT COUNT(*) as count FROM media WHERE fileHash IS NOT NULL AND fileHash != ''").get() as { count: number }
+      const withoutHashCount = this.db.prepare("SELECT COUNT(*) as count FROM media WHERE fileHash IS NULL OR fileHash = ''").get() as { count: number }
+      
+      const duplicateHashRows = this.db.prepare(`
+        SELECT COUNT(*) as count FROM (
+          SELECT fileHash FROM media 
+          WHERE fileHash IS NOT NULL AND fileHash != ''
+          GROUP BY fileHash 
+          HAVING COUNT(*) > 1
+        )
+      `).get() as { count: number }
+
+      return {
+        totalMedia: totalMedia.count,
+        moviesCount: moviesCount.count,
+        tvShowsCount: tvShowsCount.count,
+        unknownCount: unknownCount.count,
+        withHashCount: withHashCount.count,
+        withoutHashCount: withoutHashCount.count,
+        duplicateHashCount: duplicateHashRows.count
+      }
+    } catch (error) {
+      console.error("Error getting database stats:", error)
       throw error
     }
   }

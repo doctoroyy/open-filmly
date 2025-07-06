@@ -504,12 +504,13 @@ export default function ConfigPage() {
               <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center mb-4">
                 <Check className="h-6 w-6 text-white" />
               </div>
-              <p className="text-center mb-2">服务器连接已配置完成</p>
+              <p className="text-center mb-2">🎉 配置完成！自动扫描已启动</p>
               <p className="text-sm text-gray-400 text-center mb-2">
-                现在您可以返回首页开始导入和浏览您的媒体内容
+                系统将自动发现和整理您的媒体文件，无需手动操作
               </p>
               <p className="text-sm text-gray-400 text-center">
-                应用程序将自动扫描共享中的媒体文件并根据文件特征将其分类为电影、电视剧或未知类型
+                ✨ 右上角的状态图标显示扫描进度<br/>
+                📽️ 扫描完成后媒体将自动分类显示
               </p>
             </CardContent>
             <CardFooter>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react"
-import { Settings, RefreshCw, Search, FolderOpen, Home, Clock, Film, Tv, FolderHeart, ListChecks } from "lucide-react"
+import { Settings, Search, FolderOpen, Home, Clock, Film, Tv, FolderHeart, ListChecks } from "lucide-react"
 import { MediaCard } from "@/components/media-card"
 import { LoadingGrid } from "@/components/loading-grid"
 import { Button } from "@/components/ui/button"
@@ -9,13 +9,13 @@ import { Link } from "react-router-dom"
 import type { Media } from "@/types/media"
 import { getTrendingMovies, getTrendingTVShows, mapTMDBToMedia } from "@/lib/api"
 import { SMBFileBrowser } from "@/components/ui/smb-file-browser"
+import { AutoScanStatus } from "@/components/auto-scan-status"
 
 export default function HomePage() {
   const [recentlyViewed, setRecentlyViewed] = useState<Media[]>([])
   const [movies, setMovies] = useState<Media[]>([])
   const [tvShows, setTvShows] = useState<Media[]>([])
   const [loading, setLoading] = useState(true)
-  const [scanning, setScanning] = useState(false)
   const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const { toast } = useToast()
@@ -114,79 +114,6 @@ export default function HomePage() {
     }
   }
 
-  // 扫描媒体
-  const handleScan = async (type: "movie" | "tv" | "all") => {
-    if (!window.electronAPI) {
-      toast({
-        title: "功能不可用",
-        description: "扫描功能需要在桌面应用中使用",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    setScanning(true)
-    try {
-      let scanType = type;
-      let scanTypeText = type === "movie" ? "电影" : type === "tv" ? "电视剧" : "所有媒体";
-      
-      console.log(`开始扫描${scanTypeText}...`)
-      // 传递 false 作为第二个参数，强制重新扫描而不使用缓存
-      const result = await window.electronAPI?.scanMedia(scanType, false)
-      console.log(`扫描结果:`, result)
-
-      if (result?.success) {
-        let description = "";
-        
-        if (type === "movie") {
-          description = `发现 ${result.count} 部电影`;
-        } else if (type === "tv") {
-          description = `发现 ${result.count} 部电视剧`;
-        } else {
-          if (result.movieCount !== undefined && result.tvCount !== undefined) {
-            description = `发现 ${result.movieCount} 部电影和 ${result.tvCount} 部电视剧`;
-          } else {
-            description = `发现 ${result.count} 个媒体文件`;
-          }
-        }
-        
-        console.log(description)
-        toast({
-          title: "扫描完成",
-          description: description,
-        })
-
-        // 重新加载媒体数据，确保UI正确更新
-        console.log("扫描完成，重新加载媒体数据...")
-        await loadLocalMedia()
-        
-        // 确保界面更新
-        if (type === "movie") {
-          console.log(`扫描后电影数量: ${movies.length}`)
-        } else if (type === "tv") {
-          console.log(`扫描后电视剧数量: ${tvShows.length}`)
-        } else {
-          console.log(`扫描后媒体数量: 电影 ${movies.length}, 电视剧 ${tvShows.length}`)
-        }
-      } else {
-        console.error("扫描失败:", result?.error)
-        toast({
-          title: "扫描失败",
-          description: result?.error || "未知错误",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error(`Failed to scan ${type}:`, error)
-      toast({
-        title: "扫描失败",
-        description: "发生错误，无法扫描媒体",
-        variant: "destructive",
-      })
-    } finally {
-      setScanning(false)
-    }
-  }
 
   // 处理关闭文件浏览器
   const handleCloseFileBrowser = () => {
@@ -213,6 +140,20 @@ export default function HomePage() {
   const openFileBrowser = () => {
     setShowFileBrowser(true);
   }
+
+  // 监听扫描完成事件，重新加载数据
+  useEffect(() => {
+    const handleScanCompleted = () => {
+      console.log('Scan completed event received, reloading media data...')
+      loadLocalMedia()
+    }
+
+    window.addEventListener('scan-completed', handleScanCompleted)
+
+    return () => {
+      window.removeEventListener('scan-completed', handleScanCompleted)
+    }
+  }, [])
 
   // 初始加载 - 组件挂载时执行一次
   useEffect(() => {
@@ -396,6 +337,7 @@ export default function HomePage() {
                   <FolderOpen className="h-5 w-5" />
                   <span className="sr-only">浏览文件</span>
                 </Button>
+                <AutoScanStatus />
                 <Link to="/config">
                   <Button variant="outline" size="icon" className="border-input text-foreground hover:text-foreground">
                     <Settings className="h-5 w-5" />
@@ -409,17 +351,11 @@ export default function HomePage() {
             <section className="mb-12">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">最近观看 &rarr;</h3>
-                <div className="flex items-center gap-4">
-                  {recentlyViewed.length > 0 && !loading && (
-                    <div className="text-sm text-muted-foreground">
-                      显示 {recentlyViewed.length} 个最近项目
-                    </div>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => handleScan("all")} disabled={scanning} className="border-input text-foreground hover:text-foreground">
-                    <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-                    全局扫描
-                  </Button>
-                </div>
+                {recentlyViewed.length > 0 && !loading && (
+                  <div className="text-sm text-muted-foreground">
+                    显示 {recentlyViewed.length} 个最近项目
+                  </div>
+                )}
               </div>
 
               {loading ? (
@@ -433,6 +369,7 @@ export default function HomePage() {
               ) : (
                 <div className="p-8 text-center text-muted-foreground">
                   <p>暂无最近观看的媒体</p>
+                  <p className="text-sm mt-2">配置SMB连接后将自动扫描和显示媒体文件</p>
                 </div>
               )}
             </section>
@@ -440,18 +377,14 @@ export default function HomePage() {
             {/* 电影 */}
             <section className="mb-12">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold">电影 &rarr;</h3>
-                <div className="flex items-center gap-4">
-                  {movies.length > 0 && !loading && (
-                    <div className="text-sm text-muted-foreground">
-                      显示 {movies.length} 部电影
-                    </div>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => handleScan("movie")} disabled={scanning} className="border-input text-foreground hover:text-foreground">
-                    <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-                    扫描
-                  </Button>
-                </div>
+                <Link to="/movies" className="flex items-center hover:text-blue-600 transition-colors">
+                  <h3 className="text-xl font-semibold">电影 &rarr;</h3>
+                </Link>
+                {movies.length > 0 && !loading && (
+                  <div className="text-sm text-muted-foreground">
+                    显示 {movies.length} 部电影
+                  </div>
+                )}
               </div>
 
               {loading ? (
@@ -464,7 +397,8 @@ export default function HomePage() {
                 </div>
               ) : (
                 <div className="p-8 text-center text-muted-foreground">
-                  <p>暂无电影，请使用"扫描"按钮添加电影</p>
+                  <p>暂无电影</p>
+                  <p className="text-sm mt-2">配置SMB连接后将自动发现和添加电影</p>
                 </div>
               )}
             </section>
@@ -472,18 +406,14 @@ export default function HomePage() {
             {/* 电视剧 */}
             <section>
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xl font-semibold">电视剧 &rarr;</h3>
-                <div className="flex items-center gap-4">
-                  {tvShows.length > 0 && !loading && (
-                    <div className="text-sm text-muted-foreground">
-                      显示 {tvShows.length} 部电视剧
-                    </div>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => handleScan("tv")} disabled={scanning} className="border-input text-foreground hover:text-foreground">
-                    <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-                    扫描
-                  </Button>
-                </div>
+                <Link to="/tv" className="flex items-center hover:text-blue-600 transition-colors">
+                  <h3 className="text-xl font-semibold">电视剧 &rarr;</h3>
+                </Link>
+                {tvShows.length > 0 && !loading && (
+                  <div className="text-sm text-muted-foreground">
+                    显示 {tvShows.length} 部电视剧
+                  </div>
+                )}
               </div>
 
               {loading ? (
@@ -496,7 +426,8 @@ export default function HomePage() {
                 </div>
               ) : (
                 <div className="p-8 text-center text-muted-foreground">
-                  <p>暂无电视剧，请使用"扫描"按钮添加电视剧</p>
+                  <p>暂无电视剧</p>
+                  <p className="text-sm mt-2">配置SMB连接后将自动发现和添加电视剧</p>
                 </div>
               )}
             </section>

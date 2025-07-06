@@ -80,6 +80,68 @@ export interface ElectronAPI {
   // 文件系统相关 - 使用FileSystemChannels
   selectFolder: () => Promise<{ canceled: boolean; filePaths?: string[] }>;
 
+  // 自动扫描相关 - 使用TaskChannels
+  startAutoScan: (options?: { force?: boolean }) => Promise<{ 
+    success: boolean; 
+    started?: boolean; 
+    message?: string; 
+    error?: string 
+  }>;
+  stopAutoScan: () => Promise<{ 
+    success: boolean; 
+    stopped?: boolean; 
+    error?: string 
+  }>;
+  getScanStatus: () => Promise<{ 
+    success: boolean; 
+    data?: {
+      isScanning: boolean;
+      currentPhase?: string;
+      totalFiles?: number;
+      processedFiles?: number;
+      currentFile?: string;
+      startTime?: string;
+      errors?: string[];
+      scanProgress?: {
+        phase: string;
+        current: number;
+        total: number;
+        currentItem?: string;
+      };
+      scrapeProgress?: {
+        phase: string;
+        current: number;
+        total: number;
+        currentItem?: string;
+      };
+    };
+    error?: string 
+  }>;
+  getScanProgress: () => Promise<{ 
+    success: boolean; 
+    data?: {
+      scanProgress: {
+        phase: string;
+        current: number;
+        total: number;
+        currentItem?: string;
+      };
+      scrapeProgress?: {
+        phase: string;
+        current: number;
+        total: number;
+        currentItem?: string;
+      };
+    };
+    error?: string 
+  }>;
+
+  // 扫描事件监听器
+  onScanProgressUpdate?: (callback: (data: any) => void) => void;
+  onScanCompleted?: (callback: (data: any) => void) => void;
+  onScanError?: (callback: (data: any) => void) => void;
+  removeAllListeners?: (eventType: string) => void;
+
   // 高级API访问（用于调试和扩展）
   _client?: any; // IPCClient类型，用于直接IPC调用
   _api?: any;    // ElectronAPI类型，用于组织化的API访问

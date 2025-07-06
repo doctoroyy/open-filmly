@@ -35,6 +35,7 @@ export interface Media {
   backdropPath?: string
   releaseDate?: string
   genres?: string[]
+  fileHash?: string
 }
 
 export interface DataSource {

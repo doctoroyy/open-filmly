@@ -7,9 +7,9 @@ import { dialog } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { MediaDatabase } from './media-database'
-import { MediaScanner } from './media-scanner'
 import { MediaPlayer } from './media-player'
 import { MetadataScraper } from './metadata-scraper'
+import { AutoScanManager } from './auto-scan-manager'
 import { SambaClient } from './smb-client'
 import { MediaProxyServer } from './media-proxy-server'
 import { registerIPCHandler } from './ipc-handler'
@@ -21,18 +21,18 @@ import { IPCChannels } from './ipc-channels'
  */
 export function initializeIPCHandlers(services: {
   mediaDatabase: MediaDatabase
-  mediaScanner: MediaScanner
   mediaPlayer: MediaPlayer
   metadataScraper: MetadataScraper
+  autoScanManager: AutoScanManager
   sambaClient: SambaClient
   mediaProxyServer: MediaProxyServer
   mainWindow: Electron.BrowserWindow | null
 }) {
   const {
     mediaDatabase,
-    mediaScanner,
     mediaPlayer,
     metadataScraper,
+    autoScanManager,
     sambaClient,
     mediaProxyServer,
     mainWindow
@@ -48,14 +48,27 @@ export function initializeIPCHandlers(services: {
       await mediaDatabase.saveConfig(config)
       sambaClient.configure(config)
       
-      // 设置媒体扫描器的共享路径
+      // 设置自动扫描管理器的共享路径
       if (config.sharePath) {
-        mediaScanner.setSharePath(config.sharePath)
+        autoScanManager.setSharePath(config.sharePath)
       }
       
       // 设置选定的文件夹列表（如果有）
       if (config.selectedFolders && config.selectedFolders.length > 0) {
-        mediaScanner.setSelectedFolders(config.selectedFolders)
+        autoScanManager.setSelectedFolders(config.selectedFolders)
+      }
+      
+      // 如果配置完整（有IP和共享路径），自动触发扫描
+      if (config.ip && config.ip.trim() !== "" && 
+          config.sharePath && config.sharePath.trim() !== "") {
+        console.log("[SAVE_CONFIG] Configuration complete, triggering auto scan...")
+        
+        // 异步触发自动扫描（不等待完成）
+        autoScanManager.startAutoScan().then((result) => {
+          console.log("[SAVE_CONFIG] Auto scan started:", result)
+        }).catch((error) => {
+          console.error("[SAVE_CONFIG] Failed to start auto scan:", error)
+        })
       }
       
       return { success: true }
@@ -382,10 +395,10 @@ export function initializeIPCHandlers(services: {
         }
       }
       
-      // 确认共享路径和选定文件夹的设置已更新到mediaSanner
-      mediaScanner.setSharePath(config.sharePath)
+      // 确认AutoScanManager已正确配置
+      autoScanManager.setSharePath(config.sharePath)
       if (config.selectedFolders && config.selectedFolders.length > 0) {
-        mediaScanner.setSelectedFolders(config.selectedFolders)
+        autoScanManager.setSelectedFolders(config.selectedFolders)
       }
       
       let result = { count: 0, movies: 0, tvShows: 0 }
@@ -439,22 +452,35 @@ export function initializeIPCHandlers(services: {
         console.log("Cache disabled, performing full scan")
       }
       
-      if (type === "movie" || type === "tv") {
-        // 扫描指定类型的媒体
-        const { movies, tvShows, total } = await mediaScanner.scanAllMedia(type as "movie" | "tv")
-        result = { 
-          count: total, 
-          movies: movies.length, 
-          tvShows: tvShows.length 
+      // 使用新的自动扫描管理器进行扫描
+      console.log("Starting manual scan using AutoScanManager...")
+      const scanResult = await autoScanManager.startAutoScan(true) // force=true for manual scans
+      
+      if (!scanResult.started) {
+        throw new Error(scanResult.message || "Failed to start scan")
+      }
+      
+      // 等待扫描完成（简化版，实际应用中可以通过事件监听）
+      await new Promise(resolve => {
+        const checkComplete = () => {
+          const status = autoScanManager.getStatus()
+          if (!status.isScanning) {
+            resolve(true)
+          } else {
+            setTimeout(checkComplete, 1000)
+          }
         }
-      } else {
-        // 扫描所有媒体
-        const { movies, tvShows, total } = await mediaScanner.scanAllMedia()
-        result = { 
-          count: total,
-          movies: movies.length,
-          tvShows: tvShows.length
-        }
+        setTimeout(checkComplete, 1000)
+      })
+      
+      // 获取扫描结果
+      const movies = await mediaDatabase.getMediaByType("movie")
+      const tvShows = await mediaDatabase.getMediaByType("tv")
+      
+      result = {
+        count: movies.length + tvShows.length,
+        movies: movies.length,
+        tvShows: tvShows.length
       }
       
       // 完成后重新返回所有媒体数据，以便更新UI
@@ -664,8 +690,8 @@ export function initializeIPCHandlers(services: {
       if (!metadataScraper.hasTmdbApiKey()) {
         console.error("No TMDB API key available for metadata scraper")
       }
-      const results = await metadataScraper.fetchAllMetadata(mediaIds)
-      const successCount = Object.values(results).filter(r => r !== null).length
+      const results = await metadataScraper.batchScrapeMetadata(mediaIds)
+      const successCount = results.filter(r => r.success).length
       console.log(`Finished fetching metadata. Success: ${successCount}/${mediaIds.length}`)
       return { success: true, data: { results } }
     } catch (error: unknown) {
@@ -718,6 +744,106 @@ export function initializeIPCHandlers(services: {
           reason: error instanceof Error ? error.message : 'Unknown error checking MPV availability'
         }
       }
+    }
+  })
+
+  // 自动扫描相关处理器
+  registerIPCHandler(IPCChannels.START_AUTO_SCAN, async (_, options) => {
+    try {
+      const { force = false } = options || {}
+      console.log(`[AUTO_SCAN] Starting auto scan (force: ${force})`)
+      
+      const result = await autoScanManager.startAutoScan(force)
+      return { 
+        success: true, 
+        data: result
+      }
+    } catch (error: unknown) {
+      console.error("[AUTO_SCAN] Failed to start auto scan:", error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  registerIPCHandler(IPCChannels.STOP_AUTO_SCAN, async () => {
+    try {
+      console.log(`[AUTO_SCAN] Stopping auto scan`)
+      
+      const result = await autoScanManager.stopAutoScan()
+      return { 
+        success: true, 
+        data: result
+      }
+    } catch (error: unknown) {
+      console.error("[AUTO_SCAN] Failed to stop auto scan:", error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  registerIPCHandler(IPCChannels.GET_SCAN_STATUS, async () => {
+    try {
+      const status = autoScanManager.getStatus()
+      return { 
+        success: true, 
+        data: status
+      }
+    } catch (error: unknown) {
+      console.error("[AUTO_SCAN] Failed to get scan status:", error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  registerIPCHandler(IPCChannels.GET_SCAN_PROGRESS, async () => {
+    try {
+      const status = autoScanManager.getStatus()
+      return { 
+        success: true, 
+        data: {
+          scanProgress: status.scanProgress || {
+            phase: 'idle',
+            current: 0,
+            total: 0
+          },
+          scrapeProgress: status.scrapeProgress || {
+            phase: 'idle',
+            current: 0,
+            total: 0
+          }
+        }
+      }
+    } catch (error: unknown) {
+      console.error("[AUTO_SCAN] Failed to get scan progress:", error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  // 设置自动扫描管理器的事件监听器来推送状态更新到前端
+  autoScanManager.on('status:update', (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPCChannels.SCAN_PROGRESS_UPDATE, status)
+    }
+  })
+
+  autoScanManager.on('scan:completed', (result) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPCChannels.SCAN_COMPLETED, result)
+    }
+  })
+
+  autoScanManager.on('scan:error', (error) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPCChannels.SCAN_ERROR, error)
     }
   })
 

@@ -1,9 +1,10 @@
 import path from "path"
 import { app, BrowserWindow, dialog, protocol } from "electron"
 import { MediaDatabase } from "./media-database"
-import { MediaScanner } from "./media-scanner"
 import { MediaPlayer } from "./media-player"
 import { MetadataScraper } from "./metadata-scraper"
+import { AutoScanManager } from "./auto-scan-manager"
+import { HashService } from "./hash-service"
 import * as fs from "fs"
 import { SambaClient } from "./smb-client"
 import { MediaProxyServer } from "./media-proxy-server"
@@ -93,11 +94,12 @@ if (process.platform === 'darwin') {
 // 全局变量
 let mainWindow: BrowserWindow | null = null
 let sambaClient: SambaClient
-let mediaScanner: MediaScanner
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
 let mediaProxyServer: MediaProxyServer
+let autoScanManager: AutoScanManager
+let hashService: HashService
 let productionServer: any = null
 
 // 创建主窗口
@@ -228,10 +230,16 @@ async function initializeApp() {
       }
     }
 
-    metadataScraper = new MetadataScraper(mediaDatabase, tmdbApiKey || undefined)
+    // 设置Gemini API密钥
+    const geminiApiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
     
-    // 初始化媒体扫描器，并传入海报抓取器
-    mediaScanner = new MediaScanner(sambaClient, mediaDatabase, metadataScraper)
+    metadataScraper = new MetadataScraper(mediaDatabase, tmdbApiKey || undefined, geminiApiKey)
+    
+    // 初始化自动扫描管理器
+    autoScanManager = new AutoScanManager(sambaClient, mediaDatabase, metadataScraper)
+
+    // 初始化Hash服务
+    hashService = new HashService(mediaDatabase)
 
     // 初始化媒体播放器
     mediaPlayer = new MediaPlayer()
@@ -252,10 +260,18 @@ async function initializeApp() {
       if (config.ip && config.ip.trim() !== "" && config.sharePath && config.sharePath.trim() !== "") {
         console.log("Configuration loaded, applying to Samba client")
         sambaClient.configure(config)
-        // 设置媒体扫描器的共享路径
+        // 设置自动扫描管理器的共享路径
         if (config.sharePath) {
-          mediaScanner.setSharePath(config.sharePath)
+          autoScanManager.setSharePath(config.sharePath)
         }
+        
+        // 设置自动扫描管理器的选定文件夹
+        if (config.selectedFolders) {
+          autoScanManager.setSelectedFolders(config.selectedFolders)
+        }
+        
+        // 设置Hash服务
+        autoScanManager.setHashService(hashService)
       } else {
         console.log("Incomplete configuration found, waiting for user to configure")
       }
@@ -273,11 +289,11 @@ async function initializeIPCHandlers() {
   
   initializeIPCHandlers({
     mediaDatabase,
-    mediaScanner,
     mediaPlayer,
     metadataScraper,
     sambaClient,
     mediaProxyServer,
+    autoScanManager,
     mainWindow
   })
 }

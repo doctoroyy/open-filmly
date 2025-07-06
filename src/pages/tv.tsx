@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, Search, RefreshCw } from "lucide-react"
+import { ArrowLeft, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { MediaCard } from "@/components/media-card"
@@ -12,7 +12,6 @@ export default function TVPage() {
   const navigate = useNavigate()
   const [tvShows, setTvShows] = useState<Media[]>([])
   const [loading, setLoading] = useState(true)
-  const [scanning, setScanning] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const { toast } = useToast()
 
@@ -63,40 +62,6 @@ export default function TVPage() {
     }
   }
 
-  // Handle scanning
-  const handleScan = async () => {
-    setScanning(true)
-    try {
-      console.log("扫描所有媒体...")
-      const result = await window.electronAPI?.scanMedia("all", false)
-      console.log("扫描结果:", result)
-
-      if (result?.success) {
-        let description = `发现 ${result.movieCount} 部电影和 ${result.tvCount} 部电视剧`
-        toast({
-          title: "扫描完成",
-          description: description,
-        })
-        await loadTVShows()
-      } else {
-        console.error("扫描失败:", result?.error)
-        toast({
-          title: "扫描失败",
-          description: result?.error || "未知错误",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Failed to scan media:", error)
-      toast({
-        title: "扫描失败",
-        description: "发生错误，无法扫描媒体",
-        variant: "destructive",
-      })
-    } finally {
-      setScanning(false)
-    }
-  }
 
   // Filter TV shows based on search term
   const filteredTVShows = searchTerm 
@@ -121,22 +86,15 @@ export default function TVPage() {
             <h1 className="text-2xl font-bold">电视剧库</h1>
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <Input 
-                type="search"
-                placeholder="搜索电视剧..."
-                className="pl-10 w-64"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            </div>
-            
-            <Button onClick={handleScan} disabled={scanning}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-              扫描媒体
-            </Button>
+          <div className="relative">
+            <Input 
+              type="search"
+              placeholder="搜索电视剧..."
+              className="pl-10 w-64"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           </div>
         </div>
         
@@ -156,17 +114,11 @@ export default function TVPage() {
         ) : (
           <div className="py-12 text-center">
             <p className="text-lg text-muted-foreground mb-4">没有找到电视剧</p>
-            <p className="text-sm text-muted-foreground mb-6">
+            <p className="text-sm text-muted-foreground">
               {searchTerm 
                 ? "请尝试不同的搜索关键词" 
-                : "点击扫描媒体按钮以扫描并添加电视剧"}
+                : "配置SMB连接后系统将自动发现和添加电视剧"}
             </p>
-            {!searchTerm && (
-              <Button onClick={handleScan} disabled={scanning}>
-                <RefreshCw className={`h-4 w-4 mr-2 ${scanning ? "animate-spin" : ""}`} />
-                扫描媒体
-              </Button>
-            )}
           </div>
         )}
       </div>

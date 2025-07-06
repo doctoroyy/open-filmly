@@ -105,7 +105,10 @@ export default function MediaListPage() {
       console.log("扫描结果:", result)
 
       if (result?.success) {
-        let description = `发现 ${result.movieCount} 部电影和 ${result.tvCount} 部电视剧`
+        // 计算实际的电影和电视剧数量
+        const movies = await window.electronAPI?.getMedia("movie") || []
+        const tvShows = await window.electronAPI?.getMedia("tv") || []
+        let description = `发现 ${movies.length} 部电影和 ${tvShows.length} 部电视剧`
         toast({
           title: "扫描完成",
           description: description,

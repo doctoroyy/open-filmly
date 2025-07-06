@@ -10,6 +10,9 @@ export const ConfigChannels = {
   GET_TMDB_API_KEY: 'config:tmdb-api-key:get',
   SET_TMDB_API_KEY: 'config:tmdb-api-key:set',
   CHECK_TMDB_API: 'config:tmdb-api:check',
+  GET_GEMINI_API_KEY: 'config:gemini-api-key:get',
+  SET_GEMINI_API_KEY: 'config:gemini-api-key:set',
+  CHECK_GEMINI_API: 'config:gemini-api:check',
 } as const
 
 // 服务器连接相关的IPC通道
@@ -38,11 +41,33 @@ export const MediaChannels = {
 // 海报/元数据相关的IPC通道
 export const MetadataChannels = {
   FETCH_POSTERS: 'metadata:posters:fetch',
+  INTELLIGENT_RECOGNIZE: 'metadata:intelligent:recognize',
+  INTELLIGENT_BATCH_RECOGNIZE: 'metadata:intelligent:batch-recognize',
 } as const
 
 // 文件系统相关的IPC通道
 export const FileSystemChannels = {
   SELECT_FOLDER: 'filesystem:folder:select',
+} as const
+
+// 任务和进度相关的IPC通道
+export const TaskChannels = {
+  START_AUTO_SCAN: 'task:auto-scan:start',
+  STOP_AUTO_SCAN: 'task:auto-scan:stop',
+  GET_SCAN_STATUS: 'task:scan:status:get',
+  GET_SCAN_PROGRESS: 'task:scan:progress:get',
+  
+  // 进度推送事件
+  SCAN_PROGRESS_UPDATE: 'task:scan:progress:update',
+  SCAN_PHASE_UPDATE: 'task:scan:phase:update',
+  SCAN_COMPLETED: 'task:scan:completed',
+  SCAN_ERROR: 'task:scan:error',
+  
+  // 刮削进度
+  SCRAPE_PROGRESS_UPDATE: 'task:scrape:progress:update',
+  SCRAPE_ITEM_UPDATE: 'task:scrape:item:update',
+  SCRAPE_COMPLETED: 'task:scrape:completed',
+  SCRAPE_ERROR: 'task:scrape:error',
 } as const
 
 // 所有IPC通道的联合类型
@@ -52,6 +77,7 @@ export const IPCChannels = {
   ...MediaChannels,
   ...MetadataChannels,
   ...FileSystemChannels,
+  ...TaskChannels,
 } as const
 
 // 类型定义
@@ -89,6 +115,18 @@ export interface ConfigTypes {
     response: IPCResponse<void>
   }
   [ConfigChannels.CHECK_TMDB_API]: {
+    request: void
+    response: IPCResponse<{ hasApiKey: boolean }>
+  }
+  [ConfigChannels.GET_GEMINI_API_KEY]: {
+    request: void
+    response: IPCResponse<{ apiKey: string }>
+  }
+  [ConfigChannels.SET_GEMINI_API_KEY]: {
+    request: string
+    response: IPCResponse<void>
+  }
+  [ConfigChannels.CHECK_GEMINI_API]: {
     request: void
     response: IPCResponse<{ hasApiKey: boolean }>
   }
@@ -170,6 +208,32 @@ export interface MetadataTypes {
     request: string[]
     response: IPCResponse<{ results: any }>
   }
+  [MetadataChannels.INTELLIGENT_RECOGNIZE]: {
+    request: { filename: string; filePath?: string }
+    response: IPCResponse<{
+      originalTitle: string
+      cleanTitle: string
+      mediaType: 'movie' | 'tv' | 'unknown'
+      year?: string
+      confidence: number
+      enrichedContext?: string
+      alternativeNames?: string[]
+    }>
+  }
+  [MetadataChannels.INTELLIGENT_BATCH_RECOGNIZE]: {
+    request: { filenames: string[]; filePaths?: string[] }
+    response: IPCResponse<{
+      results: Array<{
+        originalTitle: string
+        cleanTitle: string
+        mediaType: 'movie' | 'tv' | 'unknown'
+        year?: string
+        confidence: number
+        enrichedContext?: string
+        alternativeNames?: string[]
+      }>
+    }>
+  }
 }
 
 export interface FileSystemTypes {
@@ -179,5 +243,45 @@ export interface FileSystemTypes {
   }
 }
 
+export interface TaskTypes {
+  [TaskChannels.START_AUTO_SCAN]: {
+    request: { force?: boolean }
+    response: IPCResponse<{ started: boolean; message?: string }>
+  }
+  [TaskChannels.STOP_AUTO_SCAN]: {
+    request: void
+    response: IPCResponse<{ stopped: boolean }>
+  }
+  [TaskChannels.GET_SCAN_STATUS]: {
+    request: void
+    response: IPCResponse<{
+      isScanning: boolean
+      currentPhase?: string
+      totalFiles?: number
+      processedFiles?: number
+      currentFile?: string
+      startTime?: string
+      errors?: string[]
+    }>
+  }
+  [TaskChannels.GET_SCAN_PROGRESS]: {
+    request: void
+    response: IPCResponse<{
+      scanProgress: {
+        phase: string
+        current: number
+        total: number
+        currentItem?: string
+      }
+      scrapeProgress?: {
+        phase: string
+        current: number
+        total: number
+        currentItem?: string
+      }
+    }>
+  }
+}
+
 // 所有API类型的联合
-export type AllIPCTypes = ConfigTypes & ServerTypes & MediaTypes & MetadataTypes & FileSystemTypes
+export type AllIPCTypes = ConfigTypes & ServerTypes & MediaTypes & MetadataTypes & FileSystemTypes & TaskTypes
