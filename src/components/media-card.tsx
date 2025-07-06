@@ -99,6 +99,11 @@ export function MediaCard({ media }: MediaCardProps) {
       return `/placeholder.svg?height=450&width=300&text=${encodeURIComponent(media.title)}`
     }
 
+    // 如果是TMDB URL，直接返回
+    if (media.posterPath.startsWith('https://image.tmdb.org/')) {
+      return media.posterPath
+    }
+
     // 如果是本地文件路径
     if (media.posterPath.startsWith("/") || media.posterPath.includes(":\\") || media.posterPath.startsWith("\\")) {
       // 确保路径格式正确
@@ -124,52 +129,57 @@ export function MediaCard({ media }: MediaCardProps) {
     : null;
 
   return (
-    <div
-      className="relative aspect-[2/3] rounded-lg overflow-hidden group cursor-pointer transition-transform duration-200 hover:scale-105"
-      onMouseEnter={() => setIsHovering(true)}
-      onMouseLeave={() => setIsHovering(false)}
-      onClick={handleCardClick}
-    >
-      <img
-        src={getPosterPath() || "/placeholder.svg"}
-        alt={media.title}
-        className="w-full h-full object-cover"
-        onError={() => setImageError(true)}
-      />
-
+    <div className="group cursor-pointer transition-transform duration-200 hover:scale-105">
       <div
-        className={cn(
-          "absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex flex-col justify-end",
-          isHovering ? "opacity-100" : "opacity-0 sm:opacity-0 md:group-hover:opacity-100",
-        )}
-        style={{ transition: "opacity 0.3s ease" }}
+        className="relative aspect-[2/3] rounded-xl overflow-hidden shadow-lg"
+        onMouseEnter={() => setIsHovering(true)}
+        onMouseLeave={() => setIsHovering(false)}
+        onClick={handleCardClick}
       >
-        <h3 className="text-white font-medium line-clamp-2">{media.title}</h3>
-        <div className="flex items-center">
-          <p className="text-gray-300 text-sm">{media.year}</p>
-          {media.type === 'tv' && media.episodeCount && (
-            <div className="ml-2 flex items-center text-xs text-gray-300">
-              <Tv className="w-3 h-3 mr-1" />
-              <span>{media.episodeCount} 集</span>
-            </div>
-          )}
-        </div>
+        <img
+          src={getPosterPath() || "/placeholder.svg"}
+          alt={media.title}
+          className="w-full h-full object-cover"
+          onError={() => setImageError(true)}
+        />
 
-        <div 
-          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"
-          onClick={handlePlay}
+        {/* Hover overlay with play button */}
+        <div
+          className={cn(
+            "absolute inset-0 bg-black/40 flex items-center justify-center",
+            isHovering ? "opacity-100" : "opacity-0",
+          )}
+          style={{ transition: "opacity 0.3s ease" }}
         >
-          <div className="bg-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30">
+          <div 
+            className="bg-white/20 backdrop-blur-sm rounded-full p-3 border border-white/30"
+            onClick={handlePlay}
+          >
             <Play className="w-8 h-8 text-white fill-white" />
           </div>
         </div>
+
+        {formattedRating && (
+          <div className="absolute top-2 right-2 bg-green-600 text-white text-xs font-bold rounded px-1.5 py-0.5 min-w-[28px] flex items-center justify-center">
+            {formattedRating}
+          </div>
+        )}
       </div>
 
-      {formattedRating && (
-        <div className="absolute top-2 right-2 bg-yellow-600 text-white text-xs font-bold rounded w-8 h-5 flex items-center justify-center">
-          {formattedRating}
+      {/* Title and year always visible below poster */}
+      <div className="mt-3 px-1">
+        <h3 className="text-base font-semibold text-foreground line-clamp-2 leading-snug mb-1" title={media.title}>
+          {media.title}
+        </h3>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">{media.year}</p>
+          {media.type === 'tv' && media.episodeCount && (
+            <div className="flex items-center text-xs text-muted-foreground bg-accent px-2 py-1 rounded-full">
+              <span>共{media.episodeCount}集</span>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   )
 }

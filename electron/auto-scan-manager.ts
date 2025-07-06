@@ -207,14 +207,19 @@ export class AutoScanManager extends EventEmitter {
 
     this.updateScanProgress('processing', 0, mediaFiles.length, 'Processing media files...')
 
+    // 按类型分组：电影和电视剧分别处理
+    const movieFiles = mediaFiles.filter(f => f.type === 'movie')
+    const tvFiles = mediaFiles.filter(f => f.type === 'tv')
+    
     const mediaItems: Media[] = []
     
-    for (let i = 0; i < mediaFiles.length; i++) {
+    // 处理电影（每个文件一个媒体项）
+    for (let i = 0; i < movieFiles.length; i++) {
       if (this.abortController?.signal.aborted) throw new Error('Scan aborted')
       
-      const mediaFile = mediaFiles[i]
+      const mediaFile = movieFiles[i]
       this.updateScanProgress('processing', i + 1, mediaFiles.length, 
-        `Processing: ${path.basename(mediaFile.name)}`)
+        `Processing movie: ${path.basename(mediaFile.name)}`)
 
       try {
         const mediaItem = await this.createMediaItem(mediaFile)
@@ -223,8 +228,31 @@ export class AutoScanManager extends EventEmitter {
           mediaItems.push(mediaItem)
         }
       } catch (error: any) {
-        console.error(`Error processing file ${mediaFile.name}:`, error)
+        console.error(`Error processing movie ${mediaFile.name}:`, error)
         this.status.errors.push(`Failed to process ${mediaFile.name}: ${error.message}`)
+      }
+    }
+    
+    // 处理电视剧（按剧集名称分组）
+    const tvShowGroups = this.groupTVFiles(tvFiles)
+    let processedCount = movieFiles.length
+    
+    for (const [showTitle, episodes] of tvShowGroups.entries()) {
+      if (this.abortController?.signal.aborted) throw new Error('Scan aborted')
+      
+      processedCount++
+      this.updateScanProgress('processing', processedCount, mediaFiles.length, 
+        `Processing TV show: ${showTitle}`)
+
+      try {
+        const tvShowItem = await this.createTVShowItem(showTitle, episodes)
+        if (tvShowItem) {
+          await this.mediaDatabase.saveMedia(tvShowItem)
+          mediaItems.push(tvShowItem)
+        }
+      } catch (error: any) {
+        console.error(`Error processing TV show ${showTitle}:`, error)
+        this.status.errors.push(`Failed to process TV show ${showTitle}: ${error.message}`)
       }
     }
 
@@ -255,6 +283,92 @@ export class AutoScanManager extends EventEmitter {
       return mediaItem
     } catch (error: any) {
       console.error(`Error creating media item for ${mediaFile.name}:`, error)
+      return null
+    }
+  }
+  
+  private groupTVFiles(tvFiles: any[]): Map<string, any[]> {
+    const groups = new Map<string, any[]>()
+    
+    for (const file of tvFiles) {
+      const { title, season, episode } = parseFileName(file.name)
+      
+      // 提取电视剧名称（去除季集信息）
+      let showTitle = title
+      
+      // 尝试从路径中提取更好的剧集名称
+      const pathParts = file.path.split(/[\\/]/)
+      for (let i = pathParts.length - 2; i >= 0; i--) {
+        const part = pathParts[i]
+        // 如果这个目录不像是季节目录，就用它作为剧集名称
+        if (!part.match(/[Ss](eason)?\s*\d+|第.*?季/i)) {
+          showTitle = part.replace(/[._]/g, ' ').trim()
+          break
+        }
+      }
+      
+      // 清理剧集名称
+      showTitle = showTitle
+        .replace(/[._]/g, ' ')
+        .replace(/\[.*?\]/g, '')
+        .replace(/【.*?】/g, '')
+        .replace(/\(.*?\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      
+      if (!groups.has(showTitle)) {
+        groups.set(showTitle, [])
+      }
+      
+      groups.get(showTitle)!.push({
+        ...file,
+        season: season || 1,
+        episode: episode || 1,
+        episodeName: title
+      })
+    }
+    
+    return groups
+  }
+  
+  private async createTVShowItem(showTitle: string, episodes: any[]): Promise<Media | null> {
+    try {
+      // 从第一集中获取基础信息
+      const firstEpisode = episodes[0]
+      const { year } = parseFileName(firstEpisode.name)
+      
+      // 计算总集数
+      const episodeCount = episodes.length
+      
+      // 创建剧集列表
+      const episodeList = episodes.map(ep => ({
+        path: ep.path,
+        name: ep.episodeName,
+        season: ep.season,
+        episode: ep.episode
+      }))
+      
+      // 生成唯一ID（基于剧集名称）
+      const showId = `tv-show-${Buffer.from(showTitle).toString('base64').slice(0, 12)}`
+      
+      const tvShowItem: Media = {
+        id: showId,
+        title: showTitle,
+        year: year || "未知",
+        type: "tv",
+        path: firstEpisode.path, // 使用第一集的路径作为代表
+        fullPath: firstEpisode.fullPath || firstEpisode.path,
+        posterPath: "",
+        dateAdded: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        episodeCount,
+        episodes: episodeList,
+        fileHash: await this.calculateFileHash(firstEpisode)
+      }
+
+      return tvShowItem
+    } catch (error: any) {
+      console.error(`Error creating TV show item for ${showTitle}:`, error)
       return null
     }
   }

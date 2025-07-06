@@ -105,7 +105,7 @@ export default function TVPage() {
             <div className="mb-4 text-sm text-muted-foreground">
               显示 {filteredTVShows.length} 部电视剧
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
               {filteredTVShows.map((show) => (
                 <MediaCard key={show.id} media={show} />
               ))}

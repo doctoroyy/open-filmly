@@ -15,10 +15,37 @@ export default function HomePage() {
   const [recentlyViewed, setRecentlyViewed] = useState<Media[]>([])
   const [movies, setMovies] = useState<Media[]>([])
   const [tvShows, setTvShows] = useState<Media[]>([])
+  const [actionMovies, setActionMovies] = useState<Media[]>([])
+  const [dramaMovies, setDramaMovies] = useState<Media[]>([])
+  const [comedyMovies, setComedyMovies] = useState<Media[]>([])
+  const [otherFiles, setOtherFiles] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [initialized, setInitialized] = useState(false)
   const { toast } = useToast()
+
+  // 分类电影到不同类型
+  const categorizeMovies = (movies: Media[]) => {
+    const action = movies.filter(movie => 
+      movie.genres?.some(genre => 
+        ['Action', 'Adventure', 'Thriller', '动作', '冒险', '惊悚'].includes(genre)
+      )
+    )
+    const drama = movies.filter(movie => 
+      movie.genres?.some(genre => 
+        ['Drama', 'Romance', 'Biography', '剧情', '爱情', '传记'].includes(genre)
+      )
+    )
+    const comedy = movies.filter(movie => 
+      movie.genres?.some(genre => 
+        ['Comedy', 'Family', 'Animation', '喜剧', '家庭', '动画'].includes(genre)
+      )
+    )
+    
+    setActionMovies(action.slice(0, 8))
+    setDramaMovies(drama.slice(0, 8))
+    setComedyMovies(comedy.slice(0, 8))
+  }
 
   // 加载本地媒体数据
   const loadLocalMedia = async () => {
@@ -26,8 +53,9 @@ export default function HomePage() {
       const movieData = await window.electronAPI?.getMedia("movie")
       const tvData = await window.electronAPI?.getMedia("tv")
       const recentData = await window.electronAPI?.getRecentlyViewed()
+      const otherData = await window.electronAPI?.getMedia("unknown")
 
-      console.log(`从数据库加载: ${movieData?.length || 0} 部电影, ${tvData?.length || 0} 部电视剧, ${recentData?.length || 0} 个最近观看`)
+      console.log(`从数据库加载: ${movieData?.length || 0} 部电影, ${tvData?.length || 0} 部电视剧, ${recentData?.length || 0} 个最近观看, ${otherData?.length || 0} 个其他文件`)
 
       // 转换媒体数据以匹配前端类型
       const convertToFrontendMedia = (media: any): Media => ({
@@ -40,6 +68,7 @@ export default function HomePage() {
         rating: media.rating ? parseFloat(media.rating) : undefined,
         dateAdded: media.dateAdded,
         lastUpdated: media.lastUpdated,
+        fileSize: media.fileSize,
         // 解析details字段（如果存在）
         ...(media.details ? JSON.parse(media.details) : {}),
         // TV show specific fields
@@ -48,7 +77,9 @@ export default function HomePage() {
       });
 
       if (movieData?.length) {
-        setMovies(movieData.map(convertToFrontendMedia))
+        const processedMovies = movieData.map(convertToFrontendMedia)
+        setMovies(processedMovies)
+        categorizeMovies(processedMovies)
         console.log(`设置了 ${movieData.length} 部电影到界面`)
       }
       if (tvData?.length) {
@@ -58,6 +89,10 @@ export default function HomePage() {
       if (recentData?.length) {
         setRecentlyViewed(recentData.map(convertToFrontendMedia))
         console.log(`设置了 ${recentData.length} 个最近观看项目到界面`)
+      }
+      if (otherData?.length) {
+        setOtherFiles(otherData)
+        console.log(`设置了 ${otherData.length} 个其他文件到界面`)
       }
     } catch (error) {
       console.error("Failed to load local media:", error)
@@ -76,6 +111,7 @@ export default function HomePage() {
       if (movies.length === 0) {
         console.log("使用在线电影数据作为备用")
         setMovies(mappedMovies)
+        categorizeMovies(mappedMovies)
       } else {
         console.log("已有本地电影数据，不使用在线数据")
       }
@@ -234,6 +270,7 @@ export default function HomePage() {
             if (!hasMovies) {
               const mappedMovies = trendingMovies.map((movie: any) => mapTMDBToMedia(movie, 'movie'))
               setMovies(mappedMovies)
+              categorizeMovies(mappedMovies)
               console.log(`使用 ${mappedMovies.length} 部在线电影数据作为备用`)
             }
             
@@ -390,8 +427,8 @@ export default function HomePage() {
               {loading ? (
                 <LoadingGrid />
               ) : movies.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
-                  {movies.slice(0, 8).map((media) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-6">
+                  {movies.slice(0, 7).map((media) => (
                     <MediaCard key={media.id} media={media} />
                   ))}
                 </div>
@@ -404,7 +441,7 @@ export default function HomePage() {
             </section>
 
             {/* 电视剧 */}
-            <section>
+            <section className="mb-12">
               <div className="flex justify-between items-center mb-4">
                 <Link to="/tv" className="flex items-center hover:text-blue-600 transition-colors">
                   <h3 className="text-xl font-semibold">电视剧 &rarr;</h3>
@@ -419,8 +456,8 @@ export default function HomePage() {
               {loading ? (
                 <LoadingGrid />
               ) : tvShows.length > 0 ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-4">
-                  {tvShows.slice(0, 8).map((media) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-6">
+                  {tvShows.slice(0, 7).map((media) => (
                     <MediaCard key={media.id} media={media} />
                   ))}
                 </div>
@@ -431,6 +468,85 @@ export default function HomePage() {
                 </div>
               )}
             </section>
+
+            {/* 类别 */}
+            <section className="mb-12">
+              <h3 className="text-xl font-semibold mb-6">类别</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* 动作片 */}
+                <div 
+                  className="relative h-48 rounded-lg overflow-hidden cursor-pointer group bg-gradient-to-br from-red-500 to-orange-600"
+                  onClick={() => window.location.href = '/movies?genre=action'}
+                >
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
+                  <div className="absolute inset-0 p-6 flex flex-col justify-end">
+                    <h4 className="text-white text-xl font-bold">动作</h4>
+                    <p className="text-white/80 text-sm">
+                      {actionMovies.length > 0 ? `${actionMovies.length} 部影片` : '暂无影片'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 剧情片 */}
+                <div 
+                  className="relative h-48 rounded-lg overflow-hidden cursor-pointer group bg-gradient-to-br from-blue-500 to-purple-600"
+                  onClick={() => window.location.href = '/movies?genre=drama'}
+                >
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
+                  <div className="absolute inset-0 p-6 flex flex-col justify-end">
+                    <h4 className="text-white text-xl font-bold">剧情</h4>
+                    <p className="text-white/80 text-sm">
+                      {dramaMovies.length > 0 ? `${dramaMovies.length} 部影片` : '暂无影片'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 喜剧片 */}
+                <div 
+                  className="relative h-48 rounded-lg overflow-hidden cursor-pointer group bg-gradient-to-br from-green-500 to-yellow-500"
+                  onClick={() => window.location.href = '/movies?genre=comedy'}
+                >
+                  <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
+                  <div className="absolute inset-0 p-6 flex flex-col justify-end">
+                    <h4 className="text-white text-xl font-bold">喜剧</h4>
+                    <p className="text-white/80 text-sm">
+                      {comedyMovies.length > 0 ? `${comedyMovies.length} 部影片` : '暂无影片'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* 其他 */}
+            {otherFiles.length > 0 && (
+              <section className="mb-12">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-semibold">其他 &rarr;</h3>
+                  <div className="text-sm text-muted-foreground">
+                    显示 {otherFiles.length} 个文件
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {otherFiles.slice(0, 8).map((file, index) => (
+                    <div key={index} className="p-4 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-gray-300 rounded-lg flex items-center justify-center">
+                          <span className="text-gray-600 text-xs">文件</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{file.title || file.path?.split('/').pop()}</p>
+                          <p className="text-xs text-gray-500">
+                            {file.fileSize ? `${(file.fileSize / 1024 / 1024 / 1024).toFixed(1)} GB` : '未知大小'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         </div>
       </div>

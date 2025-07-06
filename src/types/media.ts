@@ -5,6 +5,22 @@ export interface MediaEpisode {
   episode: number
 }
 
+export interface CastMember {
+  id: number
+  name: string
+  character?: string
+  profile_path?: string
+  order?: number
+}
+
+export interface CrewMember {
+  id: number
+  name: string
+  job: string
+  department?: string
+  profile_path?: string
+}
+
 export interface Media {
   id: string
   title: string
@@ -24,6 +40,10 @@ export interface Media {
   dateAdded?: string
   lastUpdated?: string
   details?: string
+  
+  // Cast and crew information
+  cast?: CastMember[]
+  crew?: CrewMember[]
   
   // TV series specific fields
   episodeCount?: number
