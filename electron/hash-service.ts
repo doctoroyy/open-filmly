@@ -46,7 +46,7 @@ export class HashService {
     this.mediaDatabase = mediaDatabase
     
     // 使用免费的API服务（可以部署在Cloudflare Workers上）
-    this.apiBaseUrl = process.env.HASH_API_URL || 'https://filmly-hash-api.your-domain.workers.dev'
+    this.apiBaseUrl = process.env.HASH_API_URL || 'https://filmly-hash-api.doctoroyy.workers.dev'
     
     // 生成用户代理标识
     this.userAgent = `open-filmly-${this.generateUserId()}`
