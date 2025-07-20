@@ -115,6 +115,7 @@ export class SambaClient {
     try {
       // 首先检查服务器是否可达
       await this.pingServer(this.config.ip, this.config.port || 445);
+      console.log(`服务器 ${this.config.ip}:${this.config.port || 445} 连接正常`);
       
       // 尝试使用系统自带的smbclient命令获取共享列表
       if (process.platform === 'darwin' || process.platform === 'linux') {
@@ -138,13 +139,31 @@ export class SambaClient {
           const command = `smbclient -L ${this.config.ip}${port}${authParams} -g`;
           console.log(`执行命令: ${command}`);
           
-          const { stdout } = await execPromise(command);
+          const { stdout, stderr } = await execPromise(command);
+          console.log(`smbclient 输出: ${stdout}`);
+          if (stderr) console.log(`smbclient 错误: ${stderr}`);
           
           // 解析输出，获取共享列表
           const shares = stdout
             .split('\n')
-            .filter(line => line.includes('Disk|'))
-            .map(line => line.split('|')[1]);
+            .filter(line => {
+              // 支持多种smbclient输出格式
+              return line.includes('Disk|') || 
+                     (line.includes('|') && line.includes('Disk')) ||
+                     line.match(/^\s*\w+\s+Disk/);
+            })
+            .map(line => {
+              // 处理不同的输出格式
+              if (line.includes('|')) {
+                const parts = line.split('|');
+                return parts.length > 1 ? parts[1].trim() : parts[0].trim();
+              } else {
+                // 处理空格分隔的格式: "sharename    Disk    description"
+                const match = line.match(/^\s*(\w+)\s+Disk/);
+                return match ? match[1] : '';
+              }
+            })
+            .filter(share => share && share.trim() !== '');
           
           if (shares.length > 0) {
             console.log(`通过smbclient找到共享: ${shares.join(', ')}`);
@@ -153,14 +172,96 @@ export class SambaClient {
           }
         } catch (error) {
           console.error('使用smbclient列出共享失败:', error);
+          // 在macOS上尝试使用nmblookup命令
+          if (process.platform === 'darwin') {
+            try {
+              const nmblookupCommand = `nmblookup -A ${this.config.ip}`;
+              console.log(`尝试nmblookup命令: ${nmblookupCommand}`);
+              const { stdout: nmblookupOut } = await execPromise(nmblookupCommand);
+              console.log(`nmblookup 输出: ${nmblookupOut}`);
+              // nmblookup主要用于验证主机，不直接提供共享列表
+            } catch (nmblookupError) {
+              console.error('nmblookup也失败了:', nmblookupError);
+            }
+          }
           // 失败时继续尝试其他方法
         }
       }
       
-      // 如果smbclient失败或不可用，退回到自动发现方法
+      // 如果smbclient失败或不可用，尝试macOS原生方法
+      if (process.platform === 'darwin') {
+        try {
+          return await this.tryMacOSNativeDiscovery();
+        } catch (macOSError) {
+          console.error('macOS原生发现方法也失败了:', macOSError);
+        }
+      }
+      
+      // 最后退回到自动发现方法
       return await this.autoDiscoverShares();
     } catch (error) {
       console.error("列出服务器共享失败:", error);
+      throw error;
+    }
+  }
+
+  // 尝试使用macOS原生方法发现共享
+  private async tryMacOSNativeDiscovery(): Promise<string[]> {
+    if (!this.config || !this.config.ip) {
+      throw new Error("Server IP must be specified");
+    }
+
+    console.log(`尝试使用macOS原生方法发现共享...`);
+    
+    try {
+      // 使用dscl命令查询SMB共享
+      let authParams = '';
+      if (this.config.username && this.config.password) {
+        authParams = ` -u ${this.config.username} -p ${this.config.password}`;
+      }
+      
+      // 尝试使用net命令（如果可用）
+      try {
+        const netCommand = `net view \\\\${this.config.ip}${authParams}`;
+        console.log(`尝试net命令: ${netCommand}`);
+        const { stdout } = await execPromise(netCommand);
+        
+        // 解析net view输出
+        const shares = stdout
+          .split('\n')
+          .filter(line => line.includes('Disk'))
+          .map(line => {
+            const match = line.match(/^(\S+)\s+Disk/);
+            return match ? match[1] : '';
+          })
+          .filter(share => share);
+          
+        if (shares.length > 0) {
+          console.log(`通过net命令找到共享: ${shares.join(', ')}`);
+          return shares;
+        }
+      } catch (netError) {
+        console.error('net命令失败:', netError);
+      }
+      
+      // 如果net命令失败，尝试直接用finder的方式
+      try {
+        const finderCommand = `osascript -e 'tell application "Finder" to get name of every disk whose URL starts with "smb://${this.config.ip}/"'`;
+        console.log(`尝试Finder命令: ${finderCommand}`);
+        const { stdout } = await execPromise(finderCommand);
+        
+        if (stdout.trim()) {
+          const shares = stdout.split(', ').map(s => s.trim());
+          console.log(`通过Finder找到共享: ${shares.join(', ')}`);
+          return shares;
+        }
+      } catch (finderError) {
+        console.error('Finder方法失败:', finderError);
+      }
+      
+      throw new Error('所有macOS原生方法都失败了');
+    } catch (error) {
+      console.error('macOS原生发现失败:', error);
       throw error;
     }
   }
@@ -196,12 +297,18 @@ export class SambaClient {
           
         } catch (error: any) {
           // 如果是错误的网络名称，跳过该共享
-          if (error.code === 'STATUS_BAD_NETWORK_NAME') {
-            // 静默跳过
+          if (error.code === 'STATUS_BAD_NETWORK_NAME' || 
+              error.message?.includes('STATUS_BAD_NETWORK_NAME') ||
+              error.message?.includes('0xC00000CC')) {
+            console.log(`共享 ${shareName} 不存在，跳过`);
           } else if (error.code === 'STATUS_LOGON_FAILURE') {
             // 如果是认证失败，说明共享存在但需要用户名密码
             availableShares.push(shareName);
             console.log(`发现共享(需要认证): ${shareName}`);
+          } else if (error.code === 'STATUS_ACCESS_DENIED') {
+            // 如果是访问被拒绝，共享存在但没有权限
+            availableShares.push(shareName);
+            console.log(`发现共享(无权限): ${shareName}`);
           } else {
             // 其他错误记录下来但继续尝试
             console.log(`尝试连接共享 ${shareName} 时发生错误: ${error.code || error.message}`);

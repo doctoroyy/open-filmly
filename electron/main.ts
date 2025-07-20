@@ -3,7 +3,6 @@ import { app, BrowserWindow, dialog, protocol } from "electron"
 import { MediaDatabase } from "./media-database"
 import { MediaPlayer } from "./media-player"
 import { MetadataScraper } from "./metadata-scraper"
-import { EnhancedMetadataScraper } from "./enhanced-metadata-scraper"
 import { AutoScanManager } from "./auto-scan-manager"
 import { HashService } from "./hash-service"
 import * as fs from "fs"
@@ -96,7 +95,6 @@ if (process.platform === 'darwin') {
 let mainWindow: BrowserWindow | null = null
 let sambaClient: SambaClient
 let metadataScraper: MetadataScraper
-let enhancedMetadataScraper: EnhancedMetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
 let mediaProxyServer: MediaProxyServer
