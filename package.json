@@ -69,7 +69,13 @@
         "to": "public"
       }
     ],
-    "asar": true,
+    "asar": {
+      "smartUnpack": false
+    },
+    "asarUnpack": [
+      "**/node_modules/**",
+      "dist/electron/**"
+    ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
@@ -120,6 +126,7 @@
     "execa": "^5.1.1",
     "follow-redirects": "^1.15.5",
     "form-data": "^4.0.0",
+    "framer-motion": "^10.18.0",
     "get-stream": "^6.0.1",
     "hono": "^4.7.7",
     "human-signals": "^2.1.0",
