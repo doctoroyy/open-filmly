@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import type { SambaClient } from './smb-client'
+import type { GoSMBClient } from './go-smb-client'
 import type { MediaDatabase } from './media-database'
 import { MetadataScraper } from './metadata-scraper'
 import { TaskQueueManager } from './task-queue-manager'
@@ -29,7 +29,7 @@ export interface AutoScanStatus {
 }
 
 export class AutoScanManager extends EventEmitter {
-  private sambaClient: SambaClient
+  private goSmbClient: GoSMBClient
   private mediaDatabase: MediaDatabase
   private metadataScraper: MetadataScraper
   private hashService?: HashService
@@ -40,12 +40,12 @@ export class AutoScanManager extends EventEmitter {
   private abortController?: AbortController
 
   constructor(
-    sambaClient: SambaClient, 
+    goSmbClient: GoSMBClient, 
     mediaDatabase: MediaDatabase, 
     metadataScraper: MetadataScraper
   ) {
     super()
-    this.sambaClient = sambaClient
+    this.goSmbClient = goSmbClient
     this.mediaDatabase = mediaDatabase
     this.metadataScraper = metadataScraper
     this.taskQueue = new TaskQueueManager(3) // 最多3个并发任务
@@ -188,7 +188,7 @@ export class AutoScanManager extends EventEmitter {
       this.updateScanProgress('discovering', i, startPaths.length, `Scanning folder: ${folder || '/'}`)
       
       try {
-        const mediaFiles = await this.sambaClient.scanMediaFiles(folder)
+        const mediaFiles = await this.goSmbClient.scanMediaFiles(folder)
         allMediaFiles = [...allMediaFiles, ...mediaFiles]
       } catch (error: any) {
         console.error(`Error scanning folder ${folder}:`, error)

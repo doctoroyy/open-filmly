@@ -76,6 +76,10 @@ export class ServerAPI {
     return this.client.invoke(IPCChannels.CONNECT_SERVER, serverConfig)
   }
 
+  async goDiscoverShares(serverConfig: any) {
+    return this.client.invoke(IPCChannels.GO_DISCOVER, serverConfig)
+  }
+
   async listShares() {
     return this.client.invoke(IPCChannels.LIST_SHARES)
   }

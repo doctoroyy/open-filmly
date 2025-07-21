@@ -18,6 +18,7 @@ export const ConfigChannels = {
 // 服务器连接相关的IPC通道
 export const ServerChannels = {
   CONNECT_SERVER: 'server:connect',
+  GO_DISCOVER: 'server:go-discover',
   LIST_SHARES: 'server:shares:list',
   LIST_FOLDERS: 'server:folders:list',
   GET_DIR_CONTENTS: 'server:dir-contents:get',

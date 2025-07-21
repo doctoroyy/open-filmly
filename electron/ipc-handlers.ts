@@ -10,7 +10,8 @@ import { MediaDatabase } from './media-database'
 import { MediaPlayer } from './media-player'
 import { MetadataScraper } from './metadata-scraper'
 import { AutoScanManager } from './auto-scan-manager'
-import { SambaClient } from './smb-client'
+// Old SambaClient removed - using GoSMBClient only
+import { GoSMBClient } from './go-smb-client'
 import { MediaProxyServer } from './media-proxy-server'
 import { registerIPCHandler } from './ipc-handler'
 import { IPCChannels } from './ipc-channels'
@@ -24,7 +25,7 @@ export function initializeIPCHandlers(services: {
   mediaPlayer: MediaPlayer
   metadataScraper: MetadataScraper
   autoScanManager: AutoScanManager
-  sambaClient: SambaClient
+  goSmbClient: GoSMBClient
   mediaProxyServer: MediaProxyServer
   mainWindow: Electron.BrowserWindow | null
 }) {
@@ -33,7 +34,7 @@ export function initializeIPCHandlers(services: {
     mediaPlayer,
     metadataScraper,
     autoScanManager,
-    sambaClient,
+    goSmbClient,
     mediaProxyServer,
     mainWindow
   } = services
@@ -46,7 +47,7 @@ export function initializeIPCHandlers(services: {
   registerIPCHandler(IPCChannels.SAVE_CONFIG, async (_, config) => {
     try {
       await mediaDatabase.saveConfig(config)
-      sambaClient.configure(config)
+      goSmbClient.configure(config)
       
       // 设置自动扫描管理器的共享路径
       if (config.sharePath) {
@@ -124,7 +125,55 @@ export function initializeIPCHandlers(services: {
     }
   })
 
-  // 服务器连接相关处理器
+  // Go SMB发现处理器 (推荐使用)
+  registerIPCHandler(IPCChannels.GO_DISCOVER, async (_, serverConfig) => {
+    try {
+      console.log('使用Go SMB客户端发现共享...')
+      
+      goSmbClient.configure(serverConfig)
+      
+      // 检查Go二进制文件是否可用
+      if (!goSmbClient.isBinaryAvailable()) {
+        const systemInfo = await goSmbClient.getSystemInfo()
+        return {
+          success: false,
+          error: "Go SMB二进制文件不可用",
+          errorType: "binary_not_found",
+          systemInfo: systemInfo
+        }
+      }
+      
+      // 首先测试连接
+      const isConnected = await goSmbClient.testConnection()
+      if (!isConnected) {
+        return {
+          success: false,
+          error: "无法连接到服务器",
+          errorType: "connection_failed"
+        }
+      }
+      
+      // 发现真实共享
+      const shares = await goSmbClient.discoverShares()
+      
+      console.log(`Go SMB发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
+      
+      return {
+        success: true,
+        shares: shares.map(share => share.name),
+        shareDetails: shares
+      }
+    } catch (error: any) {
+      console.error('Go SMB发现失败:', error)
+      return {
+        success: false,
+        error: error.message,
+        errorType: "discovery_failed"
+      }
+    }
+  })
+
+  // 服务器连接相关处理器 - 使用Go SMB发现
   registerIPCHandler(IPCChannels.CONNECT_SERVER, async (_, serverConfig) => {
     try {
       // 验证必要的配置
@@ -136,82 +185,58 @@ export function initializeIPCHandlers(services: {
         }
       }
       
-      console.log(`连接到SMB服务器 ${serverConfig.ip}`)
+      console.log(`使用Go SMB客户端连接到服务器 ${serverConfig.ip}`)
       
-      // 配置Samba客户端
-      sambaClient.configure(serverConfig)
+      // 配置Go SMB客户端
+      goSmbClient.configure(serverConfig)
       
-      try {
-        // 尝试获取服务器上的所有共享
-        console.log("尝试获取服务器上的所有共享...")
-        const availableShares = await sambaClient.listShares()
-        
-        if (availableShares && availableShares.length > 0) {
-          console.log(`发现可用共享: ${availableShares.join(', ')}`)
-          
-          // 返回发现的共享列表，让用户选择
-          return { 
-            success: true, 
-            data: {
-              needShareSelection: true,
-              shares: availableShares
-            }
-          }
-        } else {
-          return {
-            success: false,
-            error: "无法在服务器上发现共享",
-            errorType: "no_shares_found"
-          }
+      // 检查二进制文件可用性
+      if (!goSmbClient.isBinaryAvailable()) {
+        const systemInfo = await goSmbClient.getSystemInfo()
+        return {
+          success: false,
+          error: "Go SMB二进制文件不可用",
+          errorType: "binary_not_found",
+          systemInfo
         }
-      } catch (error: any) {
-        console.error("获取共享列表失败:", error)
-        
-        // 对特定的SMB错误进行更友好的提示
-        if (error.code === 'STATUS_BAD_NETWORK_NAME') {
-          return { 
-            success: false, 
-            error: `找不到指定的共享，请检查共享名称是否正确`,
-            errorType: "share_not_found" 
-          }
-        } else if (error.code === 'STATUS_LOGON_FAILURE') {
-          return { 
-            success: false, 
-            error: `认证失败，请检查用户名和密码`,
-            errorType: "auth_failed" 
-          }
-        } else {
-          return { 
-            success: false, 
-            error: error instanceof Error ? error.message : String(error),
-            errorType: error.code || "unknown_error"
-          }
+      }
+      
+      // 首先测试连接
+      const isConnected = await goSmbClient.testConnection()
+      if (!isConnected) {
+        return {
+          success: false,
+          error: "无法连接到服务器",
+          errorType: "connection_failed"
         }
+      }
+      
+      // 发现真实共享
+      const shares = await goSmbClient.discoverShares()
+      
+      console.log(`Go SMB发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
+      
+      return {
+        success: true,
+        shares: shares.map(share => share.name),
+        shareDetails: shares
       }
     } catch (error: any) {
-      console.error("连接服务器失败:", error)
-      
-      // 处理一些常见连接错误
-      if (error.code === 'ETIMEDOUT' || error.code === 'EHOSTUNREACH' || error.code === 'ECONNREFUSED') {
-        return { 
-          success: false, 
-          error: `无法连接到服务器 ${serverConfig.ip}，请检查IP地址是否正确且服务器是否在线`,
-          errorType: "connection_failed" 
-        }
-      }
-      
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : String(error),
-        errorType: error.code || "unknown_error"
+      console.error('Go SMB连接失败:', error)
+      return {
+        success: false,
+        error: error.message,
+        errorType: "connection_failed"
       }
     }
   })
 
   registerIPCHandler(IPCChannels.LIST_SHARES, async () => {
     try {
-      const shares = await sambaClient.listShares()
-      return { success: true, data: { shares } }
+      const shares = await goSmbClient.discoverShares()
+      // Format shares to match expected structure
+      const shareNames = shares.map(share => share.name)
+      return { success: true, data: { shares: shareNames } }
     } catch (error: unknown) {
       console.error("Failed to list shares:", error)
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -220,33 +245,22 @@ export function initializeIPCHandlers(services: {
 
   registerIPCHandler(IPCChannels.LIST_FOLDERS, async (_, shareName) => {
     try {
-      // 确保共享名称格式正确
-      const formattedShareName = shareName === "/" ? "" : shareName.replace(/^\/+/, '')
-      console.log(`Listing folders in: "${formattedShareName}"`)
-      
-      const files = await sambaClient.listFiles(formattedShareName)
-      // 过滤只返回文件夹
-      const folders = []
-      
-      for (const file of files) {
-        if (file.startsWith('.')) continue
-        
-        try {
-          // 构建子路径，保持一致的格式
-          const subPath = formattedShareName 
-            ? `${formattedShareName}\\${file}` 
-            : file
-            
-          console.log(`Checking if is directory: "${subPath}"`)
-          
-          // 尝试列出文件，如果成功，则是文件夹
-          await sambaClient.listFiles(subPath)
-          folders.push(file)
-        } catch (error) {
-          // 忽略错误，表示不是文件夹或无权限
-          console.log(`Not a directory or no permission: ${file}`)
-        }
+      // Parse the path to get share and directory
+      const pathParts = shareName.split('/').filter(Boolean)
+      if (pathParts.length === 0) {
+        throw new Error("Invalid path")
       }
+      
+      const shareNameOnly = pathParts[0]
+      const directory = pathParts.length > 1 ? '/' + pathParts.slice(1).join('/') : '/'
+      
+      console.log(`Listing folders in share: "${shareNameOnly}", directory: "${directory}"`)
+      
+      // Use Go SMB client to list directory contents
+      const items = await goSmbClient.listDirectory(shareNameOnly, directory)
+      
+      // Filter only directories
+      const folders = items.filter(item => item.isDirectory).map(item => item.name)
       
       return { success: true, data: { folders } }
     } catch (error: unknown) {
@@ -261,28 +275,49 @@ export function initializeIPCHandlers(services: {
 
   registerIPCHandler(IPCChannels.GET_DIR_CONTENTS, async (_, dirPath) => {
     try {
-      // 确保目录路径格式正确
-      const formattedPath = dirPath === "/" ? "" : dirPath.replace(/^\/+/, '')
-      console.log(`Getting directory contents for: "${formattedPath}"`)
+      console.log(`Getting directory contents for: "${dirPath}"`)
       
-      // 调试：检查SMB配置状态
-      const configStatus = sambaClient.getConfigurationStatus();
-      console.log('SMB Configuration Status:', configStatus);
-      
-      if (!configStatus.configured) {
-        throw new Error("SMB client is not configured");
-      }
-      
-      if (!configStatus.hasSharePath) {
-        throw new Error("SMB share path is not configured");
-      }
-      
-      // 使用新方法获取目录内容
-      const items = await sambaClient.getDirContents(formattedPath)
-      
-      return { 
-        success: true, 
-        items: items // 直接返回items而不是嵌套在data中
+      if (dirPath === "/") {
+        // Root path - show all available shares
+        const result = await goSmbClient.discoverShares()
+        const shareItems = result.map(share => ({
+          name: share.name,
+          isDirectory: true,
+          size: undefined,
+          modifiedTime: undefined
+        }))
+        
+        return { 
+          success: true, 
+          items: shareItems
+        }
+      } else {
+        // Parse the path to extract share and directory
+        const pathParts = dirPath.split('/').filter(Boolean)
+        if (pathParts.length === 0) {
+          throw new Error("Invalid path")
+        }
+        
+        const shareName = pathParts[0]
+        const directory = pathParts.length > 1 ? '/' + pathParts.slice(1).join('/') : '/'
+        
+        console.log(`Listing directory: share="${shareName}", directory="${directory}"`)
+        
+        // Use Go SMB client to list directory contents
+        const items = await goSmbClient.listDirectory(shareName, directory)
+        
+        // Convert GoDirectoryItem to FileItem format
+        const fileItems = items.map(item => ({
+          name: item.name,
+          isDirectory: item.isDirectory,
+          size: item.size,
+          modifiedTime: item.modifiedTime
+        }))
+        
+        return { 
+          success: true, 
+          items: fileItems
+        }
       }
     } catch (error: unknown) {
       console.error(`Failed to get contents of directory ${dirPath}:`, error)
@@ -378,10 +413,10 @@ export function initializeIPCHandlers(services: {
     try {
       const { type, useCached = true } = request
       
-      if (!sambaClient) {
+      if (!goSmbClient) {
         return { 
           success: false, 
-          error: "Samba client is not initialized" 
+          error: "Go SMB client is not initialized" 
         }
       }
       

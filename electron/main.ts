@@ -6,7 +6,8 @@ import { MetadataScraper } from "./metadata-scraper"
 import { AutoScanManager } from "./auto-scan-manager"
 import { HashService } from "./hash-service"
 import * as fs from "fs"
-import { SambaClient } from "./smb-client"
+// Old SambaClient removed - using GoSMBClient only
+import { GoSMBClient } from "./go-smb-client"
 import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
@@ -93,7 +94,8 @@ if (process.platform === 'darwin') {
 
 // 全局变量
 let mainWindow: BrowserWindow | null = null
-let sambaClient: SambaClient
+// Using only GoSMBClient now
+let goSmbClient: GoSMBClient
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
@@ -187,8 +189,10 @@ async function initializeApp() {
     mediaDatabase = new MediaDatabase(path.join(app.getPath("userData"), "media.db"))
     await mediaDatabase.initialize()
 
-    // 初始化Samba客户端
-    sambaClient = new SambaClient()
+    // Only using Go SMB client now
+    
+    // 初始化Go SMB客户端
+    goSmbClient = new GoSMBClient()
 
     // 初始化海报抓取器，使用TMDB API密钥
     // 首先尝试从数据库获取TMDB API密钥
@@ -236,7 +240,7 @@ async function initializeApp() {
     metadataScraper = new MetadataScraper(mediaDatabase, tmdbApiKey || undefined, geminiApiKey)
     
     // 初始化自动扫描管理器
-    autoScanManager = new AutoScanManager(sambaClient, mediaDatabase, metadataScraper)
+    autoScanManager = new AutoScanManager(goSmbClient, mediaDatabase, metadataScraper)
 
     // 初始化Hash服务
     hashService = new HashService(mediaDatabase)
@@ -245,7 +249,7 @@ async function initializeApp() {
     mediaPlayer = new MediaPlayer()
 
     // 初始化媒体代理服务器
-    mediaProxyServer = new MediaProxyServer(sambaClient)
+    mediaProxyServer = new MediaProxyServer(goSmbClient)
     try {
       const proxyPort = await mediaProxyServer.start()
       console.log(`Media proxy server started on port ${proxyPort}`)
@@ -258,8 +262,8 @@ async function initializeApp() {
     if (config) {
       // 检查配置是否完整
       if (config.ip && config.ip.trim() !== "" && config.sharePath && config.sharePath.trim() !== "") {
-        console.log("Configuration loaded, applying to Samba client")
-        sambaClient.configure(config)
+        console.log("Configuration loaded, applying to Go SMB client")
+        goSmbClient.configure(config)
         // 设置自动扫描管理器的共享路径
         if (config.sharePath) {
           autoScanManager.setSharePath(config.sharePath)
@@ -291,7 +295,7 @@ async function initializeIPCHandlers() {
     mediaDatabase,
     mediaPlayer,
     metadataScraper,
-    sambaClient,
+    goSmbClient,
     mediaProxyServer,
     autoScanManager,
     mainWindow
@@ -379,9 +383,9 @@ app.on("before-quit", async () => {
       productionServer.close?.()
     }
     
-    // 断开Samba连接
-    if (sambaClient) {
-      sambaClient.disconnect()
+    // 断开Go SMB连接
+    if (goSmbClient) {
+      goSmbClient.disconnect()
     }
   } catch (error) {
     console.error("Error during cleanup:", error)

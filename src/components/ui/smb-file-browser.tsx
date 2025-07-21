@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Folder, File, ArrowLeft, FolderOpen, CheckSquare, Square, RefreshCw, AlertCircle, Grid, List } from "lucide-react"
+import { Folder, File, ArrowLeft, FolderOpen, CheckSquare, Square, RefreshCw, AlertCircle, Grid, List, Home, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 import { Toggle } from "@/components/ui/toggle"
+import { Badge } from "@/components/ui/badge"
 
 interface FileItem {
   name: string
@@ -19,9 +20,9 @@ interface SMBFileBrowserProps {
   selectionMode?: boolean
   onSelect?: (selectedPaths: string[]) => void
   onCancel?: () => void
-  selectedFolders?: string[] // Allow showing previously selected folders
-  allowFileAddition?: boolean // Allow adding individual files directly
-  onFileAdded?: (mediaInfo: any) => void // Callback when a file is added directly
+  selectedFolders?: string[]
+  allowFileAddition?: boolean
+  onFileAdded?: (mediaInfo: any) => void
 }
 
 export function SMBFileBrowser({
@@ -53,29 +54,73 @@ export function SMBFileBrowser({
     }
   }, [selectedFolders]);
 
-  // 加载当前目录内容
-  const loadDirectoryContents = async (path: string) => {
+  // Load directory contents - backend handles both shares and regular directories
+  const loadDirectoryContents = async (path: string, retryCount: number = 0) => {
     setLoading(true)
     setError(null)
+    
+    const maxRetries = 2
+    
     try {
+      console.log(`Loading directory: path="${path}"`)
+      
+      // Use the unified API that handles both root (shares) and regular directories
       const result = await window.electronAPI?.getDirContents(path)
       
       if (result?.success && result.items) {
         setItems(result.items)
       } else {
-        setError(result?.error || "无法加载目录内容")
+        const errorMessage = result?.error || "Unable to load directory contents"
+        
+        // Enhanced error handling with specific error types
+        if (errorMessage.includes("STATUS_OBJECT_NAME_NOT_FOUND") || errorMessage.includes("not found")) {
+          setError(`Directory not found: ${path}. The path may have been moved or deleted.`)
+        } else if (errorMessage.includes("access denied") || errorMessage.includes("permission")) {
+          setError("Access denied. Please check your SMB credentials and permissions.")
+        } else if (errorMessage.includes("network") || errorMessage.includes("connection")) {
+          setError("Network connection error. Please check your SMB server connection.")
+        } else if (errorMessage.includes("binary not found")) {
+          setError("SMB client binary not found. Please check your installation.")
+        } else {
+          setError(errorMessage)
+        }
+        
+        // Auto-retry for certain error types
+        if (retryCount < maxRetries && (
+          errorMessage.includes("network") || 
+          errorMessage.includes("timeout") ||
+          errorMessage.includes("connection")
+        )) {
+          console.log(`Retrying directory load (attempt ${retryCount + 1}/${maxRetries})...`)
+          setTimeout(() => {
+            loadDirectoryContents(path, retryCount + 1)
+          }, 1000 * (retryCount + 1))
+          return
+        }
+        
         toast({
-          title: "加载失败",
-          description: result?.error || "无法加载目录内容",
+          title: "Load Failed",
+          description: error || errorMessage,
           variant: "destructive",
         })
       }
     } catch (error) {
       console.error("Error loading directory contents:", error)
-      setError("加载目录内容时出错")
+      const errorMessage = `Error loading directory contents: ${path}`
+      setError(errorMessage)
+      
+      // Auto-retry for network errors
+      if (retryCount < maxRetries) {
+        console.log(`Retrying directory load due to exception (attempt ${retryCount + 1}/${maxRetries})...`)
+        setTimeout(() => {
+          loadDirectoryContents(path, retryCount + 1)
+        }, 1000 * (retryCount + 1))
+        return
+      }
+      
       toast({
-        title: "加载失败",
-        description: "加载目录内容时出错",
+        title: "Load Failed",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -83,34 +128,28 @@ export function SMBFileBrowser({
     }
   }
 
-  // 第一次加载
+  // Initial load
   useEffect(() => {
     loadDirectoryContents(initialPath)
   }, [initialPath])
 
-  // 导航到特定路径
-  const navigateTo = (path: string) => {
-    // 保存当前路径到历史
-    setPathHistory(prev => [...prev, currentPath])
-    // 设置新路径
+  // Navigate to specific path
+  const navigateTo = (path: string, addToHistory: boolean = true) => {
+    if (addToHistory) {
+      setPathHistory(prev => [...prev, currentPath])
+    }
     setCurrentPath(path)
-    // 加载新目录内容
     loadDirectoryContents(path)
   }
 
-  // 返回上一级
+  // Go back in navigation
   const goBack = () => {
     if (pathHistory.length > 0) {
-      // 从历史中获取上一个路径
       const previousPath = pathHistory[pathHistory.length - 1]
-      // 更新历史
       setPathHistory(prev => prev.slice(0, -1))
-      // 设置当前路径
       setCurrentPath(previousPath)
-      // 加载目录内容
       loadDirectoryContents(previousPath)
     } else if (currentPath !== "/") {
-      // 如果没有历史但当前不是根目录，回到上一级
       const parentPath = currentPath.substring(0, currentPath.lastIndexOf("/"))
       const normalizedParentPath = parentPath || "/"
       setCurrentPath(normalizedParentPath)
@@ -118,68 +157,81 @@ export function SMBFileBrowser({
     }
   }
 
-  // 刷新当前目录
+  // Go to root
+  const goToRoot = () => {
+    setPathHistory([])
+    setCurrentPath("/")
+    loadDirectoryContents("/")
+  }
+
+  // Refresh current directory
   const refreshDirectory = () => {
     loadDirectoryContents(currentPath)
   }
 
-  // 处理点击项目
-  const handleItemClick = (item: FileItem) => {
-    if (selectionMode && item.isDirectory) {
-      // 在选择模式下，点击目录应该切换选择状态
-      toggleDirectorySelection(item.name);
-    } else if (item.isDirectory && !selectionMode) {
-      // 非选择模式下，点击目录导航到该目录
+  // Handle item clicks - unified interaction
+  const handleItemClick = (item: FileItem, event: React.MouseEvent) => {
+    // Check if clicked on checkbox area - for selection
+    const target = event.target as HTMLElement
+    if (target.closest('.checkbox-area')) {
+      if (selectionMode && item.isDirectory) {
+        toggleDirectorySelection(item.name)
+      }
+      return
+    }
+    
+    // Clicked outside checkbox - for navigation or file action
+    if (item.isDirectory) {
+      // Navigate into directory
       const newPath = currentPath === "/" 
         ? `/${item.name}` 
         : `${currentPath}/${item.name}`
       navigateTo(newPath)
-    } else if (allowFileAddition && !selectionMode) {
-      // 如果允许添加文件，且不是选择模式，处理文件添加
-      handleAddFile(item);
+    } else if (allowFileAddition && !item.isDirectory) {
+      // Handle file addition
+      handleAddFile(item)
     }
   }
 
-  // 处理添加单个文件
+  // Handle adding single file
   const handleAddFile = async (file: FileItem) => {
     try {
       const filePath = currentPath === "/" 
         ? `/${file.name}` 
-        : `${currentPath}/${file.name}`;
+        : `${currentPath}/${file.name}`
       
-      setLoading(true);
-      const result = await window.electronAPI?.addSingleMedia(filePath);
+      setLoading(true)
+      const result = await window.electronAPI?.addSingleMedia(filePath)
       
       if (result?.success) {
         toast({
-          title: "文件已添加",
-          description: `已将文件添加到媒体库: ${file.name}`,
-        });
+          title: "File Added",
+          description: `Added file to media library: ${file.name}`,
+        })
         
-        // 调用回调
         if (onFileAdded) {
-          onFileAdded(result.media);
+          onFileAdded(result.media)
         }
       } else {
         toast({
-          title: "添加失败",
-          description: result?.error || "无法添加文件",
+          title: "Add Failed",
+          description: result?.error || "Unable to add file",
           variant: "destructive",
-        });
+        })
       }
     } catch (error) {
-      console.error("Error adding file:", error);
+      console.error("Error adding file:", error)
       toast({
-        title: "添加失败",
-        description: "添加文件时发生错误",
+        title: "Add Failed",
+        description: "Error adding file",
         variant: "destructive",
-      });
+      })
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  // 切换目录选择状态
+  // Toggle directory selection
   const toggleDirectorySelection = (dirName: string) => {
     const dirPath = currentPath === "/" 
       ? `/${dirName}` 
@@ -196,23 +248,48 @@ export function SMBFileBrowser({
     })
   }
 
-  // 确认选择
+  // Confirm selection
   const confirmSelection = () => {
     if (onSelect) {
       onSelect(Object.keys(selectedItems))
     }
   }
 
-  // 取消选择
+  // Toggle select all directories
+  const toggleSelectAll = () => {
+    const allDirectories = items.filter(item => item.isDirectory)
+    const allSelected = allDirectories.every(dir => {
+      const dirPath = currentPath === "/" ? `/${dir.name}` : `${currentPath}/${dir.name}`
+      return selectedItems[dirPath]
+    })
+
+    if (allSelected) {
+      const newSelected = { ...selectedItems }
+      allDirectories.forEach(dir => {
+        const dirPath = currentPath === "/" ? `/${dir.name}` : `${currentPath}/${dir.name}`
+        delete newSelected[dirPath]
+      })
+      setSelectedItems(newSelected)
+    } else {
+      const newSelected = { ...selectedItems }
+      allDirectories.forEach(dir => {
+        const dirPath = currentPath === "/" ? `/${dir.name}` : `${currentPath}/${dir.name}`
+        newSelected[dirPath] = true
+      })
+      setSelectedItems(newSelected)
+    }
+  }
+
+  // Cancel selection
   const cancelSelection = () => {
     if (onCancel) {
       onCancel()
     }
   }
 
-  // 格式化文件大小
+  // Format file size
   const formatFileSize = (bytes?: number): string => {
-    if (bytes === undefined) return "未知"
+    if (bytes === undefined) return "Unknown"
     
     if (bytes < 1024) return `${bytes} B`
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -220,57 +297,75 @@ export function SMBFileBrowser({
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
   }
 
-  // 渲染网格视图
+  // Generate breadcrumb navigation
+  const getBreadcrumbs = () => {
+    if (currentPath === "/") return [{ name: "Root", path: "/" }]
+    
+    const parts = currentPath.split("/").filter(Boolean)
+    const breadcrumbs = [{ name: "Root", path: "/" }]
+    
+    let accumulatedPath = ""
+    parts.forEach(part => {
+      accumulatedPath += `/${part}`
+      breadcrumbs.push({ name: part, path: accumulatedPath })
+    })
+    
+    return breadcrumbs
+  }
+
+  // Render grid view with unified interaction
   const renderGridView = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-      {items.filter(item => selectionMode ? item.isDirectory : true).map((item) => (
+      {items.map((item) => (
         <div 
           key={item.name}
           className={`
-            flex items-center p-2 rounded-md cursor-pointer hover:bg-muted
+            flex items-center p-2 rounded-md cursor-pointer transition-colors relative
+            hover:bg-blue-50 dark:hover:bg-blue-900/20
             ${selectionMode && item.isDirectory && (
               selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-              'bg-primary/10' : ''
+              'bg-blue-100 dark:bg-blue-900/30' : ''
             )}
             ${!item.isDirectory ? 'opacity-70' : ''}
           `}
-          onClick={() => handleItemClick(item)}
+          onClick={(e) => handleItemClick(item, e)}
         >
           {selectionMode && item.isDirectory && (
-            <div className="mr-1" onClick={(e) => {
-              e.stopPropagation();
-              toggleDirectorySelection(item.name);
-            }}>
+            <div 
+              className="checkbox-area mr-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" 
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleDirectorySelection(item.name)
+              }}
+            >
               {selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-                <CheckSquare className="w-5 h-5 text-primary" /> : 
-                <Square className="w-5 h-5" />
+                <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                <Square className="w-4 h-4 text-gray-400" />
               }
             </div>
           )}
           
           {item.isDirectory ? (
-            item.isDirectory ? 
-              selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-                <FolderOpen className="w-5 h-5 mr-2 text-blue-500" /> : 
-                <Folder className="w-5 h-5 mr-2 text-blue-500" /> 
-              : <File className="w-5 h-5 mr-2" />
+            selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
+              <FolderOpen className="w-5 h-5 mr-2 text-blue-600" /> : 
+              <Folder className="w-5 h-5 mr-2 text-blue-500" /> 
           ) : (
-            <File className="w-5 h-5 mr-2" />
+            <File className="w-5 h-5 mr-2 text-gray-500" />
           )}
           
           <div className="truncate flex-1">{item.name}</div>
           
-          {allowFileAddition && !selectionMode && !item.isDirectory && (
+          {allowFileAddition && !item.isDirectory && (
             <Button 
               variant="ghost" 
               size="sm"
               className="ml-2 h-6 px-2"
               onClick={(e) => {
-                e.stopPropagation();
-                handleAddFile(item);
+                e.stopPropagation()
+                handleAddFile(item)
               }}
             >
-              添加
+              Add
             </Button>
           )}
         </div>
@@ -278,67 +373,69 @@ export function SMBFileBrowser({
     </div>
   )
 
-  // 渲染列表视图
+  // Render list view with unified interaction
   const renderListView = () => (
     <div className="flex flex-col gap-1">
-      {items.filter(item => selectionMode ? item.isDirectory : true).map((item) => (
+      {items.map((item) => (
         <div 
           key={item.name}
           className={`
-            flex items-center p-2 rounded-md cursor-pointer hover:bg-muted
+            flex items-center p-2 rounded-md cursor-pointer transition-colors relative
+            hover:bg-blue-50 dark:hover:bg-blue-900/20
             ${selectionMode && item.isDirectory && (
               selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-              'bg-primary/10' : ''
+              'bg-blue-100 dark:bg-blue-900/30' : ''
             )}
             ${!item.isDirectory ? 'opacity-70' : ''}
           `}
-          onClick={() => handleItemClick(item)}
+          onClick={(e) => handleItemClick(item, e)}
         >
           {selectionMode && item.isDirectory && (
-            <div className="mr-1" onClick={(e) => {
-              e.stopPropagation();
-              toggleDirectorySelection(item.name);
-            }}>
+            <div 
+              className="checkbox-area mr-2 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleDirectorySelection(item.name)
+              }}
+            >
               {selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-                <CheckSquare className="w-5 h-5 text-primary" /> : 
-                <Square className="w-5 h-5" />
+                <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                <Square className="w-4 h-4 text-gray-400" />
               }
             </div>
           )}
           
           {item.isDirectory ? (
-            item.isDirectory ? 
-              selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
-                <FolderOpen className="w-5 h-5 mr-2 text-blue-500" /> : 
-                <Folder className="w-5 h-5 mr-2 text-blue-500" /> 
-              : <File className="w-5 h-5 mr-2" />
+            selectedItems[`${currentPath === "/" ? "" : currentPath}/${item.name}`] ? 
+              <FolderOpen className="w-5 h-5 mr-2 text-blue-600" /> : 
+              <Folder className="w-5 h-5 mr-2 text-blue-500" /> 
           ) : (
-            <File className="w-5 h-5 mr-2" />
+            <File className="w-5 h-5 mr-2 text-gray-500" />
           )}
           
           <div className="truncate flex-1">{item.name}</div>
           
-          <div className="text-xs text-muted-foreground ml-4 flex-shrink-0">
+          <div className="text-xs text-gray-500 ml-4 flex-shrink-0">
             {item.size !== undefined && formatFileSize(item.size)}
           </div>
           
           {item.modifiedTime && (
-            <div className="text-xs text-muted-foreground ml-4 flex-shrink-0">
+            <div className="text-xs text-gray-500 ml-4 flex-shrink-0">
               {new Date(item.modifiedTime).toLocaleDateString()}
             </div>
           )}
           
-          {allowFileAddition && !selectionMode && !item.isDirectory && (
+          {allowFileAddition && !item.isDirectory && (
             <Button 
               variant="ghost" 
               size="sm"
               className="ml-2 h-6 px-2"
               onClick={(e) => {
-                e.stopPropagation();
-                handleAddFile(item);
+                e.stopPropagation()
+                handleAddFile(item)
               }}
             >
-              添加
+              Add
             </Button>
           )}
         </div>
@@ -348,17 +445,48 @@ export function SMBFileBrowser({
 
   return (
     <Card className="w-full">
-      <CardContent className="p-4">
-        {/* 导航栏 */}
-        <div className="flex items-center mb-4 space-x-2">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg">SMB File Browser</CardTitle>
+          <div className="flex items-center gap-2">
+            {/* View Mode Toggle */}
+            <Toggle
+              pressed={viewMode === "list"}
+              onPressedChange={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
+              className="h-8 w-8"
+            >
+              {viewMode === "grid" ? 
+                <List className="w-4 h-4" /> : 
+                <Grid className="w-4 h-4" />
+              }
+            </Toggle>
+          </div>
+        </div>
+      </CardHeader>
+      
+      <CardContent className="space-y-4">
+        {/* Navigation Bar */}
+        <div className="flex items-center space-x-2">
           <Button 
             variant="outline" 
             size="sm" 
             onClick={goBack}
             disabled={currentPath === "/" && pathHistory.length === 0}
+            className="h-8"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
-            返回
+            Back
+          </Button>
+          
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={goToRoot}
+            disabled={currentPath === "/"}
+            className="h-8"
+          >
+            <Home className="w-4 h-4 mr-1" />
+            Root
           </Button>
           
           <Button 
@@ -366,65 +494,109 @@ export function SMBFileBrowser({
             size="sm"
             onClick={refreshDirectory}
             disabled={loading}
+            className="h-8"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            刷新
+            Refresh
           </Button>
-          
-          <div className="flex-1 px-3 py-1 border rounded-md truncate">
-            {currentPath}
-          </div>
 
-          <Toggle
-            aria-label="Toggle view mode"
-            pressed={viewMode === "list"}
-            onPressedChange={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
-          >
-            {viewMode === "grid" ? 
-              <List className="w-4 h-4" /> : 
-              <Grid className="w-4 h-4" />
-            }
-          </Toggle>
+          {selectionMode && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={toggleSelectAll}
+              disabled={items.filter(item => item.isDirectory).length === 0}
+              className="h-8"
+            >
+              {items.filter(item => item.isDirectory).every(dir => {
+                const dirPath = currentPath === "/" ? `/${dir.name}` : `${currentPath}/${dir.name}`
+                return selectedItems[dirPath]
+              }) && items.filter(item => item.isDirectory).length > 0 ? "Deselect All" : "Select All"}
+            </Button>
+          )}
+        </div>
+
+        {/* Breadcrumb Navigation */}
+        <div className="flex items-center space-x-1 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded-md px-3 py-2">
+          {getBreadcrumbs().map((crumb, index) => (
+            <div key={crumb.path} className="flex items-center">
+              {index > 0 && <ChevronRight className="w-4 h-4 mx-1" />}
+              <button
+                onClick={() => navigateTo(crumb.path, false)}
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                {crumb.name}
+              </button>
+            </div>
+          ))}
         </div>
         
-        {/* 文件浏览区域 */}
-        <div className="h-[400px] rounded-md border p-2 overflow-auto">
+        {/* File Browser Area */}
+        <div className="h-[400px] rounded-md border border-gray-200 dark:border-gray-700 p-3 overflow-auto bg-white dark:bg-gray-900">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <RefreshCw className="w-6 h-6 animate-spin mr-2" />
-              加载中...
+              Loading...
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-destructive">
+            <div className="flex flex-col items-center justify-center h-full text-red-600 dark:text-red-400">
               <AlertCircle className="w-8 h-8 mb-2" />
-              <p>{error}</p>
+              <p className="text-center">{error}</p>
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="mt-2"
+                className="mt-3"
                 onClick={refreshDirectory}
               >
-                重试
+                Retry
               </Button>
             </div>
           ) : items.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              此目录为空
+            <div className="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+              This directory is empty
             </div>
           ) : (
             viewMode === "grid" ? renderGridView() : renderListView()
           )}
         </div>
         
-        {/* 底部操作栏 */}
+        {/* Selection Footer */}
         {selectionMode && (
-          <div className="flex justify-end space-x-2 mt-4">
-            <Button variant="outline" onClick={cancelSelection}>
-              取消
-            </Button>
-            <Button onClick={confirmSelection}>
-              确认选择 ({Object.keys(selectedItems).length})
-            </Button>
+          <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
+            <div className="text-sm text-blue-700 dark:text-blue-300">
+              Selected {Object.keys(selectedItems).length} folders
+              {Object.keys(selectedItems).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {Object.keys(selectedItems).slice(0, 3).map(path => (
+                    <Badge key={path} variant="secondary" className="text-xs">
+                      {path.split('/').pop()}
+                    </Badge>
+                  ))}
+                  {Object.keys(selectedItems).length > 3 && (
+                    <Badge variant="secondary" className="text-xs">
+                      +{Object.keys(selectedItems).length - 3} more
+                    </Badge>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex space-x-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={cancelSelection}
+              >
+                Cancel
+              </Button>
+              <Button 
+                size="sm" 
+                onClick={confirmSelection}
+                disabled={Object.keys(selectedItems).length === 0}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                Confirm ({Object.keys(selectedItems).length})
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>

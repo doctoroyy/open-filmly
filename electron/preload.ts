@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getConfig: () => electronAPI.config.getConfig(),
   saveConfig: (config: any) => electronAPI.config.saveConfig(config),
   connectServer: (serverConfig: any) => electronAPI.server.connectServer(serverConfig),
+  goDiscoverShares: (serverConfig: any) => electronAPI.server.goDiscoverShares(serverConfig),
   listShares: () => electronAPI.server.listShares(),
   listFolders: (shareName: string) => electronAPI.server.listFolders(shareName),
   

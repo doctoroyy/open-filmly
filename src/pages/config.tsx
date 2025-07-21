@@ -23,7 +23,8 @@ import {
   Shield,
   Zap,
   Activity,
-  FolderOpen
+  FolderOpen,
+  CheckSquare
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -63,7 +64,7 @@ export default function ConfigPage() {
     password: "",
   })
   const [shares, setShares] = useState<string[]>([])
-  const [selectedShare, setSelectedShare] = useState<string>("")
+  const [selectedShares, setSelectedShares] = useState<string[]>([])
   const [selectedFolders, setSelectedFolders] = useState<string[]>([])
   
   // API state
@@ -109,13 +110,20 @@ export default function ConfigPage() {
           setSelectedFolders(config.selectedFolders)
         }
         
-        if (config.sharePath) {
-          setSelectedShare(config.sharePath)
+        if (config.sharePaths && Array.isArray(config.sharePaths)) {
+          setSelectedShares(config.sharePaths)
+        } else if (config.sharePath) {
+          // 兼容旧版本单个共享配置
+          setSelectedShares([config.sharePath])
         }
         
-        // Check connection status
-        if (config.ip) {
-          checkConnectionStatus(config)
+        // Check connection status only if we have sufficient config
+        if (config.ip && config.ip.trim() !== '') {
+          // 只有在有IP配置时才尝试连接测试
+          checkConnectionStatus(config).catch(error => {
+            console.log("Initial connection check failed:", error)
+            // 初始检查失败是正常的，不显示错误
+          })
         }
       }
     } catch (error) {
@@ -125,15 +133,29 @@ export default function ConfigPage() {
 
   const loadSystemStats = async () => {
     try {
-      // Mock system stats - would be replaced with actual API calls
+      // 获取真实的媒体数量
+      const mediaResult = await window.electronAPI?.getMedia("all")
+      const mediaCount = Array.isArray(mediaResult) ? mediaResult.length : 0
+      
+      // 获取真实的缓存大小（这里需要实现一个API）
+      // 暂时设为0，等待真实API
+      const cacheSize = "0 MB"
+      
       setSystemStats({
-        mediaCount: 150,
-        cacheSize: "2.3 GB",
-        apiUsage: 67,
-        lastScan: "2 hours ago"
+        mediaCount: mediaCount,
+        cacheSize: cacheSize,
+        apiUsage: 0, // 真实的API使用情况需要TMDB统计
+        lastScan: "Unknown" // 需要从数据库获取上次扫描时间
       })
     } catch (error) {
       console.error("Error loading system stats:", error)
+      // 失败时设置为0，不显示假数据
+      setSystemStats({
+        mediaCount: 0,
+        cacheSize: "0 MB",
+        apiUsage: 0,
+        lastScan: "Unknown"
+      })
     }
   }
 
@@ -177,13 +199,26 @@ export default function ConfigPage() {
   const checkConnectionStatus = async (testConfig?: SambaConfig) => {
     const configToTest = testConfig || config
     try {
-      // Mock connection check - would be replaced with actual API call
-      setConnectionStatus({
-        connected: true,
-        server: `${configToTest.ip}:${configToTest.port}`,
-        shares: ["Media", "Movies", "TV Shows"],
-        lastConnected: "Just now"
-      })
+      // 使用真实的API调用来检查连接状态和获取共享列表
+      const result = await window.electronAPI?.connectServer(configToTest)
+      
+      if (result?.success) {
+        setConnectionStatus({
+          connected: true,
+          server: `${configToTest.ip}:${configToTest.port}`,
+          shares: result.shares || [],
+          lastConnected: "Just now"
+        })
+        
+        if (result.shares) {
+          setShares(result.shares)
+        }
+      } else {
+        setConnectionStatus({
+          connected: false,
+          error: result?.error || "Connection failed"
+        })
+      }
     } catch (error) {
       setConnectionStatus({
         connected: false,
@@ -192,10 +227,11 @@ export default function ConfigPage() {
     }
   }
 
-  const handleConnect = async () => {
+  const handleDiscoverShares = async () => {
     setConnecting(true)
     try {
-      const result = await window.electronAPI?.connectServer(config)
+      console.log('使用Go SMB发现共享...')
+      const result = await window.electronAPI?.goDiscoverShares(config)
       
       if (result?.success) {
         setConnectionStatus({
@@ -210,34 +246,77 @@ export default function ConfigPage() {
         }
         
         toast({
-          title: "Connection Successful",
-          description: `Connected to ${config.ip} with ${result.shares?.length || 0} shares found`,
+          title: "SMB发现成功",
+          description: `发现了 ${result.shares?.length || 0} 个真实共享`,
         })
       } else {
         setConnectionStatus({
           connected: false,
-          error: result?.error || "Connection failed"
+          error: result?.error || "SMB发现失败"
         })
         
         toast({
-          title: "Connection Failed",
-          description: result?.error || "Unable to connect to server",
+          title: "SMB发现失败",
+          description: result?.error || "无法发现共享",
           variant: "destructive",
         })
+
+        // 如果是二进制文件不可用，显示详细信息
+        if (result?.errorType === "binary_not_found" && result?.systemInfo) {
+          console.error("Go SMB二进制文件信息:", result.systemInfo)
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       setConnectionStatus({
         connected: false,
-        error: "Network error"
+        error: "网络错误"
       })
       
       toast({
-        title: "Connection Error",
-        description: "Network error occurred",
+        title: "连接错误", 
+        description: "发生网络错误",
         variant: "destructive",
       })
     } finally {
       setConnecting(false)
+    }
+  }
+
+  const handleBrowseShare = async () => {
+    if (selectedShares.length === 0) {
+      toast({
+        title: "No Shares Selected",
+        description: "Please select at least one share first before browsing",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // 配置SMB客户端使用选定的共享（兼容旧版本，使用第一个共享）
+    const shareConfig = {
+      ...config,
+      sharePaths: selectedShares,
+      sharePath: selectedShares[0]
+    }
+
+    try {
+      // 保存配置到SMB客户端
+      const result = await window.electronAPI?.saveConfig(shareConfig)
+      if (result?.success) {
+        setShowFileBrowser(!showFileBrowser)
+      } else {
+        toast({
+          title: "Configuration Failed",
+          description: "Failed to configure share path",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Configuration Error",
+        description: "Error configuring share path",
+        variant: "destructive",
+      })
     }
   }
 
@@ -246,7 +325,9 @@ export default function ConfigPage() {
     try {
       const finalConfig = {
         ...config,
-        sharePath: selectedShare,
+        sharePaths: selectedShares,
+        // 兼容旧版本
+        sharePath: selectedShares[0] || "",
         selectedFolders: selectedFolders
       }
       
@@ -588,7 +669,7 @@ export default function ConfigPage() {
                     <div className="space-y-4 pt-4 border-t border-gray-700">
                       <Label className="flex items-center gap-2">
                         <FolderOpen className="h-4 w-4" />
-                        Available Shares
+                        Available Shares (可多选)
                       </Label>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         {connectionStatus.shares.map((share) => (
@@ -596,15 +677,25 @@ export default function ConfigPage() {
                             key={share}
                             className={cn(
                               "cursor-pointer transition-all border-2",
-                              selectedShare === share 
+                              selectedShares.includes(share)
                                 ? "border-blue-500 bg-blue-500/10" 
                                 : "border-gray-700 bg-gray-800/30 hover:border-gray-600"
                             )}
-                            onClick={() => setSelectedShare(share)}
+                            onClick={() => {
+                              setSelectedShares(prev => 
+                                prev.includes(share)
+                                  ? prev.filter(s => s !== share)
+                                  : [...prev, share]
+                              )
+                            }}
                           >
                             <CardContent className="p-4">
                               <div className="flex items-center gap-3">
-                                <Folder className="h-5 w-5 text-blue-400" />
+                                {selectedShares.includes(share) ? (
+                                  <CheckSquare className="h-5 w-5 text-blue-400" />
+                                ) : (
+                                  <Folder className="h-5 w-5 text-blue-400" />
+                                )}
                                 <div>
                                   <p className="font-medium">{share}</p>
                                   <p className="text-sm text-gray-400">SMB Share</p>
@@ -614,18 +705,28 @@ export default function ConfigPage() {
                           </Card>
                         ))}
                       </div>
+                      {selectedShares.length > 0 && (
+                        <div className="mt-4 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
+                          <p className="text-sm text-blue-300">
+                            已选择 {selectedShares.length} 个共享: {selectedShares.join(', ')}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
                 <CardFooter>
-                  <Button 
-                    onClick={handleConnect} 
-                    disabled={connecting || !config.ip}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    <Activity className="mr-2 h-4 w-4" />
-                    {connecting ? "Connecting..." : "Test Connection"}
-                  </Button>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button 
+                      onClick={handleDiscoverShares} 
+                      disabled={connecting || !config.ip}
+                      className="bg-blue-600 hover:bg-blue-700"
+                      title="使用Go语言编写的高性能SMB发现工具"
+                    >
+                      <Activity className="mr-2 h-4 w-4" />
+                      {connecting ? "发现中..." : "发现共享"}
+                    </Button>
+                  </div>
                 </CardFooter>
               </Card>
             </TabsContent>
@@ -641,60 +742,100 @@ export default function ConfigPage() {
                   <CardDescription>Configure media scanning and organization</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {selectedFolders.length > 0 && (
-                    <div className="space-y-3">
-                      <Label>Selected Folders</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedFolders.map((folder, index) => (
-                          <Badge 
-                            key={index}
-                            variant="secondary" 
-                            className="bg-blue-500/20 text-blue-300 border-blue-500/30"
-                          >
-                            {folder}
-                            <button
-                              className="ml-2 hover:text-red-300"
-                              onClick={() => setSelectedFolders(prev => prev.filter((_, i) => i !== index))}
-                            >
-                              ×
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
+                  {!connectionStatus.connected || selectedShares.length === 0 ? (
+                    <div className="text-center p-8 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                      <HardDrive className="h-12 w-12 mx-auto mb-4 text-yellow-400" />
+                      <h3 className="text-lg font-semibold mb-2 text-yellow-300">需要先连接SMB服务器</h3>
+                      <p className="text-yellow-400/80 mb-4">
+                        请先在Network选项卡中连接到SMB服务器并选择共享文件夹
+                      </p>
+                      <Button 
+                        variant="outline" 
+                        className="border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20"
+                        onClick={() => {
+                          // Switch to network tab
+                          const networkTab = document.querySelector('[data-value="network"]') as HTMLElement
+                          networkTab?.click()
+                        }}
+                      >
+                        前往Network配置
+                      </Button>
                     </div>
-                  )}
-                  
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setShowFileBrowser(!showFileBrowser)}
-                    className="border-gray-600 hover:border-gray-500"
-                  >
-                    <FolderOpen className="mr-2 h-4 w-4" />
-                    {showFileBrowser ? "Hide" : "Browse"} Folders
-                  </Button>
-                  
-                  {showFileBrowser && selectedShare && (
-                    <Card className="bg-gray-900/50 border-gray-600">
-                      <CardHeader>
-                        <CardTitle className="text-lg">Browse Share: {selectedShare}</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <SMBFileBrowser
-                          initialPath="/"
-                          selectionMode={true}
-                          selectedFolders={selectedFolders}
-                          onSelect={(selectedPaths) => {
-                            setSelectedFolders(selectedPaths)
-                            setShowFileBrowser(false)
-                            toast({
-                              title: "Folders Selected",
-                              description: `Selected ${selectedPaths.length} folders for scanning`,
-                            })
-                          }}
-                          onCancel={() => setShowFileBrowser(false)}
-                        />
-                      </CardContent>
-                    </Card>
+                  ) : (
+                    <>
+                      {selectedFolders.length > 0 && (
+                        <div className="space-y-3">
+                          <Label>Selected Folders</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedFolders.map((folder, index) => (
+                              <Badge 
+                                key={index}
+                                variant="secondary" 
+                                className="bg-blue-500/20 text-blue-300 border-blue-500/30"
+                              >
+                                {folder}
+                                <button
+                                  className="ml-2 hover:text-red-300"
+                                  onClick={() => setSelectedFolders(prev => prev.filter((_, i) => i !== index))}
+                                >
+                                  ×
+                                </button>
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="bg-blue-500/10 rounded-lg border border-blue-500/20 p-4">
+                        <div className="flex items-start gap-3">
+                          <FolderOpen className="h-5 w-5 text-blue-400 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-medium text-blue-300">
+                              当前共享 ({selectedShares.length}个): {selectedShares.join(', ')}
+                            </p>
+                            <p className="text-xs text-blue-400/80 mt-1">
+                              点击下方按钮浏览共享中的文件夹并选择要扫描的目录
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <Button 
+                        variant="outline" 
+                        onClick={handleBrowseShare}
+                        disabled={selectedShares.length === 0}
+                        className="border-gray-600 hover:border-gray-500 disabled:opacity-50"
+                      >
+                        <FolderOpen className="mr-2 h-4 w-4" />
+                        {showFileBrowser ? "Hide" : "Browse"} Folders
+                      </Button>
+                      
+                      {showFileBrowser && selectedShares.length > 0 && (
+                        <Card className="bg-gray-900/50 border-gray-600">
+                          <CardHeader>
+                            <CardTitle className="text-lg">
+                              Browse Shares: {selectedShares.join(', ')}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <SMBFileBrowser
+                              initialPath="/"
+                              selectionMode={true}
+                              selectedFolders={selectedFolders}
+                              onSelect={(selectedPaths) => {
+                                setSelectedFolders(selectedPaths)
+                                setShowFileBrowser(false)
+                                toast({
+                                  title: "Folders Selected",
+                                  description: `Selected ${selectedPaths.length} folders for scanning`,
+                                })
+                              }}
+                              onCancel={() => setShowFileBrowser(false)}
+                            />
+                          </CardContent>
+                        </Card>
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>

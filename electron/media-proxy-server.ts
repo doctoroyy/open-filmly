@@ -5,15 +5,15 @@
 
 import * as http from 'http'
 import * as url from 'url'
-import { SambaClient } from './smb-client'
+import { GoSMBClient } from './go-smb-client'
 
 export class MediaProxyServer {
   private server: http.Server | null = null
   private port: number = 0
-  private sambaClient: SambaClient
+  private goSmbClient: GoSMBClient
 
-  constructor(sambaClient: SambaClient) {
-    this.sambaClient = sambaClient
+  constructor(goSmbClient: GoSMBClient) {
+    this.goSmbClient = goSmbClient
   }
 
   /**
@@ -123,8 +123,8 @@ export class MediaProxyServer {
     try {
       console.log(`[MediaProxy] Streaming file: ${filePath}`)
 
-      // 从SMB读取文件
-      const fileBuffer = await this.sambaClient.readFile(filePath)
+      // 从Go SMB读取文件
+      const fileBuffer = await this.goSmbClient.readFile(filePath)
       const fileSize = fileBuffer.length
 
       // 解析Range请求（用于视频拖拽）

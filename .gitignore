@@ -28,3 +28,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Go related
+/tools/smb-discover/go/
+/tools/bin/
+/bin/smb-discover-*
+
+# Tools directory (except source code)
+/tools/build-smb-tools.sh
+/tools/Dockerfile.build
