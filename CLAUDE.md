@@ -10,7 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm start` - Run built Electron app
 
 ### Building
-- `pnpm build` - Build frontend and compile TypeScript for Electron
+- `pnpm build` - Build frontend, compile TypeScript for Electron, and compile SMB tools
+- `pnpm build:smb` - Compile SMB tools only (cross-platform Go binaries)
 - `pnpm dist` - Clean, build, and create distributable packages
 - `pnpm pack` - Create packaged app without installer
 - `pnpm clean` - Remove dist directory
@@ -48,7 +49,7 @@ The application uses a pluggable provider system for extensibility:
 - **network-storage-client.ts** - Unified client for network storage providers
 - **media-player-client.ts** - Unified client for media player providers
 - **provider-factory.ts** - Factory for creating provider instances
-- **media-proxy-server.ts** - HTTP proxy server for streaming media files
+- **media-proxy-server.ts** - ~~HTTP proxy server for streaming media files~~ (REMOVED - replaced with native MPV integration)
 
 ### IPC Communication Architecture
 Type-safe IPC system with centralized channel definitions:
@@ -85,7 +86,8 @@ Type-safe IPC system with centralized channel definitions:
 
 ### Network Storage Integration
 SMB/CIFS support via Go binaries for cross-platform compatibility:
-- **smb-discover** Go binary for share discovery and connection testing
+- **smb-tools** Go binary with full SMB functionality (discover/list/test commands)
+- Binary names: `smb-tools-{platform}-{arch}` (e.g., `smb-tools-darwin-arm64`)
 - Path conversion between Unix/Windows formats
 - Connection pooling and error handling
 - Auto-discovery of common share names and NAS devices
@@ -94,14 +96,15 @@ SMB/CIFS support via Go binaries for cross-platform compatibility:
 SQLite with dynamic schema updates for backwards compatibility. Core tables include media files, configuration, and metadata cache.
 
 ### External Tools Integration
-- **Go Binaries** (`tools/smb-discover/`) - Cross-platform SMB discovery
+- **Go Binaries** (`tools/smb-tools/`) - Cross-platform SMB client with discover/list/test functionality
 - **TMDB API** - Movie/TV metadata and poster fetching
 - **Gemini AI** - Intelligent media file name recognition
-- **MPV Player** - Media playback integration
+- **MPV Player** - Media playback integration (native binary approach)
 
 ### Build System
 - Vite for frontend bundling with hot reload
 - TypeScript compilation for Electron main process
+- Go cross-compilation for SMB tools (automatic during production builds)
 - electron-builder for cross-platform distribution (Windows, macOS, Linux)
 - GitHub Actions workflow for automated releases on git tags
 
@@ -112,5 +115,14 @@ SQLite with dynamic schema updates for backwards compatibility. Core tables incl
 - Media type classification uses both path analysis and TMDB search results
 - Poster images cached locally for offline access
 - Error handling includes graceful degradation for network issues
-- Go binaries automatically built for target platforms (darwin-arm64, etc.)
+- SMB tools automatically compiled during production builds (not development)
+- Binary files excluded from git tracking to prevent repository bloat
 - **All code comments and developer messages must be in English** - no Chinese comments in codebase
+
+## Recent Changes
+- Removed obsolete `media-proxy-server.ts` (replaced with native MPV integration)
+- Cleaned up tools directory: `smb-discover` → `smb-tools` with complete SMB functionality
+- Updated SMB provider to use new binary names (`smb-tools-*` instead of `smb-discover-*`)
+- Implemented automatic SMB tools compilation in production builds
+- Fixed frontend to use `host` instead of `ip` for network configuration
+- Set up proper .gitignore for binary files to prevent git repository bloat
