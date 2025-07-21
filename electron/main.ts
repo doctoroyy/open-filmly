@@ -13,10 +13,10 @@ import { defaultProviderFactory } from "./provider-factory"
 import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
-// 初始化 MPV.js - 使用动态路径查找
+// Initialize MPV.js - using dynamic path discovery
 let mpvPluginInitialized = false
 try {
-  // 动态查找 mpv.js 模块路径
+  // Dynamically locate mpv.js module path
   const mpvModulePath = require.resolve('mpv.js')
   const mpvDir = path.dirname(mpvModulePath)
   const buildDir = path.join(mpvDir, 'build')
@@ -25,19 +25,19 @@ try {
   
   console.log('[MPV] Looking for MPV binary at:', mpvBinaryPath)
   
-  // 确保二进制文件存在
+  // Ensure binary file exists
   if (!fs.existsSync(mpvBinaryPath)) {
     console.log('[MPV] Binary not found, extracting from prebuilt package...')
     
-    // 创建目录
+    // Create directory
     if (!fs.existsSync(releaseBuildDir)) {
       fs.mkdirSync(releaseBuildDir, { recursive: true })
     }
     
-    // 提取预构建的二进制文件
+    // Extract prebuilt binary file
     const { execSync } = require('child_process')
     
-    // 根据平台选择正确的预构建包
+    // Select correct prebuilt package based on platform
     let prebuiltFile = ''
     if (process.platform === 'darwin') {
       prebuiltFile = 'mpv.js-v0.3.0-node-v42-darwin-x64.tar.gz'
@@ -66,16 +66,16 @@ try {
 
   const { getPluginEntry } = require('mpv.js')
   
-  // 注册 pepper 插件
+  // Register pepper plugin
   app.commandLine.appendSwitch('register-pepper-plugins', getPluginEntry(buildDir))
   
-  // 允许运行不安全的内容 (PPAPI 插件需要)
+  // Allow running insecure content (required for PPAPI plugins)
   app.commandLine.appendSwitch('allow-running-insecure-content')
   
-  // 禁用网络安全策略，以支持本地插件
+  // Disable web security policy to support local plugins
   app.commandLine.appendSwitch('disable-web-security')
   
-  // 启用插件支持
+  // Enable plugin support
   app.commandLine.appendSwitch('enable-plugins')
   
   console.log('[MPV] MPV.js plugin registered successfully')
@@ -85,16 +85,16 @@ try {
   mpvPluginInitialized = false
 }
 
-// 抑制 macOS 上的 IMK 相关警告
+// Suppress IMK-related warnings on macOS
 if (process.platform === 'darwin') {
   process.env.IMK_DISABLE_WAKEUP_RELIABLE = '1'
-  // 禁用硬件加速可以解决某些macOS上的渲染问题
+  // Disabling hardware acceleration can fix certain rendering issues on macOS
   if (process.platform === 'darwin') {
     app.disableHardwareAcceleration()
   }
 }
 
-// 全局变量
+// Global variables
 let mainWindow: BrowserWindow | null = null
 // Using new abstraction layer
 let networkStorageClient: NetworkStorageClient
@@ -107,7 +107,7 @@ let autoScanManager: AutoScanManager
 let hashService: HashService
 let productionServer: any = null
 
-// 创建主窗口
+// Create main window
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -116,11 +116,11 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      webSecurity: false, // 允许加载本地文件和MPV插件
-      plugins: true, // 启用插件支持 (PPAPI)
-      experimentalFeatures: true, // 启用实验性功能
+      webSecurity: false, // Allow loading local files and MPV plugins
+      plugins: true, // Enable plugin support (PPAPI)
+      experimentalFeatures: true, // Enable experimental features
     },
-    // 设置窗口图标 - 根据平台使用正确的图标路径
+    // Set window icon - use correct icon path based on platform
     icon: process.platform === 'darwin' 
       ? path.join(__dirname, "../public/app-icons/mac/icon.icns") 
       : process.platform === 'win32'
@@ -128,26 +128,26 @@ function createWindow() {
         : path.join(__dirname, "../public/app-icons/linux/512x512.png"),
   })
 
-  // 窗口准备好后再显示，避免闪烁
+  // Show window only after it's ready to avoid flashing
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
   })
 
-  // 在开发模式下加载本地服务器
+  // Load local server in development mode
   const isDev = process.env.NODE_ENV === "development"
   console.log(`Running in ${isDev ? "development" : "production"} mode`)
   
   if (isDev) {
-    // 尝试多个可能的端口
+    // Try multiple possible ports
     const possiblePorts = [5173, 5174, 3000]
     let serverUrl = "http://localhost:5173"
     
-    // 检查哪个端口可用
+    // Check which port is available
     for (const port of possiblePorts) {
       try {
         const testUrl = `http://localhost:${port}`
         console.log(`Testing development server at: ${testUrl}`)
-        // 这里我们将默认使用5173，如果不可用concurrently会使用其他端口
+        // We'll default to 5173, if unavailable concurrently will use other ports
         serverUrl = testUrl
         break
       } catch (error) {
@@ -159,18 +159,18 @@ function createWindow() {
     mainWindow.loadURL(serverUrl)
     mainWindow.webContents.openDevTools()
   } else {
-    // 在生产模式下启动 Hono 服务器
+    // Start Hono server in production mode
     try {
       const server = createProductionServer(3000)
       productionServer = server.start()
       const serverUrl = "http://localhost:3000"
       console.log(`Started production server at: ${serverUrl}`)
       mainWindow.loadURL(serverUrl)
-      // 在生产模式下也打开开发工具，方便调试
+      // Also open dev tools in production mode for debugging convenience
       // mainWindow.webContents.openDevTools()
     } catch (error) {
       console.error('Failed to start production server:', error)
-      // 回退到文件协议
+      // Fallback to file protocol
       const filePath = path.join(__dirname, "../renderer/index.html")
       console.log(`Fallback to file protocol: ${filePath}`)
       const fileUrl = `file://${filePath}`
@@ -179,16 +179,16 @@ function createWindow() {
     }
   }
 
-  // 窗口关闭时清除引用
+  // Clear reference when window is closed
   mainWindow.on("closed", () => {
     mainWindow = null
   })
 }
 
-// 初始化应用
+// Application initialization
 async function initializeApp() {
   try {
-    // 初始化数据库
+    // Initialize database
     mediaDatabase = new MediaDatabase(path.join(app.getPath("userData"), "media.db"))
     await mediaDatabase.initialize()
 
@@ -223,7 +223,7 @@ async function initializeApp() {
           if (matches && matches[1]) {
             tmdbApiKey = matches[1].trim()
             console.log(`Found TMDB API key in .env.local: ${tmdbApiKey.substring(0, 5)}...`)
-            // 保存到数据库以便下次使用
+            // Save to database for next use
             await mediaDatabase.saveTmdbApiKey(tmdbApiKey)
           } else {
             console.log('TMDB API key not found in .env.local')
@@ -242,7 +242,7 @@ async function initializeApp() {
       if (envApiKey) {
         tmdbApiKey = envApiKey
         console.log(`Using TMDB API key from environment: found`)
-        // 保存到数据库以便下次使用
+        // Save to database for next use
         await mediaDatabase.saveTmdbApiKey(tmdbApiKey)
       } else {
         console.log(`Using TMDB API key from environment: not found`)

@@ -1,6 +1,6 @@
 /**
- * 所有IPC处理器的实现
- * 使用类型安全的IPC架构
+ * Implementation of all IPC handlers
+ * Using type-safe IPC architecture
  */
 
 import { dialog } from 'electron'
@@ -19,8 +19,8 @@ import { registerIPCHandler } from './ipc-handler'
 import { IPCChannels } from './ipc-channels'
 
 /**
- * 初始化所有IPC处理器
- * @param services 应用程序服务
+ * Initialize all IPC handlers
+ * @param services Application services
  */
 export function initializeIPCHandlers(services: {
   mediaDatabase: MediaDatabase

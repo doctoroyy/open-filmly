@@ -25,53 +25,92 @@ Open Filmly is an Electron-based media management platform with a React frontend
 
 **Key Components:**
 - **Frontend**: React + Vite + TypeScript in renderer process
-- **Backend**: Electron main process with SQLite database and multiple service modules
-- **Communication**: IPC between renderer and main processes
+- **Backend**: Electron main process with SQLite database and pluggable provider system
+- **Communication**: Type-safe IPC architecture between renderer and main processes
+
+### Provider-Based Architecture
+The application uses a pluggable provider system for extensibility:
+
+**Storage Providers** (`electron/providers/storage/`):
+- **SMB Provider** - Network storage via SMB/CIFS protocol with Go binary for discovery
+- Extensible for FTP, NFS, WebDAV, etc.
+
+**Media Player Providers** (`electron/providers/player/`):
+- **MPV Provider** - Integration with MPV media player
+- **System Provider** - Fallback to system default players
+- Extensible for VLC, browser-based players, etc.
 
 ### Backend Services (electron/ directory)
 - **main.ts** - Application entry point, window management, IPC orchestration
 - **media-database.ts** - SQLite persistence layer using better-sqlite3
-- **media-scanner.ts** - File system scanning and media classification
-- **metadata-scraper.ts** - TMDB API integration for enriching media metadata
-- **smb-client.ts** - SMB/CIFS network storage client
-- **server.ts** - Production HTTP server using Hono framework
+- **auto-scan-manager.ts** - Automated media scanning and monitoring
+- **metadata-scraper.ts** - TMDB API integration with intelligent name recognition
+- **network-storage-client.ts** - Unified client for network storage providers
+- **media-player-client.ts** - Unified client for media player providers
+- **provider-factory.ts** - Factory for creating provider instances
+- **media-proxy-server.ts** - HTTP proxy server for streaming media files
+
+### IPC Communication Architecture
+Type-safe IPC system with centralized channel definitions:
+- **ipc-channels.ts** - Centralized channel definitions (no string hardcoding)
+- **ipc-handler.ts** - Type-safe handler registration framework
+- **ipc-client.ts** - Client-side API classes with full type safety
+- **ipc-handlers.ts** - Concrete handler implementations
+- See `electron/IPC_ARCHITECTURE.md` for detailed documentation
 
 ### Frontend Structure (src/ directory)
 - **router/** - File-based routing system
-- **pages/** - Route components (index, movies, tv, config, media-list)
-- **components/** - Reusable UI components (media cards, grids, file browser)
+- **pages/** - Route components (index, movies, tv, config, media-list, debug)
+- **components/** - Reusable UI components with Radix UI + Tailwind CSS
 - **lib/api.ts** - TMDB API client and IPC communication utilities
+- **types/electron.d.ts** - TypeScript definitions for Electron API
 
 ### Data Flow Patterns
 
 **Media Scanning Pipeline:**
-1. SMB client discovers network shares and files
-2. File parser extracts metadata from paths/filenames
-3. Media scanner classifies files as movies/TV shows
-4. Database stores basic file information
-5. Metadata scraper enriches data via TMDB API
-6. Frontend displays organized media library
+1. Network storage provider discovers shares and files via Go binaries
+2. Auto-scan manager monitors configured directories
+3. File parser extracts metadata from paths/filenames using intelligent recognition
+4. Media scanner classifies files as movies/TV shows
+5. Database stores file information with dynamic schema updates
+6. Metadata scraper enriches data via TMDB API and Gemini AI
+7. Frontend displays organized media library with posters
 
 **Configuration Management:**
-- User settings persist in SQLite config table
-- TMDB API keys managed at runtime
+- Unified `host` field supports IP addresses, hostnames, and domain names
+- User settings persist in SQLite config table with backwards compatibility
+- TMDB and Gemini API keys managed at runtime
 - Network storage credentials stored securely
 - Folder selection for targeted scanning
 
 ### Network Storage Integration
-SMB/CIFS support for accessing NAS devices with path conversion between Unix/Windows formats, connection pooling, and auto-discovery of common share names.
+SMB/CIFS support via Go binaries for cross-platform compatibility:
+- **smb-discover** Go binary for share discovery and connection testing
+- Path conversion between Unix/Windows formats
+- Connection pooling and error handling
+- Auto-discovery of common share names and NAS devices
 
 ### Database Schema
-SQLite with dynamic schema updates for backwards compatibility. Core tables include media files and application configuration.
+SQLite with dynamic schema updates for backwards compatibility. Core tables include media files, configuration, and metadata cache.
+
+### External Tools Integration
+- **Go Binaries** (`tools/smb-discover/`) - Cross-platform SMB discovery
+- **TMDB API** - Movie/TV metadata and poster fetching
+- **Gemini AI** - Intelligent media file name recognition
+- **MPV Player** - Media playback integration
 
 ### Build System
-- Vite for frontend bundling
+- Vite for frontend bundling with hot reload
 - TypeScript compilation for Electron main process
-- electron-builder for cross-platform distribution
+- electron-builder for cross-platform distribution (Windows, macOS, Linux)
 - GitHub Actions workflow for automated releases on git tags
 
 ### Development Notes
-- IPC handlers in main.ts provide clean API between processes
+- All network configuration uses unified `host` field (not `ip`) for flexibility
+- Provider system allows easy extension for new storage protocols and players
+- IPC handlers provide clean, type-safe API between processes
 - Media type classification uses both path analysis and TMDB search results
 - Poster images cached locally for offline access
 - Error handling includes graceful degradation for network issues
+- Go binaries automatically built for target platforms (darwin-arm64, etc.)
+- **All code comments and developer messages must be in English** - no Chinese comments in codebase

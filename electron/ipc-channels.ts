@@ -1,6 +1,6 @@
 /**
- * 集中化的IPC通道定义
- * 提供类型安全和统一的接口定义
+ * Centralized IPC channel definitions
+ * Provides type safety and unified interface definitions
  */
 
 // 配置相关的IPC通道
