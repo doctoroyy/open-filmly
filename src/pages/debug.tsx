@@ -53,8 +53,8 @@ export default function DebugPage() {
           totalCount: movieData.length + tvData.length
         },
         connection: {
-          status: config?.ip ? "已配置" : "未配置",
-          server: config?.ip,
+          status: config?.host ? "已配置" : "未配置",
+          server: config?.host,
           share: config?.sharePath
         },
         system: {
@@ -113,7 +113,7 @@ export default function DebugPage() {
   const handleTestConnection = async () => {
     try {
       const config = await window.electronAPI?.getConfig()
-      if (!config?.ip) {
+      if (!config?.host) {
         toast({
           title: "连接测试失败",
           description: "请先配置服务器连接",

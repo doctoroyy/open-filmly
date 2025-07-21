@@ -10,8 +10,10 @@ import { MediaDatabase } from './media-database'
 import { MediaPlayer } from './media-player'
 import { MetadataScraper } from './metadata-scraper'
 import { AutoScanManager } from './auto-scan-manager'
-// Old SambaClient removed - using GoSMBClient only
-import { GoSMBClient } from './go-smb-client'
+// Using new abstraction layer
+import { NetworkStorageClient } from './network-storage-client'
+import { MediaPlayerClient } from './media-player-client'
+import { defaultProviderFactory } from './provider-factory'
 import { MediaProxyServer } from './media-proxy-server'
 import { registerIPCHandler } from './ipc-handler'
 import { IPCChannels } from './ipc-channels'
@@ -25,7 +27,8 @@ export function initializeIPCHandlers(services: {
   mediaPlayer: MediaPlayer
   metadataScraper: MetadataScraper
   autoScanManager: AutoScanManager
-  goSmbClient: GoSMBClient
+  networkStorageClient: NetworkStorageClient
+  mediaPlayerClient: MediaPlayerClient
   mediaProxyServer: MediaProxyServer
   mainWindow: Electron.BrowserWindow | null
 }) {
@@ -34,7 +37,8 @@ export function initializeIPCHandlers(services: {
     mediaPlayer,
     metadataScraper,
     autoScanManager,
-    goSmbClient,
+    networkStorageClient,
+    mediaPlayerClient,
     mediaProxyServer,
     mainWindow
   } = services
@@ -47,7 +51,7 @@ export function initializeIPCHandlers(services: {
   registerIPCHandler(IPCChannels.SAVE_CONFIG, async (_, config) => {
     try {
       await mediaDatabase.saveConfig(config)
-      goSmbClient.configure(config)
+      networkStorageClient.configure(config)
       
       // 设置自动扫描管理器的共享路径
       if (config.sharePath) {
@@ -60,7 +64,7 @@ export function initializeIPCHandlers(services: {
       }
       
       // 如果配置完整（有IP和共享路径），自动触发扫描
-      if (config.ip && config.ip.trim() !== "" && 
+      if (config.host && config.host.trim() !== "" && 
           config.sharePath && config.sharePath.trim() !== "") {
         console.log("[SAVE_CONFIG] Configuration complete, triggering auto scan...")
         
@@ -125,26 +129,31 @@ export function initializeIPCHandlers(services: {
     }
   })
 
-  // Go SMB发现处理器 (推荐使用)
+  // 网络存储发现处理器
   registerIPCHandler(IPCChannels.GO_DISCOVER, async (_, serverConfig) => {
     try {
-      console.log('使用Go SMB客户端发现共享...')
+      console.log('使用网络存储客户端发现共享...')
       
-      goSmbClient.configure(serverConfig)
+      // 设置SMB提供者（默认）
+      if (!networkStorageClient.getCurrentProviderType()) {
+        networkStorageClient.setProvider('smb')
+      }
       
-      // 检查Go二进制文件是否可用
-      if (!goSmbClient.isBinaryAvailable()) {
-        const systemInfo = await goSmbClient.getSystemInfo()
+      networkStorageClient.configure(serverConfig)
+      
+      // 检查提供者是否可用
+      if (!networkStorageClient.isProviderAvailable()) {
+        const systemInfo = await networkStorageClient.getSystemInfo()
         return {
           success: false,
-          error: "Go SMB二进制文件不可用",
-          errorType: "binary_not_found",
+          error: "网络存储提供者不可用",
+          errorType: "provider_not_available",
           systemInfo: systemInfo
         }
       }
       
       // 首先测试连接
-      const isConnected = await goSmbClient.testConnection()
+      const isConnected = await networkStorageClient.testConnection()
       if (!isConnected) {
         return {
           success: false,
@@ -153,10 +162,10 @@ export function initializeIPCHandlers(services: {
         }
       }
       
-      // 发现真实共享
-      const shares = await goSmbClient.discoverShares()
+      // 发现共享
+      const shares = await networkStorageClient.discoverShares()
       
-      console.log(`Go SMB发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
+      console.log(`发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
       
       return {
         success: true,
@@ -164,7 +173,7 @@ export function initializeIPCHandlers(services: {
         shareDetails: shares
       }
     } catch (error: any) {
-      console.error('Go SMB发现失败:', error)
+      console.error('网络存储发现失败:', error)
       return {
         success: false,
         error: error.message,
@@ -173,11 +182,11 @@ export function initializeIPCHandlers(services: {
     }
   })
 
-  // 服务器连接相关处理器 - 使用Go SMB发现
+  // 服务器连接相关处理器
   registerIPCHandler(IPCChannels.CONNECT_SERVER, async (_, serverConfig) => {
     try {
       // 验证必要的配置
-      if (!serverConfig.ip || serverConfig.ip.trim() === "") {
+      if (!serverConfig.host || serverConfig.host.trim() === "") {
         return { 
           success: false, 
           error: "服务器IP必须指定",
@@ -185,24 +194,29 @@ export function initializeIPCHandlers(services: {
         }
       }
       
-      console.log(`使用Go SMB客户端连接到服务器 ${serverConfig.ip}`)
+      console.log(`使用网络存储客户端连接到服务器 ${serverConfig.host}`)
       
-      // 配置Go SMB客户端
-      goSmbClient.configure(serverConfig)
+      // 设置提供者（如果未设置）
+      if (!networkStorageClient.getCurrentProviderType()) {
+        networkStorageClient.setProvider('smb')
+      }
       
-      // 检查二进制文件可用性
-      if (!goSmbClient.isBinaryAvailable()) {
-        const systemInfo = await goSmbClient.getSystemInfo()
+      // 配置网络存储客户端
+      networkStorageClient.configure(serverConfig)
+      
+      // 检查提供者可用性
+      if (!networkStorageClient.isProviderAvailable()) {
+        const systemInfo = await networkStorageClient.getSystemInfo()
         return {
           success: false,
-          error: "Go SMB二进制文件不可用",
-          errorType: "binary_not_found",
+          error: "网络存储提供者不可用",
+          errorType: "provider_not_available",
           systemInfo
         }
       }
       
       // 首先测试连接
-      const isConnected = await goSmbClient.testConnection()
+      const isConnected = await networkStorageClient.testConnection()
       if (!isConnected) {
         return {
           success: false,
@@ -211,10 +225,10 @@ export function initializeIPCHandlers(services: {
         }
       }
       
-      // 发现真实共享
-      const shares = await goSmbClient.discoverShares()
+      // 发现共享
+      const shares = await networkStorageClient.discoverShares()
       
-      console.log(`Go SMB发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
+      console.log(`发现了 ${shares.length} 个共享:`, shares.map(s => s.name))
       
       return {
         success: true,
@@ -222,7 +236,7 @@ export function initializeIPCHandlers(services: {
         shareDetails: shares
       }
     } catch (error: any) {
-      console.error('Go SMB连接失败:', error)
+      console.error('网络存储连接失败:', error)
       return {
         success: false,
         error: error.message,
@@ -233,7 +247,7 @@ export function initializeIPCHandlers(services: {
 
   registerIPCHandler(IPCChannels.LIST_SHARES, async () => {
     try {
-      const shares = await goSmbClient.discoverShares()
+      const shares = await networkStorageClient.discoverShares()
       // Format shares to match expected structure
       const shareNames = shares.map(share => share.name)
       return { success: true, data: { shares: shareNames } }
@@ -256,8 +270,8 @@ export function initializeIPCHandlers(services: {
       
       console.log(`Listing folders in share: "${shareNameOnly}", directory: "${directory}"`)
       
-      // Use Go SMB client to list directory contents
-      const items = await goSmbClient.listDirectory(shareNameOnly, directory)
+      // Use network storage client to list directory contents
+      const items = await networkStorageClient.listDirectory(shareNameOnly, directory)
       
       // Filter only directories
       const folders = items.filter(item => item.isDirectory).map(item => item.name)
@@ -279,7 +293,7 @@ export function initializeIPCHandlers(services: {
       
       if (dirPath === "/") {
         // Root path - show all available shares
-        const result = await goSmbClient.discoverShares()
+        const result = await networkStorageClient.discoverShares()
         const shareItems = result.map(share => ({
           name: share.name,
           isDirectory: true,
@@ -303,8 +317,8 @@ export function initializeIPCHandlers(services: {
         
         console.log(`Listing directory: share="${shareName}", directory="${directory}"`)
         
-        // Use Go SMB client to list directory contents
-        const items = await goSmbClient.listDirectory(shareName, directory)
+        // Use network storage client to list directory contents
+        const items = await networkStorageClient.listDirectory(shareName, directory)
         
         // Convert GoDirectoryItem to FileItem format
         const fileItems = items.map(item => ({
@@ -325,6 +339,132 @@ export function initializeIPCHandlers(services: {
         success: false, 
         error: error instanceof Error ? error.message : String(error),
         errorType: error instanceof Error && 'code' in error ? (error as any).code : 'unknown'
+      }
+    }
+  })
+
+  // 通用网络文件浏览器处理器
+  registerIPCHandler(IPCChannels.GET_NETWORK_DIR_CONTENTS, async (_, request) => {
+    try {
+      const { path: dirPath, storageType = 'smb' } = request
+      console.log(`Getting network directory contents for: "${dirPath}" using ${storageType}`)
+      
+      // 设置或切换存储类型
+      if (networkStorageClient.getCurrentProviderType() !== storageType) {
+        networkStorageClient.setProvider(storageType)
+        
+        // 重新配置（使用当前配置）
+        const currentConfig = await mediaDatabase.getConfig()
+        if (currentConfig) {
+          networkStorageClient.configure(currentConfig)
+        }
+      }
+      
+      if (dirPath === "/") {
+        // Root path - show all available shares
+        const result = await networkStorageClient.discoverShares()
+        const shareItems = result.map(share => ({
+          name: share.name,
+          isDirectory: true,
+          size: undefined,
+          modifiedTime: undefined
+        }))
+        
+        return { 
+          success: true, 
+          items: shareItems
+        }
+      } else {
+        // Parse the path to extract share and directory
+        const pathParts = dirPath.split('/').filter(Boolean)
+        if (pathParts.length === 0) {
+          throw new Error("Invalid path")
+        }
+        
+        const shareName = pathParts[0]
+        const directory = pathParts.length > 1 ? '/' + pathParts.slice(1).join('/') : '/'
+        
+        console.log(`Listing directory: share="${shareName}", directory="${directory}", type="${storageType}"`)
+        
+        // Use network storage client to list directory contents
+        const items = await networkStorageClient.listDirectory(shareName, directory)
+        
+        // Convert to expected format
+        const fileItems = items.map(item => ({
+          name: item.name,
+          isDirectory: item.isDirectory,
+          size: item.size,
+          modifiedTime: item.modifiedTime
+        }))
+        
+        return { 
+          success: true, 
+          items: fileItems
+        }
+      }
+    } catch (error: unknown) {
+      console.error(`Failed to get network contents of directory ${request.path}:`, error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error),
+        errorType: error instanceof Error && 'code' in error ? (error as any).code : 'unknown'
+      }
+    }
+  })
+
+  registerIPCHandler(IPCChannels.ADD_SINGLE_NETWORK_MEDIA, async (_, request) => {
+    try {
+      const { filePath, storageType = 'smb' } = request
+      
+      if (!filePath) {
+        throw new Error("File path is required")
+      }
+      
+      // 检查是否是支持的媒体文件
+      const fileExtension = path.extname(filePath).toLowerCase()
+      const supportedExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.m4v']
+      
+      if (!supportedExtensions.includes(fileExtension)) {
+        throw new Error(`不支持的文件格式: ${fileExtension}`)
+      }
+      
+      // 从文件名解析元数据
+      const fileName = path.basename(filePath)
+      const { parseFileName } = require("./file-parser")
+      const parsedInfo = parseFileName(fileName)
+      
+      // 确定媒体类型 (基于路径或文件名规则)
+      let mediaType: "movie" | "tv" = "movie"
+      if (filePath.includes("TV") || filePath.includes("Series") || 
+          filePath.includes("电视剧") || fileName.match(/S\d+E\d+/i)) {
+        mediaType = "tv"
+      }
+      
+      // 创建媒体记录
+      const mediaRecord = {
+        id: `${mediaType}-${Buffer.from(filePath).toString("base64").slice(0, 12)}`,
+        title: parsedInfo.title || fileName,
+        type: mediaType,
+        path: filePath,
+        year: parsedInfo.year || "未知",
+        posterPath: "",
+        dateAdded: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        storageType: storageType // 记录存储类型
+      }
+      
+      // 保存到数据库
+      await mediaDatabase.saveMedia(mediaRecord)
+      
+      return { 
+        success: true, 
+        data: { media: mediaRecord }
+      }
+    } catch (error: unknown) {
+      console.error("Failed to add single network media file:", error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error) 
       }
     }
   })
@@ -413,10 +553,10 @@ export function initializeIPCHandlers(services: {
     try {
       const { type, useCached = true } = request
       
-      if (!goSmbClient) {
+      if (!networkStorageClient) {
         return { 
           success: false, 
-          error: "Go SMB client is not initialized" 
+          error: "Network storage client is not initialized" 
         }
       }
       

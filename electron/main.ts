@@ -6,8 +6,10 @@ import { MetadataScraper } from "./metadata-scraper"
 import { AutoScanManager } from "./auto-scan-manager"
 import { HashService } from "./hash-service"
 import * as fs from "fs"
-// Old SambaClient removed - using GoSMBClient only
-import { GoSMBClient } from "./go-smb-client"
+// Using new abstraction layer
+import { NetworkStorageClient } from "./network-storage-client"
+import { MediaPlayerClient } from "./media-player-client"
+import { defaultProviderFactory } from "./provider-factory"
 import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
@@ -94,8 +96,9 @@ if (process.platform === 'darwin') {
 
 // 全局变量
 let mainWindow: BrowserWindow | null = null
-// Using only GoSMBClient now
-let goSmbClient: GoSMBClient
+// Using new abstraction layer
+let networkStorageClient: NetworkStorageClient
+let mediaPlayerClient: MediaPlayerClient
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
@@ -189,10 +192,22 @@ async function initializeApp() {
     mediaDatabase = new MediaDatabase(path.join(app.getPath("userData"), "media.db"))
     await mediaDatabase.initialize()
 
-    // Only using Go SMB client now
+    // Initialize network storage client with default provider factory
+    networkStorageClient = new NetworkStorageClient(defaultProviderFactory)
     
-    // 初始化Go SMB客户端
-    goSmbClient = new GoSMBClient()
+    // Set SMB as the default provider
+    networkStorageClient.setProvider('smb')
+    
+    // Initialize media player client
+    mediaPlayerClient = new MediaPlayerClient()
+    
+    // Set MPV as the default media player provider
+    try {
+      mediaPlayerClient.setProvider('mpv')
+    } catch (error) {
+      console.warn('MPV provider not available, using system default')
+      mediaPlayerClient.setProvider('system')
+    }
 
     // 初始化海报抓取器，使用TMDB API密钥
     // 首先尝试从数据库获取TMDB API密钥
@@ -240,7 +255,7 @@ async function initializeApp() {
     metadataScraper = new MetadataScraper(mediaDatabase, tmdbApiKey || undefined, geminiApiKey)
     
     // 初始化自动扫描管理器
-    autoScanManager = new AutoScanManager(goSmbClient, mediaDatabase, metadataScraper)
+    autoScanManager = new AutoScanManager(networkStorageClient, mediaDatabase, metadataScraper)
 
     // 初始化Hash服务
     hashService = new HashService(mediaDatabase)
@@ -249,7 +264,7 @@ async function initializeApp() {
     mediaPlayer = new MediaPlayer()
 
     // 初始化媒体代理服务器
-    mediaProxyServer = new MediaProxyServer(goSmbClient)
+    mediaProxyServer = new MediaProxyServer(networkStorageClient)
     try {
       const proxyPort = await mediaProxyServer.start()
       console.log(`Media proxy server started on port ${proxyPort}`)
@@ -261,9 +276,9 @@ async function initializeApp() {
     const config = await mediaDatabase.getConfig()
     if (config) {
       // 检查配置是否完整
-      if (config.ip && config.ip.trim() !== "" && config.sharePath && config.sharePath.trim() !== "") {
+      if (config.host && config.host.trim() !== "" && config.sharePath && config.sharePath.trim() !== "") {
         console.log("Configuration loaded, applying to Go SMB client")
-        goSmbClient.configure(config)
+        networkStorageClient.configure(config)
         // 设置自动扫描管理器的共享路径
         if (config.sharePath) {
           autoScanManager.setSharePath(config.sharePath)
@@ -295,7 +310,8 @@ async function initializeIPCHandlers() {
     mediaDatabase,
     mediaPlayer,
     metadataScraper,
-    goSmbClient,
+    networkStorageClient,
+    mediaPlayerClient,
     mediaProxyServer,
     autoScanManager,
     mainWindow
@@ -384,8 +400,8 @@ app.on("before-quit", async () => {
     }
     
     // 断开Go SMB连接
-    if (goSmbClient) {
-      goSmbClient.disconnect()
+    if (networkStorageClient) {
+      networkStorageClient.disconnect()
     }
   } catch (error) {
     console.error("Error during cleanup:", error)

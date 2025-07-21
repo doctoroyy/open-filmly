@@ -148,7 +148,7 @@ export interface ElectronAPI {
 }
 
 export interface SambaConfig {
-  ip: string;
+  host: string;
   port?: number;
   username?: string;
   password?: string;

@@ -22,6 +22,8 @@ export const ServerChannels = {
   LIST_SHARES: 'server:shares:list',
   LIST_FOLDERS: 'server:folders:list',
   GET_DIR_CONTENTS: 'server:dir-contents:get',
+  // 新增通用网络存储通道
+  GET_NETWORK_DIR_CONTENTS: 'server:network-dir-contents:get',
 } as const
 
 // 媒体相关的IPC通道
@@ -32,6 +34,8 @@ export const MediaChannels = {
   GET_RECENTLY_VIEWED: 'media:recently-viewed:get',
   SCAN_MEDIA: 'media:scan',
   ADD_SINGLE_MEDIA: 'media:add-single',
+  // 新增网络媒体添加通道
+  ADD_SINGLE_NETWORK_MEDIA: 'media:add-single-network',
   PLAY_MEDIA: 'media:play',
   SEARCH_MEDIA: 'media:search',
   SEARCH_MEDIA_BY_PATH: 'media:search-by-path',
@@ -150,6 +154,10 @@ export interface ServerTypes {
     request: string
     response: IPCResponse<{ items: any[] }>
   }
+  [ServerChannels.GET_NETWORK_DIR_CONTENTS]: {
+    request: { path: string; storageType?: string }
+    response: IPCResponse<{ items: any[] }>
+  }
 }
 
 export interface MediaTypes {
@@ -175,6 +183,10 @@ export interface MediaTypes {
   }
   [MediaChannels.ADD_SINGLE_MEDIA]: {
     request: string
+    response: IPCResponse<{ media: any }>
+  }
+  [MediaChannels.ADD_SINGLE_NETWORK_MEDIA]: {
+    request: { filePath: string; storageType?: string }
     response: IPCResponse<{ media: any }>
   }
   [MediaChannels.PLAY_MEDIA]: {

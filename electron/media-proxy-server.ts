@@ -1,19 +1,19 @@
 /**
- * SMB媒体代理服务器
- * 将SMB文件流转换为HTTP流，供HTML5视频播放器使用
+ * 网络存储媒体代理服务器
+ * 将网络存储文件流转换为HTTP流，供HTML5视频播放器使用
  */
 
 import * as http from 'http'
 import * as url from 'url'
-import { GoSMBClient } from './go-smb-client'
+import { NetworkStorageClient } from './network-storage-client'
 
 export class MediaProxyServer {
   private server: http.Server | null = null
   private port: number = 0
-  private goSmbClient: GoSMBClient
+  private networkStorageClient: NetworkStorageClient
 
-  constructor(goSmbClient: GoSMBClient) {
-    this.goSmbClient = goSmbClient
+  constructor(networkStorageClient: NetworkStorageClient) {
+    this.networkStorageClient = networkStorageClient
   }
 
   /**
@@ -123,8 +123,8 @@ export class MediaProxyServer {
     try {
       console.log(`[MediaProxy] Streaming file: ${filePath}`)
 
-      // 从Go SMB读取文件
-      const fileBuffer = await this.goSmbClient.readFile(filePath)
+      // 从网络存储读取文件
+      const fileBuffer = await this.networkStorageClient.readFile(filePath)
       const fileSize = fileBuffer.length
 
       // 解析Range请求（用于视频拖拽）

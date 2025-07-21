@@ -58,7 +58,7 @@ export default function ConfigPage() {
   // Connection state
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ connected: false })
   const [config, setConfig] = useState<SambaConfig>({
-    ip: "",
+    host: "",
     port: 445,
     username: "guest", 
     password: "",
@@ -100,7 +100,7 @@ export default function ConfigPage() {
       const config = await window.electronAPI?.getConfig()
       if (config) {
         setConfig({
-          ip: config.ip || "",
+          host: config.host || "",
           port: config.port || 445,
           username: config.username || "guest",
           password: config.password || "",
@@ -118,8 +118,8 @@ export default function ConfigPage() {
         }
         
         // Check connection status only if we have sufficient config
-        if (config.ip && config.ip.trim() !== '') {
-          // 只有在有IP配置时才尝试连接测试
+        if (config.host && config.host.trim() !== '') {
+          // 只有在有主机地址配置时才尝试连接测试
           checkConnectionStatus(config).catch(error => {
             console.log("Initial connection check failed:", error)
             // 初始检查失败是正常的，不显示错误
@@ -205,7 +205,7 @@ export default function ConfigPage() {
       if (result?.success) {
         setConnectionStatus({
           connected: true,
-          server: `${configToTest.ip}:${configToTest.port}`,
+          server: `${configToTest.host}:${configToTest.port}`,
           shares: result.shares || [],
           lastConnected: "Just now"
         })
@@ -236,7 +236,7 @@ export default function ConfigPage() {
       if (result?.success) {
         setConnectionStatus({
           connected: true,
-          server: `${config.ip}:${config.port}`,
+          server: `${config.host}:${config.port}`,
           shares: result.shares || [],
           lastConnected: "Just now"
         })
@@ -606,13 +606,13 @@ export default function ConfigPage() {
                       <div className="space-y-2">
                         <Label htmlFor="ip" className="flex items-center gap-2">
                           <Monitor className="h-4 w-4" />
-                          Server IP Address
+                          Server Host Address
                         </Label>
                         <Input
-                          id="ip"
-                          placeholder="192.168.1.100"
-                          value={config.ip}
-                          onChange={(e) => setConfig(prev => ({ ...prev, ip: e.target.value }))}
+                          id="host"
+                          placeholder="192.168.1.100 or server.local"
+                          value={config.host}
+                          onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))}
                           className="bg-gray-900/50 border-gray-600 focus:border-blue-500"
                         />
                       </div>
@@ -719,7 +719,7 @@ export default function ConfigPage() {
                   <div className="flex gap-2 flex-wrap">
                     <Button 
                       onClick={handleDiscoverShares} 
-                      disabled={connecting || !config.ip}
+                      disabled={connecting || !config.host}
                       className="bg-blue-600 hover:bg-blue-700"
                       title="使用Go语言编写的高性能SMB发现工具"
                     >
