@@ -30,10 +30,10 @@ yarn-error.log*
 next-env.d.ts
 
 # Go related
-/tools/smb-discover/go/
+/tools/smb-tools/go/
+/tools/smb-tools/bin/
 /tools/bin/
-/bin/smb-discover-*
+/bin/smb-*
 
-# Tools directory (except source code)
-/tools/build-smb-tools.sh
-/tools/Dockerfile.build
+# Built binaries
+/bin/

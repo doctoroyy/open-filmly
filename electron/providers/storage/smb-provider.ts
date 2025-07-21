@@ -397,7 +397,7 @@ export class SMBStorageProvider implements INetworkStorageProvider {
       providerInfo: this.getProviderInfo(),
       config: this.config,
       searchPaths: [
-        path.join(__dirname, '..', 'tools', 'smb-discover', 'bin'),
+        path.join(__dirname, '..', 'tools', 'smb-tools', 'bin'),
         path.join(process.resourcesPath, 'bin'),
         path.join(process.cwd(), 'bin'),
         path.join(__dirname, '..', 'bin')
@@ -436,12 +436,12 @@ export class SMBStorageProvider implements INetworkStorageProvider {
     const extension = platform === 'win32' ? '.exe' : ''
 
     // 构建二进制文件名
-    const binaryName = `smb-discover-${goPlatform}-${goArch}${extension}`
+    const binaryName = `smb-tools-${goPlatform}-${goArch}${extension}`
 
     // 查找二进制文件的可能路径
     const possiblePaths = [
       // 开发环境中的路径 - 使用process.cwd()代替__dirname
-      path.join(process.cwd(), 'tools', 'smb-discover', 'bin', binaryName),
+      path.join(process.cwd(), 'tools', 'smb-tools', 'bin', binaryName),
       // 打包后的路径
       path.join(process.resourcesPath || '', 'bin', binaryName),
       // 当前目录下的bin文件夹
@@ -449,7 +449,7 @@ export class SMBStorageProvider implements INetworkStorageProvider {
       // 工具目录
       path.join(process.cwd(), 'dist', 'bin', binaryName),
       // 使用相对路径查找
-      path.resolve(process.cwd(), '..', 'tools', 'smb-discover', 'bin', binaryName),
+      path.resolve(process.cwd(), '..', 'tools', 'smb-tools', 'bin', binaryName),
       path.resolve(process.cwd(), '..', 'bin', binaryName)
     ]
 

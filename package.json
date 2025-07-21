@@ -15,7 +15,8 @@
   "scripts": {
     "dev": "vite",
     "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .\"",
-    "build": "vite build && tsc -p electron/tsconfig.json",
+    "build": "pnpm run build:smb && vite build && tsc -p electron/tsconfig.json",
+    "build:smb": "mkdir -p tools/bin bin && cd tools/smb-tools && ./build.sh && cp bin/* ../bin/ && cp bin/* ../../bin/",
     "start": "electron .",
     "clean": "rimraf dist",
     "pack": "electron-builder --dir",
@@ -27,6 +28,8 @@
     "productName": "Open Filmly",
     "files": [
       "dist/**/*",
+      "tools/bin/**/*",
+      "bin/**/*",
       "node_modules/**/*",
       "package.json"
     ],

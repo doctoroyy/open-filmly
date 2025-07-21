@@ -10,7 +10,6 @@ import * as fs from "fs"
 import { NetworkStorageClient } from "./network-storage-client"
 import { MediaPlayerClient } from "./media-player-client"
 import { defaultProviderFactory } from "./provider-factory"
-import { MediaProxyServer } from "./media-proxy-server"
 import { createProductionServer } from "./server"
 
 // Initialize MPV.js - using dynamic path discovery
@@ -102,7 +101,6 @@ let mediaPlayerClient: MediaPlayerClient
 let metadataScraper: MetadataScraper
 let mediaDatabase: MediaDatabase
 let mediaPlayer: MediaPlayer
-let mediaProxyServer: MediaProxyServer
 let autoScanManager: AutoScanManager
 let hashService: HashService
 let productionServer: any = null
@@ -263,14 +261,6 @@ async function initializeApp() {
     // 初始化媒体播放器
     mediaPlayer = new MediaPlayer()
 
-    // 初始化媒体代理服务器
-    mediaProxyServer = new MediaProxyServer(networkStorageClient)
-    try {
-      const proxyPort = await mediaProxyServer.start()
-      console.log(`Media proxy server started on port ${proxyPort}`)
-    } catch (error) {
-      console.error("Failed to start media proxy server:", error)
-    }
 
     // 从数据库加载配置
     const config = await mediaDatabase.getConfig()
@@ -312,7 +302,6 @@ async function initializeIPCHandlers() {
     metadataScraper,
     networkStorageClient,
     mediaPlayerClient,
-    mediaProxyServer,
     autoScanManager,
     mainWindow
   })
@@ -389,10 +378,6 @@ app.on("window-all-closed", () => {
 // 应用退出前清理资源
 app.on("before-quit", async () => {
   try {
-    // 停止代理服务器
-    if (mediaProxyServer) {
-      await mediaProxyServer.stop()
-    }
     
     // 停止生产服务器
     if (productionServer) {
