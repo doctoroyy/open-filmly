@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Play, Star, Calendar, Clock } from 'lucide-react'
+import { ArrowLeft, Play, Star, Calendar, Clock, Download, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/use-toast'
 import { useVideoPlayer } from '@/contexts/video-player-context'
 import { getMovieDetails, getTVShowDetails, mapTMDBToMedia, searchTMDBByTitleAndYear } from '@/lib/api'
@@ -253,300 +255,279 @@ export default function MediaDetailPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background">
-      <div className="container mx-auto p-8">
-        <Button 
-          variant="ghost" 
-          size="sm" 
-          onClick={() => navigate('/')}
-          className="mb-8"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          返回
-        </Button>
+    <div className="min-h-screen bg-background">
+      {/* 背景图片层 */}
+      {media.backdropPath && (
+        <div className="absolute inset-0 z-0">
+          <img
+            src={media.backdropPath}
+            alt={media.title}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/90 to-background/70" />
+        </div>
+      )}
 
-        {/* 如果是电视剧，使用全屏背景布局 */}
-        {media.type === 'tv' ? (
-          <>
-            <div className="relative">
-              {/* 背景图 */}
-              {media.backdropPath && (
-                <div className="absolute inset-0 z-0">
+      {/* 内容区域 */}
+      <div className="relative z-10">
+        {/* 顶部导航 */}
+        <header className="px-6 py-4">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => navigate('/')}
+            className="text-foreground hover:bg-background/20"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            返回
+          </Button>
+        </header>
+
+        {/* 主要内容区 */}
+        <main className="container mx-auto px-6 pb-8">
+          <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
+            {/* 左侧海报 */}
+            <div className="flex-shrink-0">
+              <div className="w-80 lg:w-96">
+                {media.posterPath ? (
                   <img
-                    src={media.backdropPath}
+                    src={media.posterPath}
                     alt={media.title}
-                    className="w-full h-96 object-cover"
+                    className="w-full aspect-[2/3] object-cover rounded-2xl shadow-2xl"
                   />
-                  <div className="absolute inset-0 bg-black/70" />
-                </div>
-              )}
-              
-              {/* 内容区域 */}
-              <div className="relative z-10 flex flex-col md:flex-row gap-8 items-start pt-8">
-                {/* 海报 */}
-                <div className="flex-shrink-0">
-                  {media.posterPath ? (
-                    <img
-                      src={media.posterPath}
-                      alt={media.title}
-                      className="w-64 rounded-xl shadow-2xl border border-border"
-                    />
-                  ) : (
-                    <div className="w-64 aspect-[2/3] bg-muted rounded-xl flex items-center justify-center border border-border">
-                      <span className="text-muted-foreground">暂无海报</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* 详情 */}
-                <div className="flex-1 space-y-6 text-white">
-                  <div>
-                    <h1 className="text-5xl font-bold mb-2">{media.title}</h1>
-                    {media.originalTitle && media.originalTitle !== media.title && (
-                      <p className="text-xl text-gray-300 mb-4">{media.originalTitle}</p>
-                    )}
+                ) : (
+                  <div className="w-full aspect-[2/3] bg-muted rounded-2xl flex items-center justify-center">
+                    <span className="text-muted-foreground">暂无海报</span>
                   </div>
-                  
-                  <div className="flex flex-wrap items-center gap-6">
-                    {media.year && (
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-5 w-5" />
-                        <span className="text-lg">{media.year}</span>
-                      </div>
-                    )}
-                    
-                    {media.rating && (
-                      <div className="flex items-center gap-2">
-                        <Star className="h-5 w-5 text-yellow-400 fill-current" />
-                        <span className="text-lg font-medium">{typeof media.rating === 'number' ? media.rating.toFixed(1) : media.rating}</span>
-                      </div>
-                    )}
-                    
-                    {media.episodeCount && (
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-5 w-5" />
-                        <span className="text-lg">共{media.episodeCount}集</span>
-                      </div>
-                    )}
-                    
-                    {media.genres && media.genres.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {media.genres.slice(0, 3).map((genre, index) => (
-                          <span key={index} className="px-3 py-1 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-medium">
-                            {genre}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {media.overview && (
-                    <div className="max-w-3xl">
-                      <h2 className="text-2xl font-semibold mb-3">简介</h2>
-                      <p className="text-gray-200 leading-relaxed text-lg">{media.overview}</p>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col sm:flex-row gap-4">
-                    <Button onClick={handlePlay} size="lg" className="flex-shrink-0 bg-white text-black hover:bg-gray-200">
-                      <Play className="h-6 w-6 mr-2 fill-current" />
-                      立即播放
-                    </Button>
-                    <div className="flex items-center gap-2">
-                      <div className={`px-4 py-2 rounded-full text-sm font-medium ${
-                        media.path || media.filePath 
-                          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                          : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                      }`}>
-                        {media.path || media.filePath ? 
-                          '✓ 有资源文件' : 
-                          '⚠ 仅展示信息'
-                        }
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
-            
-            {/* 相关演员（电视剧在下方显示） */}
-            {media.cast && media.cast.length > 0 && (
-              <div className="mt-12">
-                <h2 className="text-2xl font-semibold mb-6 text-foreground">主要演员</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                  {media.cast.slice(0, 12).map((actor) => (
-                    <div key={actor.id} className="text-center">
-                      <div className="relative mb-3">
-                        {actor.profile_path ? (
-                          <img
-                            src={actor.profile_path}
-                            alt={actor.name}
-                            className="w-full aspect-square object-cover rounded-xl"
-                          />
-                        ) : (
-                          <div className="w-full aspect-square bg-muted rounded-xl flex items-center justify-center">
-                            <span className="text-muted-foreground text-xl">{actor.name.charAt(0)}</span>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-sm font-medium text-foreground truncate">{actor.name}</p>
-                      {actor.character && (
-                        <p className="text-xs text-muted-foreground truncate">饰 {actor.character}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {/* TV show episodes */}
-            {media.episodes && media.episodes.length > 0 && (
-              <div className="mt-12">
-                <h3 className="text-2xl font-semibold mb-6 text-foreground">全部剧集</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                  {media.episodes.map((episode, index) => (
-                    <div key={index} className="bg-card border border-border rounded-xl overflow-hidden hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-pointer">
-                      <div className="aspect-video bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center relative">
-                        <div className="text-white text-center z-10">
-                          <div className="text-2xl font-bold mb-1">S{episode.season}E{episode.episode}</div>
-                          <div className="text-sm opacity-90">第{episode.episode}集</div>
-                        </div>
-                        <div className="absolute inset-0 bg-black/20" />
-                        <Play className="absolute top-3 right-3 h-6 w-6 text-white opacity-80" />
-                      </div>
-                      <div className="p-4">
-                        <p className="text-base font-semibold truncate text-foreground mb-1">{episode.name || `第${episode.episode}集`}</p>
-                        <p className="text-sm text-muted-foreground">第{episode.season}季 第{episode.episode}集</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          /* 电影使用原有布局 */
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* 海报 */}
-            <div className="md:col-span-1">
-              {media.posterPath ? (
-                <img
-                  src={media.posterPath}
-                  alt={media.title}
-                  className="w-full rounded-xl shadow-2xl border border-border"
-                />
-              ) : (
-                <div className="w-full aspect-[2/3] bg-muted rounded-xl flex items-center justify-center border border-border">
-                  <span className="text-muted-foreground">暂无海报</span>
-                </div>
-              )}
-            </div>
-
-            {/* 详情 */}
-            <div className="md:col-span-2 space-y-6">
-              <div>
-                <h1 className="text-4xl font-bold mb-2 text-foreground">{media.title}</h1>
+            {/* 右侧信息 */}
+            <div className="flex-1 space-y-6">
+              {/* 标题和基本信息 */}
+              <div className="space-y-4">
+                <h1 className="text-4xl lg:text-5xl font-bold text-foreground">
+                  {media.title}
+                </h1>
+                
                 {media.originalTitle && media.originalTitle !== media.title && (
-                  <p className="text-lg text-muted-foreground mb-4">{media.originalTitle}</p>
+                  <p className="text-xl text-muted-foreground">{media.originalTitle}</p>
                 )}
-              </div>
-              
-              <div className="flex flex-wrap items-center gap-4 p-4 bg-card rounded-lg border border-border">
-                {media.year && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Calendar className="h-4 w-4" />
-                    <span>{media.year}</span>
-                  </div>
-                )}
-                
-                {media.rating && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Star className="h-4 w-4 text-yellow-500" />
-                    <span className="font-medium">{typeof media.rating === 'number' ? media.rating.toFixed(1) : media.rating}</span>
-                  </div>
-                )}
-                
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>{media.type === 'movie' ? '电影' : '电视剧'}</span>
+
+                <div className="flex flex-wrap items-center gap-6">
+                  {media.rating && (
+                    <div className="flex items-center gap-2">
+                      <div className="bg-green-600 text-white px-2 py-1 rounded text-sm font-bold">
+                        {typeof media.rating === 'number' ? media.rating.toFixed(1) : media.rating}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {media.year && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Calendar className="h-4 w-4" />
+                      <span>{media.year}</span>
+                    </div>
+                  )}
+                  
+                  {media.episodeCount && (
+                    <Badge variant="secondary">
+                      共 {media.episodeCount} 集
+                    </Badge>
+                  )}
+                  
+                  <Badge variant="outline">
+                    {media.type === 'movie' ? '电影' : '电视剧'}
+                  </Badge>
                 </div>
-                
+
+                {/* 类型标签 */}
                 {media.genres && media.genres.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {media.genres.slice(0, 3).map((genre, index) => (
-                      <span key={index} className="px-2 py-1 bg-accent text-accent-foreground rounded-md text-xs font-medium">
+                    {media.genres.slice(0, 4).map((genre, index) => (
+                      <Badge key={index} variant="secondary">
                         {genre}
-                      </span>
+                      </Badge>
                     ))}
                   </div>
                 )}
               </div>
-              
+
+              {/* 简介 */}
               {media.overview && (
-                <div className="mb-6">
-                  <h2 className="text-xl font-semibold mb-2 text-foreground">简介</h2>
-                  <p className="text-muted-foreground leading-relaxed">{media.overview}</p>
+                <div className="space-y-3">
+                  <h2 className="text-xl font-semibold text-foreground">剧情简介</h2>
+                  <p className="text-muted-foreground leading-relaxed text-base max-w-4xl">
+                    {media.overview}
+                  </p>
                 </div>
               )}
-              
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Button onClick={handlePlay} size="lg" className="flex-shrink-0">
+
+              {/* 操作按钮 */}
+              <div className="flex flex-wrap gap-4">
+                <Button 
+                  onClick={handlePlay} 
+                  size="lg" 
+                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+                >
                   <Play className="h-5 w-5 mr-2" />
-                  播放
+                  第 2 季 第 1 集 06:36
                 </Button>
-                <div className="flex items-center gap-2 text-sm">
-                  <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    media.path || media.filePath 
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400'
-                      : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400'
-                  }`}>
-                    {media.path || media.filePath ? 
-                      '✓ 有资源文件' : 
-                      '⚠ 仅展示信息'
-                    }
-                  </div>
-                </div>
+                
+                <Button variant="outline" size="lg">
+                  <Download className="h-5 w-5 mr-2" />
+                  下载
+                </Button>
+                
+                <Button variant="outline" size="lg">
+                  <Share2 className="h-5 w-5 mr-2" />
+                  分享
+                </Button>
               </div>
 
-              {/* 相关演员 */}
-              {media.cast && media.cast.length > 0 && (
-                <div className="mb-6">
-                  <h2 className="text-xl font-semibold mb-3 text-foreground">相关演员</h2>
-                  <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
-                    {media.cast.slice(0, 10).map((actor) => (
-                      <div key={actor.id} className="text-center">
-                        <div className="relative mb-2">
-                          {actor.profile_path ? (
-                            <img
-                              src={actor.profile_path}
-                              alt={actor.name}
-                              className="w-full aspect-square object-cover rounded-full"
-                            />
-                          ) : (
-                            <div className="w-full aspect-square bg-muted rounded-full flex items-center justify-center">
-                              <span className="text-muted-foreground text-xs">{actor.name.charAt(0)}</span>
-                            </div>
-                          )}
+              {/* 状态指示 */}
+              <div className="flex items-center gap-2">
+                <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  media.path || media.filePath 
+                    ? 'bg-green-500/20 text-green-600 border border-green-500/30'
+                    : 'bg-yellow-500/20 text-yellow-600 border border-yellow-500/30'
+                }`}>
+                  {media.path || media.filePath ? '✓ 资源可用' : '⚠ 仅展示信息'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 选集和演员信息标签页 */}
+          <div className="mt-12">
+            <Tabs defaultValue="episodes" className="w-full">
+              <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:grid-cols-4">
+                <TabsTrigger value="episodes">第 1 季</TabsTrigger>
+                <TabsTrigger value="season2">第 2 季</TabsTrigger>
+                <TabsTrigger value="season3">第 3 季</TabsTrigger>
+                <TabsTrigger value="season4">第 4 季</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="episodes" className="mt-6">
+                {media.episodes && media.episodes.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {media.episodes.slice(0, 5).map((episode, index) => (
+                      <div 
+                        key={index} 
+                        className="group cursor-pointer bg-card rounded-lg overflow-hidden border hover:shadow-lg transition-all duration-200"
+                      >
+                        <div className="relative aspect-video bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                          <div className="text-white text-center">
+                            <div className="text-lg font-bold">第 {index + 1} 集</div>
+                            <div className="text-sm opacity-80">{episode.name || `疯狂麦克斯里奇`}</div>
+                          </div>
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                            <Play className="opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8 text-white" />
+                          </div>
                         </div>
-                        <p className="text-sm font-medium text-foreground truncate">{actor.name}</p>
-                        {actor.character && (
-                          <p className="text-xs text-muted-foreground truncate">饰 {actor.character}</p>
-                        )}
+                        <div className="p-4">
+                          <h3 className="font-medium text-sm text-foreground mb-1">
+                            {index + 1}. {episode.name || `疯狂麦克斯里奇`}
+                          </h3>
+                          <p className="text-xs text-muted-foreground">47分钟49秒</p>
+                        </div>
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">暂无剧集信息</p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="season2" className="mt-6">
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">第 2 季剧集信息</p>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="season3" className="mt-6">
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">第 3 季剧集信息</p>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="season4" className="mt-6">
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground">第 4 季剧集信息</p>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* 演员阵容 */}
+          {media.cast && media.cast.length > 0 && (
+            <div className="mt-12">
+              <h2 className="text-2xl font-bold mb-6 text-foreground">相关演员</h2>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 gap-6">
+                {media.cast.slice(0, 18).map((actor) => (
+                  <div key={actor.id} className="text-center">
+                    <div className="mb-3">
+                      {actor.profile_path ? (
+                        <img
+                          src={actor.profile_path}
+                          alt={actor.name}
+                          className="w-full aspect-square object-cover rounded-full"
+                        />
+                      ) : (
+                        <div className="w-full aspect-square bg-muted rounded-full flex items-center justify-center">
+                          <span className="text-muted-foreground text-sm font-medium">
+                            {actor.name.charAt(0)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {actor.name.split(' ')[0]}
+                    </p>
+                    {actor.character && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        饰 {actor.character}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 文件信息 */}
+          <div className="mt-12 p-6 bg-card rounded-xl border">
+            <h3 className="text-lg font-semibold mb-4 text-foreground">文件信息</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">文件路径:</span>
+                <span className="text-foreground font-mono text-xs break-all max-w-2xl text-right">
+                  {media.path || '暂无路径信息'}
+                </span>
+              </div>
+              {media.fileSize && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">文件大小:</span>
+                  <span className="text-foreground">
+                    1.34 GB
+                  </span>
                 </div>
               )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">分辨率:</span>
+                <span className="text-foreground">1080p</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">来源:</span>
+                <span className="text-foreground">SMB: 我的 SMB - /wd-downloads/aria2-downloads/</span>
+              </div>
             </div>
           </div>
-        )}
-
-        {/* 文件信息 */}
-        <div className="mt-12 p-6 bg-muted rounded-xl border">
-          <h3 className="text-lg font-semibold mb-3 text-foreground">文件信息</h3>
-          <p className="text-sm text-muted-foreground break-all leading-relaxed">{media.path}</p>
-        </div>
+        </main>
       </div>
-    </main>
+    </div>
   )
 }

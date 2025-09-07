@@ -233,7 +233,7 @@ export class MetadataScraper extends EventEmitter {
     }
   }
 
-  // TMDB搜索
+  // TMDB搜索 - 增强版
   private async tryTmdbSearch(mediaItem: any): Promise<{ metadata: any; confidence: number; method: 'tmdb' | 'ai' | 'jina' } | null> {
     if (!this.movieDb) {
       return null
@@ -246,6 +246,7 @@ export class MetadataScraper extends EventEmitter {
       let searchTitle = mediaItem.title
       let searchYear = mediaItem.year
       let detectedType = mediaItem.type
+      let searchConfidence = 0.5
 
       if (this.intelligentRecognizer) {
         const recognition = await this.intelligentRecognizer.recognizeMediaName(
@@ -257,58 +258,40 @@ export class MetadataScraper extends EventEmitter {
           searchTitle = recognition.cleanTitle
           searchYear = recognition.year || mediaItem.year
           detectedType = recognition.mediaType !== 'unknown' ? recognition.mediaType : mediaItem.type
+          searchConfidence = recognition.confidence
+          console.log(`[MetadataScraper] Using AI-enhanced search: "${searchTitle}" (confidence: ${searchConfidence})`)
         }
       }
 
-      // 执行TMDB搜索
-      const searchParams: any = {
-        query: searchTitle,
-        language: 'zh-CN'
-      }
+      // 多轮搜索策略
+      const searchStrategies = [
+        // 策略1: 完整标题 + 年份
+        { title: searchTitle, year: searchYear },
+        // 策略2: 仅标题 (如果年份可能不准确)
+        { title: searchTitle, year: null },
+        // 策略3: 原始标题（备用）
+        { title: mediaItem.title, year: mediaItem.year },
+      ]
 
-      if (searchYear && searchYear !== "未知") {
-        if (detectedType === 'movie') {
-          searchParams.year = parseInt(searchYear, 10)
-        } else {
-          searchParams.first_air_date_year = parseInt(searchYear, 10)
-        }
-      }
-
-      let searchResponse
-      if (detectedType === 'movie') {
-        searchResponse = await this.movieDb.searchMovie(searchParams)
-      } else if (detectedType === 'tv') {
-        searchResponse = await this.movieDb.searchTv(searchParams)
-      } else {
-        searchResponse = await this.movieDb.searchMulti(searchParams)
-      }
-      
-      if (searchResponse.results && searchResponse.results.length > 0) {
-        const result = searchResponse.results[0]
-        const itemId = result.id
-        const type = result.media_type || detectedType
-
-        let details
-        if (type === "movie") {
-          details = await this.movieDb.movieInfo({
-            id: itemId as number,
-            language: 'zh-CN',
-            append_to_response: 'credits'
-          })
-        } else if (type === "tv") {
-          details = await this.movieDb.tvInfo({
-            id: itemId as number,
-            language: 'zh-CN',
-            append_to_response: 'credits'
-          })
-        }
-
-        if (details && (type === 'movie' || type === 'tv')) {
-          const metadata = this.mapTMDBToMedia(details, type as 'movie' | 'tv')
-          return {
-            metadata,
-            confidence: 0.9, // TMDB搜索通常置信度较高
-            method: 'tmdb'
+      for (const strategy of searchStrategies) {
+        const result = await this.performTmdbSearch(strategy.title, strategy.year, detectedType)
+        if (result) {
+          // 计算匹配置信度
+          const matchConfidence = this.calculateMatchConfidence(
+            strategy.title, 
+            result.metadata.title || result.metadata.name,
+            strategy.year,
+            result.metadata.year
+          )
+          
+          console.log(`[MetadataScraper] TMDB match confidence: ${matchConfidence} for "${strategy.title}"`)
+          
+          if (matchConfidence > 0.7) {
+            return {
+              metadata: result.metadata,
+              confidence: Math.min(0.95, matchConfidence + searchConfidence * 0.2),
+              method: 'tmdb'
+            }
           }
         }
       }
@@ -318,6 +301,127 @@ export class MetadataScraper extends EventEmitter {
       console.error(`[MetadataScraper] TMDB search failed:`, error)
       return null
     }
+  }
+
+  // 实际执行TMDB搜索
+  private async performTmdbSearch(title: string, year: string | null, type: string) {
+    const searchParams: any = {
+      query: title,
+      language: 'zh-CN'
+    }
+
+    if (year && year !== "未知") {
+      if (type === 'movie') {
+        searchParams.year = parseInt(year, 10)
+      } else {
+        searchParams.first_air_date_year = parseInt(year, 10)
+      }
+    }
+
+    let searchResponse
+    if (type === 'movie') {
+      searchResponse = await this.movieDb.searchMovie(searchParams)
+    } else if (type === 'tv') {
+      searchResponse = await this.movieDb.searchTv(searchParams)
+    } else {
+      searchResponse = await this.movieDb.searchMulti(searchParams)
+    }
+    
+    if (searchResponse.results && searchResponse.results.length > 0) {
+      const result = searchResponse.results[0]
+      const itemId = result.id
+      const resultType = result.media_type || type
+
+      let details
+      if (resultType === "movie") {
+        details = await this.movieDb.movieInfo({
+          id: itemId as number,
+          language: 'zh-CN',
+          append_to_response: 'credits,videos'
+        })
+      } else if (resultType === "tv") {
+        details = await this.movieDb.tvInfo({
+          id: itemId as number,
+          language: 'zh-CN',
+          append_to_response: 'credits,videos'
+        })
+      }
+
+      if (details && (resultType === 'movie' || resultType === 'tv')) {
+        const metadata = this.mapTMDBToMedia(details, resultType as 'movie' | 'tv')
+        return { metadata }
+      }
+    }
+
+    return null
+  }
+
+  // 计算匹配置信度
+  private calculateMatchConfidence(searchTitle: string, resultTitle: string, searchYear: string | null, resultYear: string): number {
+    let confidence = 0
+
+    // 标题相似度
+    const titleSimilarity = this.calculateStringSimilarity(
+      searchTitle.toLowerCase().trim(),
+      resultTitle.toLowerCase().trim()
+    )
+    confidence += titleSimilarity * 0.7
+
+    // 年份匹配
+    if (searchYear && resultYear) {
+      const yearDiff = Math.abs(parseInt(searchYear) - parseInt(resultYear))
+      if (yearDiff === 0) {
+        confidence += 0.3
+      } else if (yearDiff <= 1) {
+        confidence += 0.2
+      } else if (yearDiff <= 2) {
+        confidence += 0.1
+      }
+    } else {
+      confidence += 0.1 // 部分分数，因为缺少年份信息
+    }
+
+    return Math.min(1.0, confidence)
+  }
+
+  // 字符串相似度计算 (简单版Levenshtein距离)
+  private calculateStringSimilarity(str1: string, str2: string): number {
+    if (str1 === str2) return 1.0
+    if (str1.length === 0 || str2.length === 0) return 0
+
+    // 检查是否包含关系
+    if (str1.includes(str2) || str2.includes(str1)) {
+      return 0.8
+    }
+
+    const matrix: number[][] = []
+    const len1 = str1.length
+    const len2 = str2.length
+
+    for (let i = 0; i <= len2; i++) {
+      matrix[i] = [i]
+    }
+    
+    for (let j = 0; j <= len1; j++) {
+      matrix[0][j] = j
+    }
+
+    for (let i = 1; i <= len2; i++) {
+      for (let j = 1; j <= len1; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1]
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          )
+        }
+      }
+    }
+
+    const maxLen = Math.max(len1, len2)
+    return 1 - matrix[len2][len1] / maxLen
   }
 
   // AI分析（使用Gemini）

@@ -3,36 +3,24 @@ import {
   Settings, 
   Search, 
   FolderOpen, 
-  Home, 
   Clock, 
   Film, 
   Tv, 
-  FolderHeart, 
-  ListChecks,
-  TrendingUp,
-  Sparkles,
-  Filter,
-  SortDesc,
-  Grid3X3,
-  List,
   RefreshCw,
-  Star
+  Star,
+  Play,
+  ChevronRight
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { useToast } from "@/components/ui/use-toast"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 import { MediaCard } from "@/components/media-card"
 import { LoadingGrid } from "@/components/loading-grid"
 import { SMBFileBrowser } from "@/components/ui/smb-file-browser"
 import { AutoScanStatus } from "@/components/auto-scan-status"
 import type { Media } from "@/types/media"
-import { mapTMDBToMedia } from "@/lib/api"
 
 // 界面变体类型
 type ViewMode = 'grid' | 'list' | 'detailed'
@@ -44,8 +32,6 @@ export default function HomePage() {
   const [recentlyViewed, setRecentlyViewed] = useState<Media[]>([])
   const [movies, setMovies] = useState<Media[]>([])
   const [tvShows, setTvShows] = useState<Media[]>([])
-  const [favorites, setFavorites] = useState<Media[]>([])
-  const [trending, setTrending] = useState<Media[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [searchLoading, setSearchLoading] = useState(false)
@@ -53,82 +39,15 @@ export default function HomePage() {
   const [showFileBrowser, setShowFileBrowser] = useState(false)
   const [initialized, setInitialized] = useState(false)
   
-  // UI 状态
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [sortMode, setSortMode] = useState<SortMode>('recent')
-  const [filterMode, setFilterMode] = useState<FilterMode>('all')
-  const [selectedTab, setSelectedTab] = useState("overview")
-  
   const { toast } = useToast()
 
-  // 计算分类数据
-  const categorizedMovies = useMemo(() => {
-    const action = movies.filter(movie => 
-      movie.genres?.some(genre => 
-        ['Action', 'Adventure', 'Thriller', '动作', '冒险', '惊悚'].includes(genre)
-      )
-    )
-    const drama = movies.filter(movie => 
-      movie.genres?.some(genre => 
-        ['Drama', 'Romance', 'Biography', '剧情', '爱情', '传记'].includes(genre)
-      )
-    )
-    const comedy = movies.filter(movie => 
-      movie.genres?.some(genre => 
-        ['Comedy', 'Family', 'Animation', '喜剧', '家庭', '动画'].includes(genre)
-      )
-    )
-    
-    return { action: action.slice(0, 8), drama: drama.slice(0, 8), comedy: comedy.slice(0, 8) }
-  }, [movies])
-
-  // 过滤和排序逻辑
-  const filteredAndSortedContent = useMemo(() => {
-    let allContent: Media[] = []
-    
-    switch (filterMode) {
-      case 'movie':
-        allContent = movies
-        break
-      case 'tv':
-        allContent = tvShows
-        break
-      case 'favorites':
-        allContent = favorites
-        break
-      default:
-        allContent = [...movies, ...tvShows]
-    }
-
-    // 搜索过滤
-    if (searchQuery.trim()) {
-      allContent = allContent.filter(item =>
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.overview?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.genres?.some(genre => genre.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    }
-
-    // 排序
-    switch (sortMode) {
-      case 'rating':
-        allContent.sort((a, b) => (b.rating || 0) - (a.rating || 0))
-        break
-      case 'year':
-        allContent.sort((a, b) => parseInt(b.year || '0') - parseInt(a.year || '0'))
-        break
-      case 'title':
-        allContent.sort((a, b) => a.title.localeCompare(b.title))
-        break
-      case 'popularity':
-        allContent.sort((a, b) => (b.rating || 0) * (b.genres?.length || 1) - (a.rating || 0) * (a.genres?.length || 1))
-        break
-      default: // recent
-        allContent.sort((a, b) => new Date(b.dateAdded || 0).getTime() - new Date(a.dateAdded || 0).getTime())
-    }
-
-    return allContent
-  }, [movies, tvShows, favorites, searchQuery, sortMode, filterMode])
+  // 获取高分推荐内容
+  const recommendedContent = useMemo(() => {
+    return [...movies, ...tvShows]
+      .filter(media => media.rating && media.rating >= 7.0)
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+      .slice(0, 6)
+  }, [movies, tvShows])
 
   // 数据转换函数
   const convertToFrontendMedia = useCallback((media: any): Media => ({
@@ -176,16 +95,6 @@ export default function HomePage() {
     }
   }, [convertToFrontendMedia])
 
-  // 生成本地推荐内容
-  const generateLocalRecommendations = useCallback(() => {
-    // 使用本地高评分内容作为推荐
-    const localHighRated = [...movies, ...tvShows]
-      .filter(media => media.rating && media.rating >= 7.0)
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
-      .slice(0, 8)
-    
-    setTrending(localHighRated)
-  }, [movies, tvShows])
 
   // 搜索功能
   const handleSearch = useCallback(async (query: string) => {
@@ -196,33 +105,19 @@ export default function HomePage() {
 
     setSearchLoading(true)
     try {
-      const localResults = filteredAndSortedContent.filter(item =>
-        item.title.toLowerCase().includes(query.toLowerCase())
+      const allContent = [...movies, ...tvShows]
+      const results = allContent.filter(item =>
+        item.title.toLowerCase().includes(query.toLowerCase()) ||
+        item.overview?.toLowerCase().includes(query.toLowerCase())
       )
-      setSearchResults(localResults)
+      setSearchResults(results)
     } catch (error) {
       console.error("Search failed:", error)
     } finally {
       setSearchLoading(false)
     }
-  }, [filteredAndSortedContent])
+  }, [movies, tvShows])
 
-  // 处理收藏
-  const handleFavorite = useCallback((media: Media) => {
-    setFavorites(prev => {
-      const isFavorited = prev.some(fav => fav.id === media.id)
-      if (isFavorited) {
-        return prev.filter(fav => fav.id !== media.id)
-      } else {
-        return [...prev, media]
-      }
-    })
-    
-    toast({
-      title: favorites.some(fav => fav.id === media.id) ? "已取消收藏" : "已添加到收藏",
-      description: media.title,
-    })
-  }, [favorites, toast])
 
   // 文件浏览器处理
   const handleFileAdded = useCallback(async (mediaInfo: Media) => {
@@ -243,7 +138,6 @@ export default function HomePage() {
         if (window.electronAPI) {
           await loadLocalMedia()
         }
-        generateLocalRecommendations()
       } catch (error) {
         console.error("初始化应用失败:", error)
       } finally {
@@ -253,7 +147,7 @@ export default function HomePage() {
     }
 
     initializeApp()
-  }, [initialized, loadLocalMedia, generateLocalRecommendations])
+  }, [initialized, loadLocalMedia])
 
   // 搜索防抖
   useEffect(() => {
@@ -275,438 +169,234 @@ export default function HomePage() {
   }, [loadLocalMedia])
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
-      <div className="flex h-screen">
-        {/* 增强的侧边栏 */}
-        <aside className="w-64 lg:w-72 xl:w-80 2xl:w-96 h-full bg-sidebar-background/95 backdrop-blur-sm border-r border-sidebar-border/50 p-4">
-          <div className="mb-8">
-            <h1 className="text-xl font-bold text-sidebar-foreground flex items-center gap-2">
-              <Sparkles className="w-6 h-6 text-primary" />
-              Open Filmly
-            </h1>
-            <p className="text-xs text-sidebar-foreground/60 mt-1">智能媒体管理平台</p>
-          </div>
-          
-          <nav className="space-y-2 mb-8">
-            <Link to="/" className="flex items-center p-3 bg-sidebar-accent rounded-md text-sidebar-accent-foreground transition-colors">
-              <Home className="mr-3 h-5 w-5" />
-              <span>首页</span>
-              <Badge variant="secondary" className="ml-auto text-xs">
-                {movies.length + tvShows.length}
-              </Badge>
-            </Link>
-            <Link to="/recently-viewed" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
-              <Clock className="mr-3 h-5 w-5" />
-              <span>最近观看</span>
-              {recentlyViewed.length > 0 && (
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {recentlyViewed.length}
-                </Badge>
-              )}
-            </Link>
-            <Link to="/movies" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
-              <Film className="mr-3 h-5 w-5" />
-              <span>电影</span>
-              {movies.length > 0 && (
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {movies.length}
-                </Badge>
-              )}
-            </Link>
-            <Link to="/tv" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
-              <Tv className="mr-3 h-5 w-5" />
-              <span>电视剧</span>
-              {tvShows.length > 0 && (
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {tvShows.length}
-                </Badge>
-              )}
-            </Link>
-            <Link to="/favorites" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
-              <FolderHeart className="mr-3 h-5 w-5" />
-              <span>收藏</span>
-              {favorites.length > 0 && (
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {favorites.length}
-                </Badge>
-              )}
-            </Link>
-            <Link to="/media-list" className="flex items-center p-3 rounded-md hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
-              <ListChecks className="mr-3 h-5 w-5" />
-              <span>媒体列表</span>
-            </Link>
-          </nav>
+    <div className="min-h-screen bg-background">
+      {/* 顶部导航栏 */}
+      <header className="bg-background/95 backdrop-blur-sm border-b sticky top-0 z-40">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            {/* Logo 和导航 */}
+            <div className="flex items-center space-x-8">
+              <div className="flex items-center space-x-2">
+                <h1 className="text-xl font-bold">Open Filmly</h1>
+              </div>
+              
+              <nav className="flex items-center space-x-6">
+                <Link to="/" className="flex items-center space-x-2 text-sm font-medium text-foreground">
+                  首页
+                </Link>
+                <Link to="/movies" className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-foreground">
+                  <Film className="w-4 h-4" />
+                  电影
+                  {movies.length > 0 && (
+                    <span className="bg-muted text-muted-foreground text-xs px-1.5 py-0.5 rounded-full">
+                      {movies.length}
+                    </span>
+                  )}
+                </Link>
+                <Link to="/tv" className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-foreground">
+                  <Tv className="w-4 h-4" />
+                  电视剧
+                  {tvShows.length > 0 && (
+                    <span className="bg-muted text-muted-foreground text-xs px-1.5 py-0.5 rounded-full">
+                      {tvShows.length}
+                    </span>
+                  )}
+                </Link>
+                <Link to="/recently-viewed" className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-foreground">
+                  <Clock className="w-4 h-4" />
+                  最近观看
+                </Link>
+              </nav>
+            </div>
 
-          {/* 热门内容预览 */}
-          {trending.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-sidebar-foreground flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
-                热门内容
-              </h3>
-              <div className="space-y-2">
-                {trending.slice(0, 3).map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 p-2 rounded-md hover:bg-sidebar-accent/50 cursor-pointer transition-colors">
-                    <div className="w-8 h-12 bg-muted rounded flex-shrink-0 overflow-hidden">
-                      {item.posterPath && (
-                        <img src={item.posterPath} alt={item.title} className="w-full h-full object-cover" />
-                      )}
+            {/* 搜索和操作 */}
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Input 
+                  type="search"
+                  placeholder="输入影片名称搜索"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 w-80 bg-muted/50"
+                />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                {searchLoading && (
+                  <RefreshCw className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin" />
+                )}
+              </div>
+
+              <AutoScanStatus />
+              
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowFileBrowser(true)}
+              >
+                <FolderOpen className="h-4 w-4 mr-2" />
+                浏览文件
+              </Button>
+
+              <Link to="/config">
+                <Button variant="outline" size="sm">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* 主内容区 */}
+      <main className="container mx-auto px-6 py-8">
+        {/* 搜索结果 */}
+        {searchQuery && (
+          <section className="mb-8">
+            <h2 className="text-2xl font-bold mb-6">
+              搜索结果 "{searchQuery}" ({searchResults.length})
+            </h2>
+            {searchLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="w-8 h-8 animate-spin mr-3" />
+                <p>正在搜索...</p>
+              </div>
+            ) : searchResults.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {searchResults.map((media) => (
+                  <MediaCard key={media.id} media={media} />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">没有找到与 "{searchQuery}" 相关的内容</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* 主要内容 */}
+        {!searchQuery && (
+          <>
+            {loading ? (
+              <LoadingGrid />
+            ) : (
+              <div className="space-y-12">
+                {/* 最近观看 */}
+                {recentlyViewed.length > 0 && (
+                  <section>
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center">
+                        <Clock className="w-6 h-6 mr-3 text-blue-500" />
+                        最近观看
+                      </h2>
+                      <Link to="/recently-viewed">
+                        <Button variant="ghost" size="sm" className="flex items-center">
+                          查看全部
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </Link>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-sidebar-foreground truncate">{item.title}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                        <span className="text-xs text-sidebar-foreground/60">{item.rating?.toFixed(1)}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                      {recentlyViewed.slice(0, 10).map((media) => (
+                        <MediaCard key={media.id} media={media} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 高分推荐 */}
+                {recommendedContent.length > 0 && (
+                  <section>
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center">
+                        <Star className="w-6 h-6 mr-3 text-yellow-500" />
+                        高分推荐
+                      </h2>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                      {recommendedContent.map((media) => (
+                        <MediaCard key={media.id} media={media} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 电影 */}
+                {movies.length > 0 && (
+                  <section>
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center">
+                        <Film className="w-6 h-6 mr-3 text-red-500" />
+                        电影
+                      </h2>
+                      <Link to="/movies">
+                        <Button variant="ghost" size="sm" className="flex items-center">
+                          查看全部 ({movies.length})
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </Link>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                      {movies.slice(0, 12).map((media) => (
+                        <MediaCard key={media.id} media={media} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 电视剧 */}
+                {tvShows.length > 0 && (
+                  <section>
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center">
+                        <Tv className="w-6 h-6 mr-3 text-green-500" />
+                        电视剧
+                      </h2>
+                      <Link to="/tv">
+                        <Button variant="ghost" size="sm" className="flex items-center">
+                          查看全部 ({tvShows.length})
+                          <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </Link>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                      {tvShows.slice(0, 12).map((media) => (
+                        <MediaCard key={media.id} media={media} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 空状态 */}
+                {movies.length === 0 && tvShows.length === 0 && (
+                  <div className="text-center py-20">
+                    <div className="max-w-md mx-auto">
+                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
+                        <Film className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-lg font-semibold mb-2">暂无媒体内容</h3>
+                      <p className="text-muted-foreground mb-6">
+                        配置 SMB 连接后，系统将自动发现和添加您的媒体文件
+                      </p>
+                      <div className="space-x-4">
+                        <Button onClick={() => setShowFileBrowser(true)}>
+                          <FolderOpen className="w-4 h-4 mr-2" />
+                          浏览文件
+                        </Button>
+                        <Link to="/config">
+                          <Button variant="outline">
+                            <Settings className="w-4 h-4 mr-2" />
+                            设置
+                          </Button>
+                        </Link>
                       </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </aside>
-
-        {/* 主内容区 */}
-        <div className="flex-1 overflow-auto">
-          <div className="container max-w-none mx-auto p-4 lg:p-6 xl:p-8 2xl:p-10">
-            {/* 增强的顶部栏 */}
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <h2 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-                  欢迎回来
-                </h2>
-                <p className="text-muted-foreground mt-1">发现和管理您的媒体收藏</p>
-              </div>
-              
-              <div className="flex items-center space-x-4">
-                {/* 搜索框 */}
-                <div className="relative">
-                  <Input 
-                    type="search"
-                    placeholder="搜索电影、电视剧..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 w-80 bg-muted/50 border-input focus:border-ring"
-                  />
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  {searchLoading && (
-                    <RefreshCw className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
-                  )}
-                </div>
-
-                {/* 视图和排序控制 */}
-                <div className="flex items-center gap-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon">
-                        <Filter className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setFilterMode('all')}>
-                        全部内容
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterMode('movie')}>
-                        仅电影
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterMode('tv')}>
-                        仅电视剧
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setFilterMode('favorites')}>
-                        收藏内容
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                  <Select value={sortMode} onValueChange={(value: SortMode) => setSortMode(value)}>
-                    <SelectTrigger className="w-32">
-                      <SortDesc className="w-4 h-4 mr-2" />
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="recent">最新添加</SelectItem>
-                      <SelectItem value="rating">评分</SelectItem>
-                      <SelectItem value="year">年份</SelectItem>
-                      <SelectItem value="title">标题</SelectItem>
-                      <SelectItem value="popularity">热门度</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <div className="flex rounded-md border">
-                    <Button
-                      variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                      size="sm"
-                      onClick={() => setViewMode('grid')}
-                      className="rounded-r-none"
-                    >
-                      <Grid3X3 className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={viewMode === 'list' ? 'default' : 'ghost'}
-                      size="sm"
-                      onClick={() => setViewMode('list')}
-                      className="rounded-none border-x"
-                    >
-                      <List className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* 操作按钮 */}
-                <Button 
-                  variant="outline" 
-                  size="icon"
-                  onClick={() => setShowFileBrowser(true)}
-                >
-                  <FolderOpen className="h-5 w-5" />
-                </Button>
-
-                <AutoScanStatus />
-
-                <Link to="/config">
-                  <Button variant="outline" size="icon">
-                    <Settings className="h-5 w-5" />
-                  </Button>
-                </Link>
-              </div>
-            </div>
-
-            {/* 搜索结果 */}
-            {searchQuery && (
-              <section className="mb-8">
-                <h3 className="text-xl font-semibold mb-4">
-                  搜索结果 "{searchQuery}" ({searchResults.length})
-                </h3>
-                {searchLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <div className="text-center space-y-4">
-                      <RefreshCw className="w-8 h-8 animate-spin mx-auto" />
-                      <p>正在搜索 "{searchQuery}"...</p>
-                    </div>
-                  </div>
-                ) : searchResults.length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                    {searchResults.map((media) => (
-                      <MediaCard key={media.id} media={media} />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <p className="text-muted-foreground">没有找到与 "{searchQuery}" 相关的媒体</p>
-                  </div>
                 )}
-              </section>
+              </div>
             )}
-
-            {/* 主要内容标签页 */}
-            {!searchQuery && (
-              <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-8">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="overview">概览</TabsTrigger>
-                  <TabsTrigger value="movies">电影</TabsTrigger>
-                  <TabsTrigger value="tv">电视剧</TabsTrigger>
-                  <TabsTrigger value="recent">最近</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="overview" className="space-y-8">
-                  {loading ? (
-                    <LoadingGrid />
-                  ) : (
-                    <>
-                      {/* 最近观看 */}
-                      {recentlyViewed.length > 0 && (
-                        <section>
-                          <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-semibold flex items-center gap-2">
-                              <Clock className="w-6 h-6 text-primary" />
-                              继续观看
-                            </h3>
-                            <Link to="/recently-viewed">
-                              <Button variant="ghost" size="sm">
-                                查看全部 →
-                              </Button>
-                            </Link>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 lg:gap-6">
-                            {recentlyViewed.slice(0, 5).map((media) => (
-                              <MediaCard key={media.id} media={media} />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* 热门推荐 */}
-                      {trending.length > 0 && (
-                        <section>
-                          <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-semibold flex items-center gap-2">
-                              <TrendingUp className="w-6 h-6 text-primary" />
-                              高分推荐
-                            </h3>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                            {trending.slice(0, 8).map((media) => (
-                              <MediaCard key={media.id} media={media} />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* 电影精选 */}
-                      {movies.length > 0 && (
-                        <section>
-                          <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-semibold flex items-center gap-2">
-                              <Film className="w-6 h-6 text-primary" />
-                              电影精选
-                            </h3>
-                            <Link to="/movies">
-                              <Button variant="ghost" size="sm">
-                                查看全部 ({movies.length}) →
-                              </Button>
-                            </Link>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                            {movies.slice(0, 8).map((media) => (
-                              <MediaCard key={media.id} media={media} />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* 电视剧推荐 */}
-                      {tvShows.length > 0 && (
-                        <section>
-                          <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-2xl font-semibold flex items-center gap-2">
-                              <Tv className="w-6 h-6 text-primary" />
-                              电视剧推荐
-                            </h3>
-                            <Link to="/tv">
-                              <Button variant="ghost" size="sm">
-                                查看全部 ({tvShows.length}) →
-                              </Button>
-                            </Link>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                            {tvShows.slice(0, 8).map((media) => (
-                              <MediaCard key={media.id} media={media} />
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {/* 分类浏览 */}
-                      <section>
-                        <h3 className="text-2xl font-semibold mb-6">分类浏览</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                          <div 
-                            className="relative h-48 rounded-xl overflow-hidden cursor-pointer group bg-gradient-to-br from-red-500 to-orange-600 hover:scale-[1.02] transition-transform"
-                            onClick={() => window.location.href = '/movies?genre=action'}
-                          >
-                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
-                            <div className="absolute inset-0 p-6 flex flex-col justify-end">
-                              <h4 className="text-white text-2xl font-bold mb-2">动作冒险</h4>
-                              <p className="text-white/80">
-                                {categorizedMovies.action.length > 0 ? `${categorizedMovies.action.length} 部影片` : '暂无影片'}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div 
-                            className="relative h-48 rounded-xl overflow-hidden cursor-pointer group bg-gradient-to-br from-blue-500 to-purple-600 hover:scale-[1.02] transition-transform"
-                            onClick={() => window.location.href = '/movies?genre=drama'}
-                          >
-                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
-                            <div className="absolute inset-0 p-6 flex flex-col justify-end">
-                              <h4 className="text-white text-2xl font-bold mb-2">剧情情感</h4>
-                              <p className="text-white/80">
-                                {categorizedMovies.drama.length > 0 ? `${categorizedMovies.drama.length} 部影片` : '暂无影片'}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div 
-                            className="relative h-48 rounded-xl overflow-hidden cursor-pointer group bg-gradient-to-br from-green-500 to-yellow-500 hover:scale-[1.02] transition-transform"
-                            onClick={() => window.location.href = '/movies?genre=comedy'}
-                          >
-                            <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors"></div>
-                            <div className="absolute inset-0 p-6 flex flex-col justify-end">
-                              <h4 className="text-white text-2xl font-bold mb-2">喜剧轻松</h4>
-                              <p className="text-white/80">
-                                {categorizedMovies.comedy.length > 0 ? `${categorizedMovies.comedy.length} 部影片` : '暂无影片'}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-                    </>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="movies">
-                  {loading ? (
-                    <LoadingGrid />
-                  ) : movies.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                      {movies.map((media) => (
-                        <MediaCard key={media.id} media={media} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <p className="text-muted-foreground mb-4">暂无电影</p>
-                      <p className="text-sm text-muted-foreground">配置SMB连接后将自动发现和添加电影</p>
-                      <Button className="mt-4" onClick={() => setShowFileBrowser(true)}>
-                        <FolderOpen className="w-4 h-4 mr-2" />
-                        浏览文件
-                      </Button>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="tv">
-                  {loading ? (
-                    <LoadingGrid />
-                  ) : tvShows.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 lg:gap-6">
-                      {tvShows.map((media) => (
-                        <MediaCard key={media.id} media={media} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <p className="text-muted-foreground mb-4">暂无电视剧</p>
-                      <p className="text-sm text-muted-foreground">配置SMB连接后将自动发现和添加电视剧</p>
-                      <Button className="mt-4" onClick={() => setShowFileBrowser(true)}>
-                        <FolderOpen className="w-4 h-4 mr-2" />
-                        浏览文件
-                      </Button>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="recent">
-                  {loading ? (
-                    <LoadingGrid />
-                  ) : recentlyViewed.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 lg:gap-6">
-                      {recentlyViewed.map((media) => (
-                        <MediaCard key={media.id} media={media} />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <p className="text-muted-foreground">暂无最近观看</p>
-                      <p className="text-sm text-muted-foreground mt-2">开始观看媒体后，这里将显示您的观看历史</p>
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-            )}
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+      </main>
       
       {/* 文件浏览器弹窗 */}
       {showFileBrowser && (
@@ -716,9 +406,7 @@ export default function HomePage() {
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-semibold">文件浏览器</h3>
-                  <p className="text-sm text-muted-foreground">
-                    浏览并添加媒体文件到库
-                  </p>
+                  <p className="text-sm text-muted-foreground">浏览并添加媒体文件到库</p>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setShowFileBrowser(false)}>
                   关闭
@@ -733,6 +421,6 @@ export default function HomePage() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   )
 }
