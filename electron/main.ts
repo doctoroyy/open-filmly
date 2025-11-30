@@ -199,11 +199,11 @@ async function initializeApp() {
     // Initialize media player client
     mediaPlayerClient = new MediaPlayerClient()
     
-    // Set MPV as the default media player provider
+    // Set VLC as the default media player provider
     try {
-      mediaPlayerClient.setProvider('mpv')
+      mediaPlayerClient.setProvider('vlc')
     } catch (error) {
-      console.warn('MPV provider not available, using system default')
+      console.warn('VLC provider not available, using system default')
       mediaPlayerClient.setProvider('system')
     }
 

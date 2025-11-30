@@ -318,6 +318,11 @@ export class MetadataScraper extends EventEmitter {
       }
     }
 
+    if (!this.movieDb) {
+      console.warn('[MetadataScraper] MovieDb not initialized, skipping TMDB search')
+      return null
+    }
+
     let searchResponse
     if (type === 'movie') {
       searchResponse = await this.movieDb.searchMovie(searchParams)

@@ -12,6 +12,12 @@ import {
   ProviderError
 } from './types/providers'
 
+import { SMBStorageProvider } from './providers/storage/smb-provider'
+
+import { MPVPlayerProvider } from './providers/player/mpv-provider'
+import { VLCPlayerProvider } from './providers/player/vlc-provider'
+import { SystemPlayerProvider } from './providers/player/system-provider'
+
 /**
  * 默认Provider工厂实现
  */
@@ -26,20 +32,16 @@ export class DefaultProviderFactory implements IProviderFactory {
     try {
       switch (type) {
         case 'smb':
-          const { SMBStorageProvider } = require('./providers/storage/smb-provider')
           return new SMBStorageProvider()
         
         case 'ftp':
-          const { FTPStorageProvider } = require('./providers/storage/ftp-provider')
-          return new FTPStorageProvider()
-        
         case 'nfs':
-          const { NFSStorageProvider } = require('./providers/storage/nfs-provider')
-          return new NFSStorageProvider()
-        
         case 'webdav':
-          const { WebDAVStorageProvider } = require('./providers/storage/webdav-provider')
-          return new WebDAVStorageProvider()
+          throw new ProviderError(
+            `Storage provider not implemented: ${type}`,
+            type,
+            'PROVIDER_NOT_IMPLEMENTED'
+          )
         
         default:
           throw new ProviderError(
@@ -81,19 +83,19 @@ export class DefaultProviderFactory implements IProviderFactory {
     try {
       switch (type) {
         case 'mpv':
-          const { MPVPlayerProvider } = require('./providers/player/mpv-provider')
           return new MPVPlayerProvider()
         
         case 'vlc':
-          const { VLCPlayerProvider } = require('./providers/player/vlc-provider')
           return new VLCPlayerProvider()
         
         case 'browser':
-          const { BrowserPlayerProvider } = require('./providers/player/browser-provider')
-          return new BrowserPlayerProvider()
+          throw new ProviderError(
+            `Media player provider not implemented: ${type}`,
+            type,
+            'PROVIDER_NOT_IMPLEMENTED'
+          )
         
         case 'system':
-          const { SystemPlayerProvider } = require('./providers/player/system-provider')
           return new SystemPlayerProvider()
         
         default:

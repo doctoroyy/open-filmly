@@ -805,6 +805,21 @@ export function initializeIPCHandlers(services: {
     return result
   })
 
+  // 播放媒体
+  registerIPCHandler(IPCChannels.PLAY_MEDIA, async (_, options) => {
+    try {
+      console.log('[IPC] Received play media request:', options)
+      await mediaPlayerClient.play(options)
+      return { success: true }
+    } catch (error: unknown) {
+      console.error('[IPC] Failed to play media:', error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
   // MPV 可用性检查
   registerIPCHandler(IPCChannels.CHECK_MPV_AVAILABILITY, async () => {
     try {

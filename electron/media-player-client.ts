@@ -14,6 +14,8 @@ import {
   ProviderEvent
 } from './types/providers'
 
+import { defaultProviderFactory } from './provider-factory'
+
 /**
  * 媒体播放器客户端 - 主要的抽象层
  */
@@ -33,8 +35,8 @@ export class MediaPlayerClient {
    */
   public setProvider(type: MediaPlayerProviderType, config?: MediaPlayerConfig): void {
     try {
-      // 根据类型创建相应的Provider
-      this.provider = this.createProvider(type)
+      // Use factory to create provider
+      this.provider = defaultProviderFactory.createMediaPlayerProvider(type)
       this.providerType = type
       
       if (config) {
@@ -70,7 +72,7 @@ export class MediaPlayerClient {
    * 获取可用的媒体播放器提供者列表
    */
   public getAvailableProviders(): MediaPlayerProviderType[] {
-    return ['mpv', 'vlc', 'browser', 'system']
+    return defaultProviderFactory.getAvailableMediaPlayerProviders()
   }
 
   /**
@@ -392,40 +394,5 @@ export class MediaPlayerClient {
 
   private emitEvent(type: string, event: ProviderEvent): void {
     this.eventEmitter.emit(type, event)
-  }
-
-  /**
-   * 创建指定类型的Provider
-   */
-  private createProvider(type: MediaPlayerProviderType): IMediaPlayerProvider {
-    // 简单的工厂方法，实际使用时可以通过依赖注入或工厂类实现
-    switch (type) {
-      case 'mpv':
-        // 动态导入MPV Provider
-        const { MPVPlayerProvider } = require('./providers/player/mpv-provider')
-        return new MPVPlayerProvider()
-      
-      case 'vlc':
-        // 动态导入VLC Provider
-        const { VLCPlayerProvider } = require('./providers/player/vlc-provider')
-        return new VLCPlayerProvider()
-      
-      case 'browser':
-        // 动态导入Browser Provider
-        const { BrowserPlayerProvider } = require('./providers/player/browser-provider')
-        return new BrowserPlayerProvider()
-      
-      case 'system':
-        // 动态导入System Provider
-        const { SystemPlayerProvider } = require('./providers/player/system-provider')
-        return new SystemPlayerProvider()
-      
-      default:
-        throw new MediaPlayerProviderError(
-          `Unsupported player provider: ${type}`,
-          type,
-          'UNSUPPORTED_PROVIDER'
-        )
-    }
   }
 }

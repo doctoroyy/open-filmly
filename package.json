@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "vite",
     "dev:electron": "concurrently \"vite\" \"wait-on http://localhost:5173 && tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .\"",
-    "build": "pnpm run build:smb && vite build && tsc -p electron/tsconfig.json",
+    "build": "pnpm run build:smb && vite build && tsc -p electron/tsconfig.json --noEmit",
     "build:smb": "mkdir -p tools/bin bin && cd tools/smb-tools && ./build.sh && cp bin/* ../bin/ && cp bin/* ../../bin/",
     "start": "electron .",
     "clean": "rimraf dist",
@@ -77,7 +77,9 @@
     },
     "asarUnpack": [
       "**/node_modules/**",
-      "dist/electron/**"
+      "**/*.node",
+      "**/mpv.js/**",
+      "bin/**/*"
     ],
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
   },
