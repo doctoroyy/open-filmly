@@ -1,0 +1,43 @@
+name: open_filmly
+description: "Open Filmly — cross-platform media library (Flutter rewrite)."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^3.3.1
+  go_router: ^17.2.3
+  http: ^1.6.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  smb_connect:
+    path: packages/smb_connect
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+  drift: ^2.33.0
+  drift_flutter: ^0.3.0
+  file_selector: ^1.1.0
+  cached_network_image: ^3.4.1
+  webdav_client: ^1.2.2
+  flutter_cache_manager: ^3.4.1
+  flutter_skill: ^0.9.36
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  drift_dev: ^2.33.0
+  build_runner: ^2.15.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/

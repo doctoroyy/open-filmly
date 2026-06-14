@@ -1,0 +1,23 @@
+PODS:
+  - FlutterMacOS (1.0.0)
+  - VLCKit (3.7.3)
+
+DEPENDENCIES:
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - VLCKit (= 3.7.3)
+
+SPEC REPOS:
+  trunk:
+    - VLCKit
+
+EXTERNAL SOURCES:
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+
+SPEC CHECKSUMS:
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  VLCKit: 4f2c462daaab6de88b93ab7609bdefbada557a4d
+
+PODFILE CHECKSUM: 08bc81ad451b4ec359229ed991eb16e110f15ae6
+
+COCOAPODS: 1.16.2

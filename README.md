@@ -1,96 +1,107 @@
 # Open Filmly
 
-Open Filmly is a powerful media management platform similar to Plex, Emby, or Jellyfin, designed to organize and stream your media library. It automatically categorizes your media files, fetches posters and metadata, tracks playback progress, and supports one-click playback with automatic subtitle matching.
+Open Filmly is a desktop media library player for macOS. It is now a Flutter
+application backed by native VLCKit playback, replacing the old Electron code.
 
-**⚠️ BETA STATUS:** Open Filmly is currently in beta. Some features are still under development and may not be fully functional.
+The app is built for private media libraries: local folders, SMB shares,
+WebDAV servers, Emby, and Jellyfin-style sources. It scans media, cleans file
+names, enriches titles through TMDB, tracks playback progress, and plays video
+inside the app with VLC's codec, audio-track, and embedded-subtitle support.
 
-## Features
+## Screenshots
 
-- ✅ Automatic media scanning and categorization
-- ✅ Metadata and poster fetching from online sources
-- 🚧 One-click playback with integrated media player (in development)
-- 🚧 Automatic subtitle detection and matching (planned)
-- 🚧 Watch progress tracking (in development)
-- ✅ NAS/Samba connectivity for accessing network storage
-- ✅ Electron-based cross-platform support
+![Home library](docs/screenshots/home.png)
 
-*Legend: ✅ Completed | 🚧 In Development*
+![VLCKit player](docs/screenshots/player.png)
 
-## Project Status
+## What works
 
-Open Filmly is currently in active development. Core functionality for media scanning, categorization, and metadata fetching is working. The media player integration, subtitle matching, and watch progress tracking features are still being developed.
+- macOS desktop client built with Flutter.
+- Native embedded VLC player through `VLCKit`.
+- Local file, HTTP, WebDAV, and SMB playback.
+- SMB streaming through a local HTTP Range proxy.
+- Emby library import and browsing.
+- TMDB metadata matching, poster walls, favorites, recent playback, and
+  continue-watching shelves.
+- Embedded audio and subtitle track discovery with Chinese subtitle preference.
+- macOS window controls, safe-area spacing, keyboard shortcuts, and double-click
+  fullscreen on the video surface.
 
-### Roadmap:
-- Complete the media player integration
-- Implement subtitle auto-detection and matching
-- Add user watch history and progress tracking
-- Improve UI/UX for the media browsing experience
-- Add user profiles and preferences
+## Repository layout
 
-## Development
+- `app/` contains the Flutter application.
+- `app/macos/` contains the macOS host app and the VLCKit bridge.
+- `app/packages/smb_connect/` is the local SMB client package used by the app.
+- `docs/screenshots/` contains README screenshots.
 
-This project uses pnpm as the package manager. Make sure to install pnpm first:
-
-```bash
-npm install -g pnpm
-```
-
-### Install dependencies
-
-```bash
-pnpm install
-```
-
-### Run in development mode
-
-For frontend development only:
-```bash
-pnpm dev
-```
-
-For full Electron app development:
-```bash
-pnpm dev:electron
-```
-
-This will start both the Vite development server and the Electron app with hot reload.
-
-### Build for production
-
-```bash
-pnpm build
-pnpm dist
-```
-
-The `dist` command will clean, build, and create distributable packages for all platforms.
+The legacy Electron, Vite, React, Node, and Go desktop code has been removed
+from the main branch.
 
 ## Requirements
 
-- Node.js 16+
-- pnpm 7+
+- macOS 13 or newer recommended.
+- Flutter 3.44 or newer.
+- Xcode command line tools.
+- CocoaPods, used to install `VLCKit`.
 
-## Tech Stack
+Install CocoaPods if needed:
 
-- **Frontend**: React + TypeScript + Vite
-- **Backend**: Electron main process with Node.js
-- **Database**: SQLite with better-sqlite3
-- **UI**: Tailwind CSS + Radix UI components
-- **Network Storage**: SMB/CIFS client for NAS access
-- **Metadata**: TMDB API integration
-- **Build**: electron-builder for cross-platform packaging
+```bash
+sudo gem install cocoapods
+```
 
-## Project Structure
+## Run locally
 
-- `/src` - React frontend application
-  - `/components` - Reusable UI components
-  - `/pages` - Route components
-  - `/lib` - Utility functions and API clients
-  - `/types` - TypeScript type definitions
-- `/electron` - Electron main process code
-  - `main.ts` - Application entry point and IPC handlers
-  - `media-database.ts` - SQLite database layer
-  - `media-scanner.ts` - Media file scanning and classification
-  - `metadata-scraper.ts` - TMDB API integration
-  - `smb-client.ts` - SMB/CIFS network storage client
-- `/public` - Static assets and app icons
-- `/types` - Shared TypeScript definitions 
+```bash
+cd app
+flutter pub get
+cd macos && pod install && cd ..
+flutter run -d macos
+```
+
+## Build
+
+```bash
+cd app
+flutter pub get
+cd macos && pod install && cd ..
+flutter build macos --release
+scripts/make_dmg.sh build/Open-Filmly.dmg
+```
+
+The release app is written to:
+
+```text
+app/build/macos/Build/Products/Release/open_filmly.app
+```
+
+## Verification
+
+```bash
+cd app
+flutter analyze --no-fatal-infos --no-fatal-warnings
+flutter test
+flutter build macos --debug
+```
+
+## Real SMB test
+
+The normal test suite does not require a real NAS. To run the optional real SMB
+test, set these variables first:
+
+```bash
+export OPEN_FILMLY_REAL_SMB_HOST=192.168.1.10
+export OPEN_FILMLY_REAL_SMB_USERNAME=username
+export OPEN_FILMLY_REAL_SMB_PASSWORD=password
+export OPEN_FILMLY_REAL_SMB_SHARE=Movies
+export OPEN_FILMLY_REAL_SMB_DOMAIN=
+
+cd app
+flutter test test/integration_smb_real_test.dart
+```
+
+## VLCKit note
+
+VLCKit is distributed through CocoaPods and is licensed under LGPL terms. Keep
+the framework dynamically linked and preserve the license obligations when
+packaging the app.
