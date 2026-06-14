@@ -32,10 +32,13 @@ class _PendingOpen {
   final Map<String, String>? httpHeaders;
 }
 
-/// Native macOS VLC playback service backed by VLCKit.
+enum PlaybackVideoEvent { tap, doubleTap }
+
+/// Native VLC playback service.
 ///
-/// The video output is an AppKit platform view. Playback commands and status
-/// polling go through a method channel registered in the macOS runner.
+/// On macOS the video output is an AppKit platform view backed by VLCKit.
+/// On Windows the runner creates a native child window backed by libVLC.
+/// Playback commands and status polling go through the same method channel.
 class PlaybackService {
   static const _channel = MethodChannel('com.openfilmly.vlc_player');
 
@@ -44,6 +47,8 @@ class PlaybackService {
   final _playingController = StreamController<bool>.broadcast();
   final _completedController = StreamController<bool>.broadcast();
   final _volumeController = StreamController<double>.broadcast();
+  final _videoEventController =
+      StreamController<PlaybackVideoEvent>.broadcast();
 
   int? _viewId;
   _PendingOpen? _pendingOpen;
@@ -62,6 +67,10 @@ class PlaybackService {
   PlaybackAudioTrack _currentAudioTrack = PlaybackAudioTrack.no();
   PlaybackSubtitleTrack _currentSubtitleTrack = PlaybackSubtitleTrack.no();
 
+  PlaybackService() {
+    _channel.setMethodCallHandler(_handleNativeEvent);
+  }
+
   PlaybackStreams get player => PlaybackStreams(
     position: _positionController.stream,
     duration: _durationController.stream,
@@ -70,6 +79,8 @@ class PlaybackService {
     volume: _volumeController.stream,
   );
 
+  Stream<PlaybackVideoEvent> get videoEvents => _videoEventController.stream;
+
   Future<void> attachNativeView(int viewId) async {
     _viewId = viewId;
     final pending = _pendingOpen;
@@ -77,6 +88,22 @@ class PlaybackService {
       await _openAttached(pending);
     }
     _startPolling();
+  }
+
+  /// Updates the native Windows VLC child-window bounds. No-op on macOS.
+  Future<void> setNativeBounds(
+    Rect bounds, {
+    required double devicePixelRatio,
+  }) async {
+    final viewId = _viewId;
+    if (viewId == null) return;
+    await _channel.invokeMethod<void>('setBounds', {
+      'viewId': viewId,
+      'x': (bounds.left * devicePixelRatio).round(),
+      'y': (bounds.top * devicePixelRatio).round(),
+      'width': (bounds.width * devicePixelRatio).round(),
+      'height': (bounds.height * devicePixelRatio).round(),
+    });
   }
 
   /// Opens [uri] (a local file path or an http:// URL) and starts playback.
@@ -146,6 +173,7 @@ class PlaybackService {
     _playingController.close();
     _completedController.close();
     _volumeController.close();
+    _videoEventController.close();
   }
 
   Future<void> _openAttached(_PendingOpen pending) async {
@@ -155,6 +183,25 @@ class PlaybackService {
       'httpHeaders': pending.httpHeaders ?? const <String, String>{},
     });
     _startPolling();
+  }
+
+  Future<Object?> _handleNativeEvent(MethodCall call) async {
+    if (_disposed) return null;
+    final args = call.arguments;
+    if (args is Map) {
+      final nativeViewId = _asInt(args['viewId']);
+      if (_viewId != null && nativeViewId != null && nativeViewId != _viewId) {
+        return null;
+      }
+    }
+
+    switch (call.method) {
+      case 'videoTap':
+        _videoEventController.add(PlaybackVideoEvent.tap);
+      case 'videoDoubleClick':
+        _videoEventController.add(PlaybackVideoEvent.doubleTap);
+    }
+    return null;
   }
 
   void _startPolling() {
@@ -172,7 +219,7 @@ class PlaybackService {
       await _refreshStatus();
       await _refreshTracks();
     } on MissingPluginException {
-      // The native VLC bridge is macOS-only.
+      // Ignore on platforms without the native VLC bridge.
     } finally {
       _refreshing = false;
     }

@@ -33,8 +33,8 @@ class PlayerArgs {
 }
 
 /// Full-screen player backed by VLCKit with a custom Apple-style control
-/// layer: play/pause, seek bar, speed, subtitle & audio track selection,
-/// skip gestures, and keyboard shortcuts.
+/// layer on macOS and libVLC on Windows: play/pause, seek bar, speed,
+/// subtitle & audio track selection, skip gestures, and keyboard shortcuts.
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({super.key, required this.args});
 
@@ -49,6 +49,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const _controlsHideDelay = Duration(seconds: 3);
   static const _skipStep = Duration(seconds: 10);
   static const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  static const _nativeTopControlsReserve = 82.0;
+  static const _nativeBottomControlsReserve = 138.0;
+  static const _nativeBottomSheetReserve = 430.0;
 
   /// NetEase player accent — blue progress bar and scrubber.
   static const _accent = Color(0xFF2F6BFF);
@@ -62,6 +65,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<double>? _volumeSub;
+  StreamSubscription<PlaybackVideoEvent>? _videoEventSub;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -69,6 +73,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _completed = false;
   bool _playing = true;
   bool _controlsVisible = true;
+  bool _optionSheetVisible = false;
   bool _dragging = false;
   double _volume = 100;
   double _rate = 1.0;
@@ -85,6 +90,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _progressRepo = ref.read(playbackProgressRepositoryProvider);
     }
     _bindStreams();
+    _videoEventSub = _playback.videoEvents.listen(_handleNativeVideoEvent);
 
     unawaited(
       _playback.open(
@@ -107,6 +113,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _completedSub?.cancel();
     _playingSub?.cancel();
     _volumeSub?.cancel();
+    _videoEventSub?.cancel();
     _focusNode.dispose();
     _playback.dispose();
     super.dispose();
@@ -138,6 +145,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         unawaited(_persistProgress(force: true));
       }
     });
+  }
+
+  void _handleNativeVideoEvent(PlaybackVideoEvent event) {
+    if (!mounted) return;
+    switch (event) {
+      case PlaybackVideoEvent.tap:
+        _toggleControls();
+      case PlaybackVideoEvent.doubleTap:
+        WindowChannel.toggleFullScreen();
+    }
   }
 
   Future<void> _persistProgress({bool force = false}) async {
@@ -286,7 +303,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           onHover: (_) => _showControls(),
           child: Stack(
             children: [
-              Positioned.fill(child: VlcVideoView(service: _playback)),
+              Positioned.fill(
+                child: VlcVideoView(
+                  service: _playback,
+                  nativeOverlayInsets: _nativeOverlayInsets,
+                ),
+              ),
               // Tap zones: center toggles fullscreen/controls, sides double-tap to skip.
               Positioned.fill(
                 child: Row(
@@ -329,6 +351,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         ),
       ),
     );
+  }
+
+  EdgeInsets get _nativeOverlayInsets {
+    final top = _controlsVisible ? _nativeTopControlsReserve : 0.0;
+    final bottom = _optionSheetVisible
+        ? _nativeBottomSheetReserve
+        : (_controlsVisible ? _nativeBottomControlsReserve : 0.0);
+    return EdgeInsets.only(top: top, bottom: bottom);
   }
 
   Widget _controlsOverlay(
@@ -599,8 +629,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   // --- Bottom sheets ------------------------------------------------------
 
-  void _showSpeedSheet() {
+  void _markOptionSheetOpen() {
     _hideTimer?.cancel();
+    setState(() {
+      _controlsVisible = true;
+      _optionSheetVisible = true;
+    });
+  }
+
+  void _markOptionSheetClosed() {
+    if (!mounted) return;
+    setState(() => _optionSheetVisible = false);
+    _scheduleHideControls();
+  }
+
+  void _showSpeedSheet() {
+    _markOptionSheetOpen();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF1A1B23),
@@ -624,11 +668,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             })
             .toList(growable: false),
       ),
-    ).whenComplete(_scheduleHideControls);
+    ).whenComplete(_markOptionSheetClosed);
   }
 
   void _showAudioTrackSheet() {
-    _hideTimer?.cancel();
+    _markOptionSheetOpen();
     final tracks = _playback.audioTracks;
     final current = _playback.currentAudioTrack;
     showModalBottomSheet<void>(
@@ -654,11 +698,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   })
                   .toList(growable: false),
       ),
-    ).whenComplete(_scheduleHideControls);
+    ).whenComplete(_markOptionSheetClosed);
   }
 
   void _showSubtitleTrackSheet() {
-    _hideTimer?.cancel();
+    _markOptionSheetOpen();
     final tracks = _playback.subtitleTracks;
     final current = _playback.currentSubtitleTrack;
     showModalBottomSheet<void>(
@@ -684,7 +728,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   })
                   .toList(growable: false),
       ),
-    ).whenComplete(_scheduleHideControls);
+    ).whenComplete(_markOptionSheetClosed);
   }
 
   Widget _optionSheet({required String title, required List<Widget> children}) {

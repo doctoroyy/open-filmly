@@ -8,7 +8,7 @@ class WindowChromeMetrics {
   static const double macOSTrafficLightReservedWidth = 96;
 }
 
-/// Provides a channel to native window manipulation (macOS only).
+/// Provides a channel to native window manipulation.
 class WindowChannel {
   static const _channel = MethodChannel('com.openfilmly.window');
 

@@ -1,7 +1,8 @@
 # Open Filmly
 
-Open Filmly is a desktop media library player for macOS. It is now a Flutter
-application backed by native VLCKit playback, replacing the old Electron code.
+Open Filmly is a desktop media library player for macOS and Windows. It is now
+a Flutter application backed by native VLC playback, replacing the old Electron
+code.
 
 The app is built for private media libraries: local folders, SMB shares,
 WebDAV servers, Emby, and Jellyfin-style sources. It scans media, cleans file
@@ -16,21 +17,22 @@ inside the app with VLC's codec, audio-track, and embedded-subtitle support.
 
 ## What works
 
-- macOS desktop client built with Flutter.
-- Native embedded VLC player through `VLCKit`.
+- macOS and Windows desktop clients built with Flutter.
+- Native embedded VLC player through `VLCKit` on macOS and `libVLC` on Windows.
 - Local file, HTTP, WebDAV, and SMB playback.
 - SMB streaming through a local HTTP Range proxy.
 - Emby library import and browsing.
 - TMDB metadata matching, poster walls, favorites, recent playback, and
   continue-watching shelves.
 - Embedded audio and subtitle track discovery with Chinese subtitle preference.
-- macOS window controls, safe-area spacing, keyboard shortcuts, and double-click
-  fullscreen on the video surface.
+- Native window controls, safe-area spacing, keyboard shortcuts, and
+  double-click fullscreen on the video surface.
 
 ## Repository layout
 
 - `app/` contains the Flutter application.
 - `app/macos/` contains the macOS host app and the VLCKit bridge.
+- `app/windows/` contains the Windows host app and the libVLC bridge.
 - `app/packages/smb_connect/` is the local SMB client package used by the app.
 - `docs/screenshots/` contains README screenshots.
 
@@ -39,10 +41,12 @@ from the main branch.
 
 ## Requirements
 
-- macOS 13 or newer recommended.
+- macOS 13 or newer recommended for macOS builds.
+- Windows 10 or newer recommended for Windows builds.
 - Flutter 3.44 or newer.
 - Xcode command line tools.
 - CocoaPods, used to install `VLCKit`.
+- VLC for Windows, or a bundled VLC runtime next to `open_filmly.exe`.
 
 Install CocoaPods if needed:
 
@@ -61,6 +65,8 @@ flutter run -d macos
 
 ## Build
 
+macOS:
+
 ```bash
 cd app
 flutter pub get
@@ -75,6 +81,31 @@ The release app is written to:
 app/build/macos/Build/Products/Release/open_filmly.app
 ```
 
+Windows:
+
+```powershell
+cd app
+flutter pub get
+flutter build windows --release
+```
+
+The Windows VLC bridge dynamically searches for `libvlc.dll` in this order:
+
+```text
+<open_filmly.exe directory>\vlc\libvlc.dll
+<open_filmly.exe directory>\libvlc.dll
+C:\Program Files\VideoLAN\VLC\libvlc.dll
+C:\Program Files (x86)\VideoLAN\VLC\libvlc.dll
+PATH
+```
+
+For a self-contained Windows package, copy VLC's `libvlc.dll`, `libvlccore.dll`,
+and `plugins\` directory into:
+
+```text
+app\build\windows\x64\runner\Release\vlc\
+```
+
 ## Verification
 
 ```bash
@@ -82,6 +113,13 @@ cd app
 flutter analyze --no-fatal-infos --no-fatal-warnings
 flutter test
 flutter build macos --debug
+```
+
+Windows builds must be verified on Windows:
+
+```powershell
+cd app
+flutter build windows --debug
 ```
 
 ## Real SMB test
@@ -100,8 +138,7 @@ cd app
 flutter test test/integration_smb_real_test.dart
 ```
 
-## VLCKit note
+## VLC note
 
-VLCKit is distributed through CocoaPods and is licensed under LGPL terms. Keep
-the framework dynamically linked and preserve the license obligations when
-packaging the app.
+VLCKit and libVLC are licensed under LGPL terms. Keep the VLC framework/runtime
+dynamically linked and preserve the license obligations when packaging the app.
