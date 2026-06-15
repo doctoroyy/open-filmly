@@ -1,19 +1,16 @@
-name: Flutter CI
+name: Release
 
 on:
   push:
-    branches: ['**']
-    paths:
-      - 'app/**'
-      - '.github/workflows/**'
-  pull_request:
-    paths:
-      - 'app/**'
-      - '.github/workflows/**'
+    tags:
+      - 'v*'
 
 concurrency:
-  group: flutter-ci-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 env:
   FLUTTER_VERSION: '3.44.0'
@@ -73,13 +70,13 @@ jobs:
         run: flutter build macos --release
 
       - name: Package DMG
-        run: scripts/make_dmg.sh build/Open-Filmly.dmg
+        run: scripts/make_dmg.sh build/Open-Filmly-${{ github.ref_name }}-macos.dmg
 
-      - name: Upload DMG artifact
+      - name: Upload macOS release asset
         uses: actions/upload-artifact@v4
         with:
-          name: open-filmly-macos-dmg
-          path: app/build/Open-Filmly.dmg
+          name: open-filmly-macos-release-asset
+          path: app/build/Open-Filmly-${{ github.ref_name }}-macos.dmg
           if-no-files-found: error
 
   build-windows:
@@ -106,9 +103,54 @@ jobs:
       - name: Build Windows
         run: flutter build windows --release
 
-      - name: Upload Windows artifact
+      - name: Package Windows zip
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path build/windows/x64/runner/Release/* `
+            -DestinationPath build/Open-Filmly-${{ github.ref_name }}-windows-x64.zip
+
+      - name: Upload Windows release asset
         uses: actions/upload-artifact@v4
         with:
-          name: open-filmly-windows-release
-          path: app/build/windows/x64/runner/Release/**
+          name: open-filmly-windows-release-asset
+          path: app/build/Open-Filmly-${{ github.ref_name }}-windows-x64.zip
           if-no-files-found: error
+
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos
+      - build-windows
+    steps:
+      - name: Download macOS asset
+        uses: actions/download-artifact@v4
+        with:
+          name: open-filmly-macos-release-asset
+          path: build/release-assets
+
+      - name: Download Windows asset
+        uses: actions/download-artifact@v4
+        with:
+          name: open-filmly-windows-release-asset
+          path: build/release-assets
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          macos_asset="build/release-assets/Open-Filmly-${tag}-macos.dmg"
+          windows_asset="build/release-assets/Open-Filmly-${tag}-windows-x64.zip"
+
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${macos_asset}" "${windows_asset}" \
+              --clobber \
+              --repo "${GITHUB_REPOSITORY}"
+          else
+            gh release create "${tag}" "${macos_asset}" "${windows_asset}" \
+              --generate-notes \
+              --title "${tag}" \
+              --repo "${GITHUB_REPOSITORY}"
+          fi
