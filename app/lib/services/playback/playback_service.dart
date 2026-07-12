@@ -196,7 +196,13 @@ class PlaybackService {
 
   Future<void> setSubtitleTrack(PlaybackSubtitleTrack track) async {
     if (track.uri) {
-      await _invoke('addSubtitleTrack', {'uri': track.id});
+      try {
+        await _invoke('addSubtitleTrack', {'uri': track.id});
+      } on MissingPluginException {
+        // The current Windows libVLC bridge supports embedded subtitle tracks
+        // but does not expose runtime sidecar attachment yet.
+        return;
+      }
       _currentSubtitleTrack = track;
       _tracksController.add(
         PlaybackTracks(audio: _audioTracks, subtitle: _subtitleTracks),
