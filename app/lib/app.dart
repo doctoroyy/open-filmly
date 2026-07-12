@@ -1,6 +1,9 @@
+import 'dart:ui';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import 'core/platform/platform_capabilities.dart';
 import 'core/router/app_router.dart';
 import 'widgets/filmly_design.dart';
 
@@ -16,6 +19,7 @@ class OpenFilmlyApp extends StatelessWidget {
     return MaterialApp.router(
       title: 'Open Filmly',
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const _FilmlyScrollBehavior(),
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: true,
@@ -33,8 +37,11 @@ class OpenFilmlyApp extends StatelessWidget {
         splashFactory: NoSplash.splashFactory,
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
-        hoverColor: Colors.transparent,
-        focusColor: Colors.transparent,
+        hoverColor: Colors.black.withValues(alpha: 0.04),
+        focusColor: FilmlyPalette.accent.withValues(alpha: 0.12),
+        visualDensity: PlatformCapabilities.isDesktop
+            ? VisualDensity.compact
+            : VisualDensity.standard,
         dividerColor: FilmlyPalette.divider,
         shadowColor: Colors.black.withValues(alpha: 0.10),
         textSelectionTheme: const TextSelectionThemeData(
@@ -100,5 +107,24 @@ class OpenFilmlyApp extends StatelessWidget {
       ),
       routerConfig: appRouter,
     );
+  }
+}
+
+class _FilmlyScrollBehavior extends MaterialScrollBehavior {
+  const _FilmlyScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.trackpad,
+    PointerDeviceKind.stylus,
+  };
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    return PlatformCapabilities.isDesktop
+        ? const ClampingScrollPhysics()
+        : const BouncingScrollPhysics();
   }
 }

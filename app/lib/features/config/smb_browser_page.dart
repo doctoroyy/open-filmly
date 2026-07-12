@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +9,8 @@ import '../../data/models/app_config.dart';
 import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
+import '../../services/playback/external_subtitle_finder.dart';
+import '../../services/playback/playback_source_resolver.dart';
 import '../../services/smb/smb_proxy_server.dart';
 import '../../services/smb/smb_service.dart';
 import '../../widgets/filmly_design.dart';
@@ -16,7 +20,7 @@ import '../player/player_page.dart';
 /// and tap a video to stream it through the local proxy into the player.
 ///
 /// This is the validation surface for the most critical migration risk —
-/// SMB random-read → HTTP Range proxy → seekable native playback. It is
+/// SMB random-read → HTTP Range proxy → libmpv seekable playback. It is
 /// replaced by the proper config + library flow in M3.
 class SmbBrowserPage extends ConsumerStatefulWidget {
   const SmbBrowserPage({super.key});
@@ -109,10 +113,11 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
         smbDomain: _domainCtrl.text.trim(),
         smbShare: _shareCtrl.text.trim(),
       );
+      // Persist credentials best-effort; connection already succeeded.
       try {
         await ref.read(configProvider.notifier).save(newConfig);
-      } catch (e) {
-        debugPrint('Failed to persist SMB config: $e');
+      } catch (_) {
+        // ignore persistence failures
       }
       // If the user configured a share, open it directly (avoids relying on
       // srvsvc share enumeration, which some NAS servers don't expose).
@@ -122,8 +127,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       } else {
         await _loadShares();
       }
-    } catch (e, stack) {
-      debugPrint('SMB Connection Error: $e\n$stack');
+    } catch (e) {
       if (mounted) setState(() => _error = '连接失败：$e');
     } finally {
       if (mounted) setState(() => _connecting = false);
@@ -198,11 +202,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       var shares = <SmbFile>[];
       try {
         shares = await _smb.listShares();
-        debugPrint(
-          'listShares returned ${shares.length} shares: ${shares.map((e) => e.name).toList()}',
-        );
       } catch (e) {
-        debugPrint('listShares threw: $e');
         // Enumeration unsupported on this server — fall through to discovery.
       }
       if (shares.isEmpty) {
@@ -213,8 +213,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
         _stack.clear();
         _entries = _sorted(shares);
       });
-    } catch (e, stack) {
-      debugPrint('SMB Load Shares Error: $e\n$stack');
+    } catch (e) {
       if (mounted) setState(() => _error = '读取共享失败：$e');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -284,7 +283,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     }
   }
 
-  Future<void> _onTap(SmbFile entry) async {
+  void _onTap(SmbFile entry) {
     // At the share-list level, every entry is a share (its DIRECTORY attribute
     // may be unset when opened via file()), so always enter it.
     // Also, due to Samba quirks, some actual directories may be missing the
@@ -293,18 +292,29 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     if (_stack.isEmpty || entry.isDirectory() || !isVideoFile) {
       _enter(entry);
     } else if (isVideoFile) {
-      try {
-        await _proxy.start();
-        if (!mounted) return;
-        final url = _proxy.urlFor(entry.path);
-        context.push(
-          '/player',
-          extra: PlayerArgs(uri: url, title: entry.name),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        setState(() => _error = '播放失败：$e');
-      }
+      final url = _proxy.urlFor(entry.path, displayName: entry.name);
+      final subtitles =
+          ExternalSubtitleFinder.findAmongSiblings(
+                entry.path,
+                _entries
+                    .where((item) => !item.isDirectory())
+                    .map((item) => item.path),
+              )
+              .map(
+                (subtitle) => PlaybackSubtitleSource(
+                  uri: _proxy.urlFor(
+                    subtitle.path,
+                    displayName: subtitle.path.split('/').last,
+                  ),
+                  title: subtitle.label,
+                  language: subtitle.languageHint,
+                ),
+              )
+              .toList(growable: false);
+      context.push(
+        '/player',
+        extra: PlayerArgs(uri: url, title: entry.name, subtitles: subtitles),
+      );
     }
   }
 
@@ -364,9 +374,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       if (configAsync.hasValue) {
         final config = configAsync.value!;
         _hostCtrl.text = config.smbHost;
-        if (config.smbUsername.isNotEmpty) {
-          _userCtrl.text = config.smbUsername;
-        }
+        if (config.smbUsername.isNotEmpty) _userCtrl.text = config.smbUsername;
         _passCtrl.text = config.smbPassword;
         _domainCtrl.text = config.smbDomain;
         if (config.smbShare.isNotEmpty) _shareCtrl.text = config.smbShare;

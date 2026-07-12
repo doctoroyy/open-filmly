@@ -4,13 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:window_manager/window_manager.dart';
 
+import '../../core/platform/desktop_window.dart';
+import '../../core/platform/platform_capabilities.dart';
+import '../../data/models/episode.dart';
 import '../../data/models/playback_progress.dart';
 import '../../data/repositories/playback_progress_repository.dart';
 import '../../providers/data_providers.dart';
+import '../../services/library/media_library_entry_factory.dart';
+import '../../providers/smb_providers.dart';
+import '../../services/playback/external_subtitle_finder.dart';
 import '../../services/playback/playback_service.dart';
+import '../../services/playback/playback_source_resolver.dart';
+import '../../services/playback/subtitle_preference.dart';
 import '../../services/playback/vlc_video_view.dart';
-import '../../core/platform/window_channel.dart';
 
 /// Arguments passed to [PlayerPage] via go_router's `extra`.
 class PlayerArgs {
@@ -20,6 +28,9 @@ class PlayerArgs {
     this.mediaId,
     this.startAt,
     this.httpHeaders,
+    this.subtitles = const [],
+    this.showId,
+    this.showTitle,
   });
 
   /// Local file path or http:// stream URL.
@@ -30,11 +41,16 @@ class PlayerArgs {
 
   /// Optional HTTP headers (e.g. WebDAV Basic auth) for the source.
   final Map<String, String>? httpHeaders;
+
+  /// Sidecar subtitle URLs discovered while resolving SMB or WebDAV media.
+  final List<PlaybackSubtitleSource> subtitles;
+
+  /// Parent TV show id — enables prev/next episode + auto-play next.
+  final String? showId;
+  final String? showTitle;
 }
 
-/// Full-screen player backed by VLCKit with a custom Apple-style control
-/// layer on macOS and libVLC on Windows: play/pause, seek bar, speed,
-/// subtitle & audio track selection, skip gestures, and keyboard shortcuts.
+/// Full-screen player backed by native VLCKit with a NetEase-style control layer.
 class PlayerPage extends ConsumerStatefulWidget {
   const PlayerPage({super.key, required this.args});
 
@@ -48,80 +64,206 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const _persistInterval = Duration(seconds: 5);
   static const _controlsHideDelay = Duration(seconds: 3);
   static const _skipStep = Duration(seconds: 10);
-  static const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  static const _autoNextDelay = Duration(seconds: 5);
   static const _nativeTopControlsReserve = 82.0;
   static const _nativeBottomControlsReserve = 138.0;
   static const _nativeBottomSheetReserve = 430.0;
-
-  /// NetEase player accent — blue progress bar and scrubber.
+  static const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
   static const _accent = Color(0xFF2F6BFF);
 
   late final PlaybackService _playback;
   final FocusNode _focusNode = FocusNode();
 
+  late String _uri;
+  late String _title;
+  String? _mediaId;
+  Map<String, String>? _httpHeaders;
+  late List<PlaybackSubtitleSource> _networkSubtitles;
+
   PlaybackProgressRepository? _progressRepo;
   StreamSubscription<Duration>? _positionSub;
   StreamSubscription<Duration>? _durationSub;
+  StreamSubscription<Duration>? _bufferSub;
   StreamSubscription<bool>? _completedSub;
   StreamSubscription<bool>? _playingSub;
+  StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<double>? _volumeSub;
+  StreamSubscription<String>? _errorSub;
+  StreamSubscription<PlaybackTracks>? _tracksSub;
   StreamSubscription<PlaybackVideoEvent>? _videoEventSub;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  Duration _buffer = Duration.zero;
   Duration _lastPersistedPosition = Duration.zero;
   bool _completed = false;
   bool _playing = true;
+  bool _buffering = true;
   bool _controlsVisible = true;
   bool _optionSheetVisible = false;
   bool _dragging = false;
+  bool _opening = true;
+  String? _error;
   double _volume = 100;
+  double _volumeBeforeMute = 100;
+  bool _muted = false;
   double _rate = 1.0;
   Timer? _hideTimer;
+  Timer? _toastTimer;
+  Timer? _autoNextTimer;
+  String? _toast;
+  int _autoNextSeconds = 0;
+
+  List<Episode> _episodes = const [];
+  int _episodeIndex = -1;
+  List<ExternalSubtitleFile> _externalSubs = const [];
+  bool _externalSubsLoaded = false;
+  String? _autoSubtitleKey;
+  bool _applyingSubtitlePreference = false;
+  bool _subtitlePreferencePending = false;
 
   @override
   void initState() {
     super.initState();
     _playback = PlaybackService();
+    _uri = widget.args.uri;
+    _title = widget.args.title;
+    _mediaId = widget.args.mediaId;
+    _httpHeaders = widget.args.httpHeaders;
+    _networkSubtitles = widget.args.subtitles;
     _position = widget.args.startAt ?? Duration.zero;
     _lastPersistedPosition = _position;
 
-    if (widget.args.mediaId != null) {
+    if (_mediaId != null) {
       _progressRepo = ref.read(playbackProgressRepositoryProvider);
     }
     _bindStreams();
     _videoEventSub = _playback.videoEvents.listen(_handleNativeVideoEvent);
-
-    unawaited(
-      _playback.open(
-        widget.args.uri,
-        startAt: widget.args.startAt,
-        httpHeaders: widget.args.httpHeaders,
-      ),
-    );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
-    });
+    _configurePlatformPlayback();
+    unawaited(_openCurrent(startAt: widget.args.startAt));
+    unawaited(_loadEpisodePlaylist());
     _scheduleHideControls();
   }
 
   @override
   void dispose() {
+    _restorePlatformAfterPlayback();
     _hideTimer?.cancel();
+    _toastTimer?.cancel();
+    _autoNextTimer?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
+    _bufferSub?.cancel();
     _completedSub?.cancel();
     _playingSub?.cancel();
+    _bufferingSub?.cancel();
     _volumeSub?.cancel();
+    _errorSub?.cancel();
+    _tracksSub?.cancel();
     _videoEventSub?.cancel();
     _focusNode.dispose();
     _playback.dispose();
     super.dispose();
   }
 
+  void _configurePlatformPlayback() {
+    if (!PlatformCapabilities.isMobile) return;
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
+    );
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]),
+    );
+  }
+
+  void _restorePlatformAfterPlayback() {
+    if (!PlatformCapabilities.isMobile) return;
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
+    unawaited(
+      SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]),
+    );
+  }
+
+  Future<void> _openCurrent({Duration? startAt}) async {
+    setState(() {
+      _opening = true;
+      _buffering = true;
+      _error = null;
+      _completed = false;
+      _externalSubs = const [];
+      _externalSubsLoaded = false;
+      _autoSubtitleKey = null;
+      _cancelAutoNext();
+    });
+    try {
+      await _playback.open(_uri, startAt: startAt, httpHeaders: _httpHeaders);
+      if (!mounted) return;
+      setState(() => _opening = false);
+      unawaited(_loadExternalSubtitles());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _opening = false;
+        _buffering = false;
+        _error = '无法打开媒体：$e';
+      });
+    }
+  }
+
+  Future<void> _loadEpisodePlaylist() async {
+    final showId = widget.args.showId;
+    if (showId == null || showId.isEmpty) return;
+    try {
+      final episodes = await ref
+          .read(episodeRepositoryProvider)
+          .getByShow(showId);
+      if (!mounted) return;
+      final idx = _mediaId == null
+          ? -1
+          : episodes.indexWhere((e) => e.id == _mediaId);
+      setState(() {
+        _episodes = episodes;
+        _episodeIndex = idx;
+      });
+    } catch (_) {
+      // Playlist is best-effort.
+    }
+  }
+
+  Future<void> _loadExternalSubtitles() async {
+    try {
+      final local = await ExternalSubtitleFinder.findFor(_uri);
+      final found = [
+        ...local,
+        for (final subtitle in _networkSubtitles)
+          ExternalSubtitleFile(
+            path: subtitle.uri,
+            label: subtitle.title,
+            languageHint: subtitle.language,
+          ),
+      ];
+      if (!mounted) return;
+      setState(() {
+        _externalSubs = found;
+        _externalSubsLoaded = true;
+      });
+      await _applyPreferredSubtitle();
+    } catch (_) {
+      if (mounted) setState(() => _externalSubsLoaded = true);
+    }
+  }
+
   void _bindStreams() {
     _positionSub = _playback.player.stream.position.listen((position) {
-      if (!mounted) return;
+      if (!mounted || _dragging) return;
       setState(() => _position = position);
       if ((position - _lastPersistedPosition).abs() >= _persistInterval) {
         unawaited(_persistProgress());
@@ -131,34 +273,101 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       if (!mounted) return;
       setState(() => _duration = duration);
     });
+    _bufferSub = _playback.player.stream.buffer.listen((buffer) {
+      if (!mounted) return;
+      setState(() => _buffer = buffer);
+    });
     _playingSub = _playback.player.stream.playing.listen((playing) {
       if (!mounted) return;
       setState(() => _playing = playing);
+      if (playing) _scheduleHideControls();
+    });
+    _bufferingSub = _playback.player.stream.buffering.listen((buffering) {
+      if (!mounted) return;
+      setState(() => _buffering = buffering);
     });
     _volumeSub = _playback.player.stream.volume.listen((volume) {
       if (!mounted) return;
-      setState(() => _volume = volume);
+      setState(() {
+        _volume = volume;
+        _muted = volume <= 0;
+      });
+    });
+    _errorSub = _playback.player.stream.error.listen((message) {
+      if (!mounted || message.trim().isEmpty) return;
+      setState(() {
+        _error = message;
+        _opening = false;
+        _buffering = false;
+      });
     });
     _completedSub = _playback.player.stream.completed.listen((completed) {
       _completed = completed;
       if (completed) {
         unawaited(_persistProgress(force: true));
+        if (_hasNextEpisode) {
+          _startAutoNextCountdown();
+        } else {
+          _showToast('播放完毕');
+          _showControls();
+        }
       }
+    });
+    _tracksSub = _playback.player.stream.tracks.listen((_) {
+      if (!mounted) return;
+      setState(() {});
+      unawaited(_applyPreferredSubtitle());
     });
   }
 
-  void _handleNativeVideoEvent(PlaybackVideoEvent event) {
+  Future<void> _applyPreferredSubtitle() async {
     if (!mounted) return;
-    switch (event) {
-      case PlaybackVideoEvent.tap:
-        _toggleControls();
-      case PlaybackVideoEvent.doubleTap:
-        WindowChannel.toggleFullScreen();
+    if (_applyingSubtitlePreference) {
+      _subtitlePreferencePending = true;
+      return;
+    }
+
+    _applyingSubtitlePreference = true;
+    try {
+      do {
+        _subtitlePreferencePending = false;
+        final selected = SubtitlePreference.choose(
+          embedded: _playback.subtitleTracks,
+          external: _externalSubs,
+        );
+        if (selected == null || selected.key == _autoSubtitleKey) continue;
+
+        final external = selected.external;
+        if (external != null) {
+          await _playback.setSubtitleTrack(
+            PlaybackSubtitleTrack.uri(
+              external.uri,
+              title: external.label,
+              language: external.languageHint,
+            ),
+          );
+        } else {
+          await _playback.setSubtitleTrack(selected.embedded!);
+        }
+        _autoSubtitleKey = selected.key;
+      } while (_subtitlePreferencePending && mounted);
+    } catch (_) {
+      // Subtitle preference is best-effort and must never block playback.
+    } finally {
+      _applyingSubtitlePreference = false;
     }
   }
 
+  bool get _hasNextEpisode =>
+      _episodeIndex >= 0 && _episodeIndex < _episodes.length - 1;
+
+  bool get _hasPrevEpisode => _episodeIndex > 0;
+
+  Episode? get _nextEpisode =>
+      _hasNextEpisode ? _episodes[_episodeIndex + 1] : null;
+
   Future<void> _persistProgress({bool force = false}) async {
-    final mediaId = widget.args.mediaId;
+    final mediaId = _mediaId;
     final repo = _progressRepo;
     if (mediaId == null || repo == null) return;
 
@@ -172,33 +381,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (snapshot == null) {
       if (force) {
         await repo.clear(mediaId);
-        if (mounted) _invalidateProgress();
+        if (mounted) _invalidateProgress(mediaId);
       }
       return;
     }
 
     _lastPersistedPosition = snapshot.position;
     await repo.save(snapshot);
-    if (mounted) _invalidateProgress();
+    if (mounted) _invalidateProgress(mediaId);
   }
 
-  void _invalidateProgress() {
-    final mediaId = widget.args.mediaId;
-    if (mediaId == null) return;
+  void _invalidateProgress(String mediaId) {
     ref.invalidate(playbackProgressByMediaIdProvider(mediaId));
     ref.invalidate(continueWatchingProvider);
     ref.invalidate(recentlyWatchedMediaProvider);
   }
 
   Future<void> _handleBack() async {
-    unawaited(_persistProgress(force: true));
+    _cancelAutoNext();
+    await _persistProgress(force: true);
     if (!mounted) return;
-    final navigator = Navigator.of(context, rootNavigator: true);
-    if (navigator.canPop()) {
-      navigator.pop();
-    } else {
-      context.pop();
-    }
+    context.pop();
   }
 
   // --- Control interactions ----------------------------------------------
@@ -206,7 +409,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   void _scheduleHideControls() {
     _hideTimer?.cancel();
     _hideTimer = Timer(_controlsHideDelay, () {
-      if (mounted && _playing && !_dragging) {
+      if (mounted && _playing && !_dragging && _error == null) {
         setState(() => _controlsVisible = false);
       }
     });
@@ -226,12 +429,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
   }
 
+  void _handleNativeVideoEvent(PlaybackVideoEvent event) {
+    switch (event) {
+      case PlaybackVideoEvent.tap:
+        _toggleControls();
+      case PlaybackVideoEvent.doubleTap:
+        unawaited(DesktopWindow.toggleFullScreen());
+    }
+  }
+
+  void _showToast(String message) {
+    _toastTimer?.cancel();
+    setState(() => _toast = message);
+    _toastTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _toast = null);
+    });
+  }
+
   Future<void> _togglePlay() async {
+    _cancelAutoNext();
     await _playback.playOrPause();
     _showControls();
   }
 
   Future<void> _skip(Duration delta) async {
+    _cancelAutoNext();
     final target = _position + delta;
     final clamped = target < Duration.zero
         ? Duration.zero
@@ -240,18 +462,120 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               : target);
     await _playback.seek(clamped);
     setState(() => _position = clamped);
+    final secs = delta.inSeconds.abs();
+    _showToast(delta.isNegative ? '−${secs}s' : '+${secs}s');
     _showControls();
   }
 
   Future<void> _setRate(double rate) async {
     await _playback.setRate(rate);
     setState(() => _rate = rate);
+    _showToast('${rate.toString().replaceAll(RegExp(r'\.0$'), '')}x');
   }
 
   Future<void> _setVolume(double volume) async {
     final clamped = volume.clamp(0.0, 100.0);
     await _playback.setVolume(clamped);
-    setState(() => _volume = clamped);
+    setState(() {
+      _volume = clamped;
+      _muted = clamped <= 0;
+      if (clamped > 0) _volumeBeforeMute = clamped;
+    });
+  }
+
+  Future<void> _toggleMute() async {
+    if (_muted || _volume <= 0) {
+      final restore = _volumeBeforeMute > 0 ? _volumeBeforeMute : 100.0;
+      await _setVolume(restore);
+      _showToast('取消静音');
+    } else {
+      _volumeBeforeMute = _volume;
+      await _setVolume(0);
+      _showToast('静音');
+    }
+    _showControls();
+  }
+
+  void _startAutoNextCountdown() {
+    _cancelAutoNext();
+    setState(() => _autoNextSeconds = _autoNextDelay.inSeconds);
+    _showControls();
+    _autoNextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_autoNextSeconds <= 1) {
+        timer.cancel();
+        unawaited(_playAdjacentEpisode(1));
+      } else {
+        setState(() => _autoNextSeconds -= 1);
+      }
+    });
+  }
+
+  void _cancelAutoNext() {
+    _autoNextTimer?.cancel();
+    _autoNextTimer = null;
+    if (_autoNextSeconds != 0 && mounted) {
+      setState(() => _autoNextSeconds = 0);
+    } else {
+      _autoNextSeconds = 0;
+    }
+  }
+
+  Future<void> _playAdjacentEpisode(int delta) async {
+    _cancelAutoNext();
+    final targetIndex = _episodeIndex + delta;
+    if (targetIndex < 0 || targetIndex >= _episodes.length) return;
+
+    final showId = widget.args.showId;
+    if (showId == null) return;
+
+    await _persistProgress(force: true);
+
+    final episode = _episodes[targetIndex];
+    try {
+      setState(() {
+        _opening = true;
+        _error = null;
+      });
+      final show = await ref.read(mediaByIdProvider(showId).future);
+      if (show == null) {
+        throw StateError('找不到剧集所属的媒体条目');
+      }
+      final playable = MediaLibraryEntryFactory.episodePlayableMedia(
+        episode,
+        show,
+      );
+      final source = await ref
+          .read(playbackSourceResolverProvider)
+          .resolve(playable);
+      if (!mounted) return;
+
+      setState(() {
+        _uri = source.uri;
+        _httpHeaders = source.httpHeaders;
+        _networkSubtitles = source.subtitles;
+        _mediaId = episode.id;
+        _title =
+            '${widget.args.showTitle ?? show.title} - ${episode.displayLabel}';
+        _episodeIndex = targetIndex;
+        _position = Duration.zero;
+        _duration = Duration.zero;
+        _buffer = Duration.zero;
+        _lastPersistedPosition = Duration.zero;
+        _progressRepo = ref.read(playbackProgressRepositoryProvider);
+      });
+      await _openCurrent();
+      _showToast(delta > 0 ? '下一集' : '上一集');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _opening = false;
+        _error = '切换剧集失败：$e';
+      });
+    }
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -281,8 +605,40 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _showControls();
       return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.keyF ||
+        key == LogicalKeyboardKey.f11 ||
+        (key == LogicalKeyboardKey.enter &&
+            HardwareKeyboard.instance.isAltPressed)) {
+      unawaited(DesktopWindow.toggleFullScreen());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyM) {
+      unawaited(_toggleMute());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyN) {
+      if (_hasNextEpisode) unawaited(_playAdjacentEpisode(1));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.keyP) {
+      if (_hasPrevEpisode) unawaited(_playAdjacentEpisode(-1));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.bracketLeft) {
+      final idx = _speedOptions.indexOf(_rate);
+      final next = idx > 0 ? _speedOptions[idx - 1] : _speedOptions.first;
+      unawaited(_setRate(next));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.bracketRight) {
+      final idx = _speedOptions.indexOf(_rate);
+      final next = idx >= 0 && idx < _speedOptions.length - 1
+          ? _speedOptions[idx + 1]
+          : _speedOptions.last;
+      unawaited(_setRate(next));
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.escape) {
-      unawaited(WindowChannel.toggleFullScreen());
       unawaited(_handleBack());
       return KeyEventResult.handled;
     }
@@ -291,8 +647,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
-
     return Scaffold(
       backgroundColor: Colors.black,
       body: Focus(
@@ -301,6 +655,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         onKeyEvent: _handleKey,
         child: MouseRegion(
           onHover: (_) => _showControls(),
+          cursor: PlatformCapabilities.isDesktop && !_controlsVisible
+              ? SystemMouseCursors.none
+              : MouseCursor.defer,
           child: Stack(
             children: [
               Positioned.fill(
@@ -309,7 +666,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   nativeOverlayInsets: _nativeOverlayInsets,
                 ),
               ),
-              // Tap zones: center toggles fullscreen/controls, sides double-tap to skip.
               Positioned.fill(
                 child: Row(
                   children: [
@@ -324,13 +680,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                     Expanded(
                       flex: 2,
                       child: GestureDetector(
-                        key: routeIsCurrent
-                            ? const Key('player_center_gesture')
-                            : null,
+                        key: const Key('player_center_gesture'),
                         behavior: HitTestBehavior.translucent,
                         onTap: _toggleControls,
                         onDoubleTap: () {
-                          WindowChannel.toggleFullScreen();
+                          if (PlatformCapabilities.isMobile) {
+                            _togglePlay();
+                          } else {
+                            DesktopWindow.toggleFullScreen();
+                          }
                         },
                       ),
                     ),
@@ -345,7 +703,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   ],
                 ),
               ),
-              _controlsOverlay(context, routeIsCurrent: routeIsCurrent),
+              if (_buffering || _opening) _bufferingOverlay(),
+              if (_error != null) _errorOverlay(),
+              if (_toast != null) _toastOverlay(),
+              if (_autoNextSeconds > 0) _autoNextOverlay(),
+              _controlsOverlay(context),
+              if (PlatformCapabilities.isDesktop)
+                const Positioned(
+                  top: 0,
+                  left: 76,
+                  right: 76,
+                  height: 28,
+                  child: DragToMoveArea(child: SizedBox.expand()),
+                ),
             ],
           ),
         ),
@@ -354,6 +724,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   EdgeInsets get _nativeOverlayInsets {
+    if (!PlatformCapabilities.isWindows) return EdgeInsets.zero;
     final top = _controlsVisible ? _nativeTopControlsReserve : 0.0;
     final bottom = _optionSheetVisible
         ? _nativeBottomSheetReserve
@@ -361,10 +732,153 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     return EdgeInsets.only(top: top, bottom: bottom);
   }
 
-  Widget _controlsOverlay(
-    BuildContext context, {
-    required bool routeIsCurrent,
-  }) {
+  Widget _bufferingOverlay() {
+    return const Center(
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white70),
+      ),
+    );
+  }
+
+  Widget _errorOverlay() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 32),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.78),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              color: Colors.white70,
+              size: 40,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error ?? '播放出错',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () => unawaited(_openCurrent(startAt: _position)),
+                  child: const Text('重试', style: TextStyle(color: _accent)),
+                ),
+                TextButton(
+                  onPressed: _handleBack,
+                  child: const Text(
+                    '返回',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _toastOverlay() {
+    return Center(
+      child: IgnorePointer(
+        child: AnimatedOpacity(
+          opacity: _toast == null ? 0 : 1,
+          duration: const Duration(milliseconds: 150),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Text(
+              _toast ?? '',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _autoNextOverlay() {
+    final next = _nextEpisode;
+    if (next == null) return const SizedBox.shrink();
+    return Positioned(
+      right: 28,
+      bottom: 110,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: 280,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${_autoNextSeconds}s 后播放下一集',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                next.displayLabel,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _cancelAutoNext,
+                    child: const Text(
+                      '取消',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: _accent),
+                    onPressed: () => unawaited(_playAdjacentEpisode(1)),
+                    child: const Text('立即播放'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _controlsOverlay(BuildContext context) {
     return AnimatedOpacity(
       opacity: _controlsVisible ? 1 : 0,
       duration: const Duration(milliseconds: 220),
@@ -386,11 +900,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           ),
           child: SafeArea(
             child: Column(
-              children: [
-                _topBar(context, routeIsCurrent: routeIsCurrent),
-                const Spacer(),
-                _bottomBar(context),
-              ],
+              children: [_topBar(context), const Spacer(), _bottomBar(context)],
             ),
           ),
         ),
@@ -398,18 +908,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _topBar(BuildContext context, {required bool routeIsCurrent}) {
-    final platform = Theme.of(context).platform;
-    final leftPadding = platform == TargetPlatform.macOS
-        ? WindowChromeMetrics.macOSTrafficLightReservedWidth
-        : 12.0;
-
+  Widget _topBar(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(leftPadding, 8, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           IconButton(
-            key: routeIsCurrent ? const Key('player_back_button') : null,
+            key: const Key('player_back_button'),
             icon: const Icon(
               Icons.arrow_back_ios_new_rounded,
               color: Colors.white,
@@ -419,17 +924,49 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              widget.args.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                letterSpacing: -0.3,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                if (_episodes.isNotEmpty && _episodeIndex >= 0)
+                  Text(
+                    '第 ${_episodeIndex + 1} / ${_episodes.length} 集',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+              ],
             ),
+          ),
+          if (_hasPrevEpisode)
+            IconButton(
+              key: const Key('player_prev_episode'),
+              tooltip: '上一集 (P)',
+              icon: const Icon(
+                Icons.skip_previous_rounded,
+                color: Colors.white,
+              ),
+              onPressed: () => unawaited(_playAdjacentEpisode(-1)),
+            ),
+          if (_hasNextEpisode)
+            IconButton(
+              key: const Key('player_next_episode'),
+              tooltip: '下一集 (N)',
+              icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
+              onPressed: () => unawaited(_playAdjacentEpisode(1)),
+            ),
+          IconButton(
+            tooltip: '全屏 (F)',
+            icon: const Icon(Icons.fullscreen_rounded, color: Colors.white70),
+            onPressed: () => unawaited(DesktopWindow.toggleFullScreen()),
           ),
         ],
       ),
@@ -478,13 +1015,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Widget _bottomBar(BuildContext context) {
     final total = _duration.inMilliseconds;
     final current = _position.inMilliseconds.clamp(0, total == 0 ? 1 : total);
+    final buffered = _buffer.inMilliseconds.clamp(0, total == 0 ? 1 : total);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Row 1: time — blue progress — time (NetEase Mac player).
           Row(
             children: [
               Text(
@@ -492,40 +1029,73 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
               Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
-                    ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 14,
-                    ),
-                    activeTrackColor: _accent,
-                    inactiveTrackColor: Colors.white24,
-                    thumbColor: _accent,
-                    overlayColor: _accent.withValues(alpha: 0.24),
-                  ),
-                  child: Slider(
-                    value: total == 0 ? 0 : current.toDouble(),
-                    max: total == 0 ? 1 : total.toDouble(),
-                    onChangeStart: (_) {
-                      _dragging = true;
-                      _hideTimer?.cancel();
-                    },
-                    onChanged: (value) {
-                      setState(
-                        () => _position = Duration(milliseconds: value.round()),
-                      );
-                    },
-                    onChangeEnd: (value) async {
-                      _dragging = false;
-                      await _playback.seek(
-                        Duration(milliseconds: value.round()),
-                      );
-                      _scheduleHideControls();
-                    },
-                  ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final maxW = constraints.maxWidth;
+                    final bufferRatio = total == 0 ? 0.0 : buffered / total;
+                    return Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        // Buffered range behind the active slider track.
+                        if (total > 0)
+                          Positioned(
+                            left: 12,
+                            right: 12,
+                            child: FractionallySizedBox(
+                              widthFactor: bufferRatio.clamp(0.0, 1.0),
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                height: 3,
+                                decoration: BoxDecoration(
+                                  color: Colors.white38,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 3,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 6,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 14,
+                            ),
+                            activeTrackColor: _accent,
+                            inactiveTrackColor: Colors.white24,
+                            thumbColor: _accent,
+                            overlayColor: _accent.withValues(alpha: 0.24),
+                          ),
+                          child: Slider(
+                            value: total == 0 ? 0 : current.toDouble(),
+                            max: total == 0 ? 1 : total.toDouble(),
+                            onChangeStart: (_) {
+                              _dragging = true;
+                              _cancelAutoNext();
+                              _hideTimer?.cancel();
+                            },
+                            onChanged: (value) {
+                              setState(
+                                () => _position = Duration(
+                                  milliseconds: value.round(),
+                                ),
+                              );
+                            },
+                            onChangeEnd: (value) async {
+                              _dragging = false;
+                              await _playback.seek(
+                                Duration(milliseconds: value.round()),
+                              );
+                              _scheduleHideControls();
+                            },
+                          ),
+                        ),
+                        // Keep analyzer happy — width used for layout only.
+                        SizedBox(width: maxW, height: 0),
+                      ],
+                    );
+                  },
                 ),
               ),
               Text(
@@ -534,7 +1104,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               ),
             ],
           ),
-          // Row 2: volume + speed | play cluster | audio + subtitles.
           Row(
             children: [
               Expanded(
@@ -570,14 +1139,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       width: 160,
       child: Row(
         children: [
-          Icon(
-            _volume == 0
-                ? Icons.volume_off_rounded
-                : (_volume < 50
-                      ? Icons.volume_down_rounded
-                      : Icons.volume_up_rounded),
-            color: Colors.white70,
-            size: 20,
+          GestureDetector(
+            onTap: () => unawaited(_toggleMute()),
+            child: Icon(
+              _muted || _volume == 0
+                  ? Icons.volume_off_rounded
+                  : (_volume < 50
+                        ? Icons.volume_down_rounded
+                        : Icons.volume_up_rounded),
+              color: Colors.white70,
+              size: 20,
+            ),
           ),
           Expanded(
             child: SliderTheme(
@@ -629,22 +1201,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   // --- Bottom sheets ------------------------------------------------------
 
-  void _markOptionSheetOpen() {
-    _hideTimer?.cancel();
-    setState(() {
-      _controlsVisible = true;
-      _optionSheetVisible = true;
-    });
-  }
-
-  void _markOptionSheetClosed() {
-    if (!mounted) return;
-    setState(() => _optionSheetVisible = false);
-    _scheduleHideControls();
-  }
-
   void _showSpeedSheet() {
-    _markOptionSheetOpen();
+    _hideTimer?.cancel();
+    setState(() => _optionSheetVisible = true);
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF1A1B23),
@@ -668,11 +1227,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             })
             .toList(growable: false),
       ),
-    ).whenComplete(_markOptionSheetClosed);
+    ).whenComplete(_finishOptionSheet);
   }
 
   void _showAudioTrackSheet() {
-    _markOptionSheetOpen();
+    _hideTimer?.cancel();
+    setState(() => _optionSheetVisible = true);
     final tracks = _playback.audioTracks;
     final current = _playback.currentAudioTrack;
     showModalBottomSheet<void>(
@@ -698,37 +1258,68 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   })
                   .toList(growable: false),
       ),
-    ).whenComplete(_markOptionSheetClosed);
+    ).whenComplete(_finishOptionSheet);
   }
 
   void _showSubtitleTrackSheet() {
-    _markOptionSheetOpen();
-    final tracks = _playback.subtitleTracks;
+    _hideTimer?.cancel();
+    setState(() => _optionSheetVisible = true);
+    final embedded = _playback.subtitleTracks;
     final current = _playback.currentSubtitleTrack;
+    final children = <Widget>[];
+
+    if (embedded.isEmpty && _externalSubs.isEmpty) {
+      children.add(
+        _emptyTracksHint(_externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…'),
+      );
+    } else {
+      for (final track in embedded) {
+        children.add(
+          _optionTile(
+            label: _subtitleTrackLabel(track),
+            selected: track.id == current.id,
+            onTap: () {
+              _playback.setSubtitleTrack(track);
+              Navigator.of(context).pop();
+            },
+          ),
+        );
+      }
+      for (final sub in _externalSubs) {
+        final uri = sub.uri;
+        final selected = current.uri && current.id == uri;
+        children.add(
+          _optionTile(
+            label: sub.label,
+            selected: selected,
+            onTap: () {
+              _playback.setSubtitleTrack(
+                PlaybackSubtitleTrack.uri(
+                  uri,
+                  title: sub.label,
+                  language: sub.languageHint,
+                ),
+              );
+              Navigator.of(context).pop();
+            },
+          ),
+        );
+      }
+    }
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF1A1B23),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _optionSheet(
-        title: '字幕',
-        children: tracks.isEmpty
-            ? [_emptyTracksHint('未检测到字幕')]
-            : tracks
-                  .map((track) {
-                    return _optionTile(
-                      label: _subtitleTrackLabel(track),
-                      selected: track.id == current.id,
-                      onTap: () {
-                        _playback.setSubtitleTrack(track);
-                        Navigator.of(context).pop();
-                      },
-                    );
-                  })
-                  .toList(growable: false),
-      ),
-    ).whenComplete(_markOptionSheetClosed);
+      builder: (context) => _optionSheet(title: '字幕', children: children),
+    ).whenComplete(_finishOptionSheet);
+  }
+
+  void _finishOptionSheet() {
+    if (mounted) setState(() => _optionSheetVisible = false);
+    _scheduleHideControls();
   }
 
   Widget _optionSheet({required String title, required List<Widget> children}) {
@@ -790,7 +1381,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   String _audioTrackLabel(PlaybackAudioTrack track) {
-    if (track.id == '-1') return '关闭';
+    if (track.id == '-1' || track.id == 'no') return '关闭';
+    if (track.id == 'auto') return '自动';
     final parts = <String>[
       if (track.title != null && track.title!.isNotEmpty) track.title!,
       if (track.language != null && track.language!.isNotEmpty)
@@ -800,7 +1392,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   String _subtitleTrackLabel(PlaybackSubtitleTrack track) {
-    if (track.id == '-1') return '关闭';
+    if (track.id == '-1' || track.id == 'no') return '关闭';
+    if (track.id == 'auto') return '自动';
     final parts = <String>[
       if (track.title != null && track.title!.isNotEmpty) track.title!,
       if (track.language != null && track.language!.isNotEmpty)

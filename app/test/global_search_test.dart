@@ -54,10 +54,10 @@ void main() {
 
     await pumpApp(tester);
 
-    // The top bar shows a search action.
-    expect(find.byKey(const Key('home_search_button')), findsOneWidget);
+    // Sidebar search pill + home top-bar search.
+    expect(find.byIcon(Icons.search_rounded), findsAtLeastNWidgets(1));
 
-    await tester.tap(find.byKey(const Key('home_search_button')));
+    await tester.tap(find.byIcon(Icons.search_rounded).first);
     await tester.pumpAndSettle();
 
     // The overlay's search field placeholder is now visible.
@@ -101,7 +101,7 @@ void main() {
     );
 
     await pumpApp(tester);
-    await tester.tap(find.byKey(const Key('home_search_button')));
+    await tester.tap(find.byIcon(Icons.search_rounded).first);
     await tester.pumpAndSettle();
 
     await tester.enterText(

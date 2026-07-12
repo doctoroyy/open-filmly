@@ -1,4 +1,5 @@
 import 'package:drift/native.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,7 +95,7 @@ void main() {
 
     await pumpApp(tester);
 
-    await tester.tap(find.byKey(const Key('home_search_button')));
+    await tester.tap(find.byIcon(Icons.search_rounded).first);
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const Key('global_search_field')), 'neo');
@@ -120,6 +121,8 @@ void main() {
         year: '1999',
         type: MediaType.movie,
         path: '/movies/matrix.mkv',
+        posterPath: 'https://image.tmdb.org/t/p/w500/poster.jpg',
+        detailsJson: '{"backdrop_path":"/backdrop.jpg"}',
         dateAdded: '2026-06-01T10:00:00.000',
       ),
     );
@@ -134,8 +137,13 @@ void main() {
 
     await pumpApp(tester);
 
+    // Sidebar uses 「最近观看」; the in-progress shelf title stays 「最近播放」.
     expect(find.text('最近观看'), findsOneWidget);
     expect(find.text('最近播放'), findsOneWidget);
+    final landscape = tester.widget<CachedNetworkImage>(
+      find.byType(CachedNetworkImage).first,
+    );
+    expect(landscape.imageUrl, 'https://image.tmdb.org/t/p/w780/backdrop.jpg');
   });
 
   testWidgets('library route opens media detail page', (tester) async {

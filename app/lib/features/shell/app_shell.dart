@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:window_manager/window_manager.dart';
 
+import '../../core/platform/desktop_window.dart';
+import '../../core/platform/platform_capabilities.dart';
+import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/global_search.dart';
-import '../../core/platform/window_channel.dart';
 
 /// Persistent macOS-style split view: a light sidebar on the left (brand +
 /// library nav) and the routed content on the right — matching NetEase 爆米花's
@@ -26,7 +29,6 @@ class AppShell extends ConsumerStatefulWidget {
     _NavItem(icon: Icons.music_note_rounded, label: '演唱会', path: '/concert'),
     _NavItem(icon: Icons.menu_book_rounded, label: '纪录片', path: '/documentary'),
     _NavItem(icon: Icons.more_horiz_rounded, label: '其他', path: '/other'),
-    _NavItem(icon: Icons.dns_rounded, label: '来源', path: '/sources'),
   ];
 
   @override
@@ -34,8 +36,6 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
-  static const double _sidebarWidth = 212;
-
   bool _startupScanStarted = false;
 
   @override
@@ -69,6 +69,15 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   int _selectedIndex(BuildContext context) {
     final location = _location(context);
+    if (location == '/media') {
+      final id = GoRouterState.of(context).uri.queryParameters['id'];
+      final media = id == null
+          ? null
+          : ref.watch(mediaByIdProvider(id)).asData?.value;
+      if (media?.type == MediaType.movie) return 2;
+      if (media?.type == MediaType.tv) return 3;
+      return -1;
+    }
     for (var i = AppShell._navItems.length - 1; i >= 0; i--) {
       final path = AppShell._navItems[i].path;
       if (path == '/') {
@@ -91,6 +100,37 @@ class _AppShellState extends ConsumerState<AppShell> {
             const _OpenSearchIntent(),
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             const _OpenSearchIntent(),
+        const SingleActivator(LogicalKeyboardKey.comma, meta: true):
+            const _OpenSettingsIntent(),
+        const SingleActivator(LogicalKeyboardKey.comma, control: true):
+            const _OpenSettingsIntent(),
+        const SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+            const _NavigateIntent('/'),
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true):
+            const _NavigateIntent('/'),
+        const SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+            const _NavigateIntent('/recent'),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true):
+            const _NavigateIntent('/recent'),
+        const SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+            const _NavigateIntent('/movies'),
+        const SingleActivator(LogicalKeyboardKey.digit3, control: true):
+            const _NavigateIntent('/movies'),
+        const SingleActivator(LogicalKeyboardKey.digit4, meta: true):
+            const _NavigateIntent('/tv'),
+        const SingleActivator(LogicalKeyboardKey.digit4, control: true):
+            const _NavigateIntent('/tv'),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
+            const _BackIntent(),
+        const SingleActivator(LogicalKeyboardKey.f11):
+            const _ToggleFullScreenIntent(),
+        const SingleActivator(
+          LogicalKeyboardKey.keyF,
+          meta: true,
+          control: true,
+        ): const _ToggleFullScreenIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyM, meta: true):
+            const _MinimizeIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -100,47 +140,202 @@ class _AppShellState extends ConsumerState<AppShell> {
               return null;
             },
           ),
+          _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
+            onInvoke: (_) {
+              context.go('/config');
+              return null;
+            },
+          ),
+          _NavigateIntent: CallbackAction<_NavigateIntent>(
+            onInvoke: (intent) {
+              context.go(intent.location);
+              return null;
+            },
+          ),
+          _BackIntent: CallbackAction<_BackIntent>(
+            onInvoke: (_) {
+              if (context.canPop()) context.pop();
+              return null;
+            },
+          ),
+          _ToggleFullScreenIntent: CallbackAction<_ToggleFullScreenIntent>(
+            onInvoke: (_) {
+              DesktopWindow.toggleFullScreen();
+              return null;
+            },
+          ),
+          _MinimizeIntent: CallbackAction<_MinimizeIntent>(
+            onInvoke: (_) {
+              DesktopWindow.minimize();
+              return null;
+            },
+          ),
         },
         child: Focus(
           autofocus: true,
-          child: Scaffold(
-            backgroundColor: FilmlyPalette.background,
-            body: Stack(
-              children: [
-                Row(
-                  children: [
-                    _Sidebar(
-                      selectedIndex: selected,
-                      settingsSelected: settingsSelected,
-                      onTapItem: (i) => context.go(AppShell._navItems[i].path),
-                      onTapSettings: () => context.go('/config'),
-                    ),
-                    const VerticalDivider(
-                      width: 1,
-                      thickness: 1,
-                      color: FilmlyPalette.divider,
-                    ),
-                    Expanded(child: widget.child),
-                  ],
-                ),
-                if (Theme.of(context).platform == TargetPlatform.macOS)
-                  Positioned(
-                    top: 0,
-                    left: WindowChromeMetrics.macOSTrafficLightReservedWidth,
-                    width:
-                        _sidebarWidth -
-                        WindowChromeMetrics.macOSTrafficLightReservedWidth,
-                    height: WindowChromeMetrics.macOSTitlebarHeight,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onDoubleTap: () {
-                        WindowChannel.maximize();
-                      },
-                    ),
-                  ),
-              ],
-            ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final useSidebar = constraints.maxWidth >= 840;
+              final favoritesSelected = _location(
+                context,
+              ).startsWith('/favorites');
+              final sourcesSelected = _location(context).startsWith('/sources');
+
+              return Scaffold(
+                backgroundColor: FilmlyPalette.background,
+                body: useSidebar
+                    ? Stack(
+                        children: [
+                          Row(
+                            children: [
+                              _Sidebar(
+                                selectedIndex: selected,
+                                settingsSelected: settingsSelected,
+                                onTapItem: (i) =>
+                                    context.go(AppShell._navItems[i].path),
+                                onTapSettings: () => context.go('/config'),
+                                onTapFavorites: () => context.go('/favorites'),
+                                onTapSources: () => context.go('/sources'),
+                                favoritesSelected: favoritesSelected,
+                                sourcesSelected: sourcesSelected,
+                              ),
+                              const VerticalDivider(
+                                width: 1,
+                                thickness: 1,
+                                color: FilmlyPalette.divider,
+                              ),
+                              Expanded(child: widget.child),
+                            ],
+                          ),
+                          if (PlatformCapabilities.isMacOS)
+                            const Positioned(
+                              top: 0,
+                              left: 76,
+                              right: 0,
+                              height: 30,
+                              child: DragToMoveArea(child: SizedBox.expand()),
+                            ),
+                          if (PlatformCapabilities.isWindows)
+                            const Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              height: kWindowCaptionHeight,
+                              child: WindowCaption(
+                                brightness: Brightness.light,
+                                title: Text('Open Filmly'),
+                              ),
+                            ),
+                        ],
+                      )
+                    : widget.child,
+                bottomNavigationBar: useSidebar
+                    ? null
+                    : _MobileNavigation(
+                        selectedIndex: selected,
+                        moreSelected:
+                            selected > 3 ||
+                            settingsSelected ||
+                            favoritesSelected ||
+                            sourcesSelected,
+                        onNavigate: (path) => context.go(path),
+                      ),
+              );
+            },
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileNavigation extends StatelessWidget {
+  const _MobileNavigation({
+    required this.selectedIndex,
+    required this.moreSelected,
+    required this.onNavigate,
+  });
+
+  final int selectedIndex;
+  final bool moreSelected;
+  final ValueChanged<String> onNavigate;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = moreSelected
+        ? 4
+        : selectedIndex < 0
+        ? 0
+        : selectedIndex > 3
+        ? 3
+        : selectedIndex;
+    return NavigationBar(
+      height: 68,
+      selectedIndex: current,
+      onDestinationSelected: (index) {
+        if (index < 4) {
+          onNavigate(AppShell._navItems[index].path);
+        } else {
+          _showMore(context);
+        }
+      },
+      destinations: const [
+        NavigationDestination(icon: Icon(Icons.home_rounded), label: '首页'),
+        NavigationDestination(icon: Icon(Icons.history_rounded), label: '最近'),
+        NavigationDestination(icon: Icon(Icons.movie_rounded), label: '电影'),
+        NavigationDestination(icon: Icon(Icons.tv_rounded), label: '电视剧'),
+        NavigationDestination(
+          icon: Icon(Icons.more_horiz_rounded),
+          label: '更多',
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showMore(BuildContext context) {
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+          children: [
+            for (final item in AppShell._navItems.skip(4))
+              ListTile(
+                leading: Icon(item.icon),
+                title: Text(item.label),
+                onTap: () {
+                  Navigator.pop(context);
+                  onNavigate(item.path);
+                },
+              ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.favorite_rounded),
+              title: const Text('收藏'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate('/favorites');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.dns_rounded),
+              title: const Text('来源'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate('/sources');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_rounded),
+              title: const Text('设置'),
+              onTap: () {
+                Navigator.pop(context);
+                onNavigate('/config');
+              },
+            ),
+          ],
         ),
       ),
     );
@@ -153,28 +348,31 @@ class _Sidebar extends StatelessWidget {
     required this.settingsSelected,
     required this.onTapItem,
     required this.onTapSettings,
+    required this.onTapFavorites,
+    required this.onTapSources,
+    required this.favoritesSelected,
+    required this.sourcesSelected,
   });
 
   final int selectedIndex;
   final bool settingsSelected;
+  final bool favoritesSelected;
+  final bool sourcesSelected;
   final ValueChanged<int> onTapItem;
   final VoidCallback onTapSettings;
+  final VoidCallback onTapFavorites;
+  final VoidCallback onTapSources;
 
   @override
   Widget build(BuildContext context) {
     final isMac = Theme.of(context).platform == TargetPlatform.macOS;
     return Container(
-      width: _AppShellState._sidebarWidth,
+      width: 212,
       color: FilmlyPalette.sidebar,
       child: SafeArea(
         right: false,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            12,
-            isMac ? WindowChromeMetrics.macOSTitlebarHeight : 16,
-            12,
-            14,
-          ),
+          padding: EdgeInsets.fromLTRB(12, isMac ? 38 : 16, 12, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -271,7 +469,11 @@ class _Sidebar extends StatelessWidget {
                       key: Key('sidebar_${item.path}'),
                       icon: item.icon,
                       label: item.label,
-                      selected: i == selectedIndex && !settingsSelected,
+                      selected:
+                          i == selectedIndex &&
+                          !settingsSelected &&
+                          !favoritesSelected &&
+                          !sourcesSelected,
                       onTap: () => onTapItem(i),
                     );
                   },
@@ -280,7 +482,7 @@ class _Sidebar extends StatelessWidget {
               const SizedBox(height: 12),
               const Divider(height: 1, color: FilmlyPalette.divider),
               const SizedBox(height: 10),
-              // Account Row & Settings Icon at the bottom (Netease style)
+              // Account row + quick actions (favorites / sources / settings)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(
@@ -307,7 +509,7 @@ class _Sidebar extends StatelessWidget {
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text(
-                        'Filmly',
+                        'xiaoyu',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: FilmlyPalette.textPrimary,
@@ -316,26 +518,26 @@ class _Sidebar extends StatelessWidget {
                         ),
                       ),
                     ),
-                    GestureDetector(
+                    _SidebarIconButton(
+                      key: const Key('sidebar_/favorites'),
+                      icon: Icons.favorite_rounded,
+                      selected: favoritesSelected,
+                      tooltip: '收藏',
+                      onTap: onTapFavorites,
+                    ),
+                    _SidebarIconButton(
+                      key: const Key('sidebar_/sources'),
+                      icon: Icons.dns_rounded,
+                      selected: sourcesSelected,
+                      tooltip: '来源',
+                      onTap: onTapSources,
+                    ),
+                    _SidebarIconButton(
                       key: const Key('sidebar_/config'),
+                      icon: Icons.settings_rounded,
+                      selected: settingsSelected,
+                      tooltip: '设置',
                       onTap: onTapSettings,
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: settingsSelected
-                              ? FilmlyPalette.accent.withValues(alpha: 0.12)
-                              : Colors.transparent,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.settings_rounded,
-                          color: settingsSelected
-                              ? FilmlyPalette.accent
-                              : FilmlyPalette.textSecondary,
-                          size: 18,
-                        ),
-                      ),
                     ),
                   ],
                 ),
@@ -378,33 +580,81 @@ class _SidebarItemState extends State<_SidebarItem> {
         ? FilmlyPalette.accent
         : FilmlyPalette.textPrimary;
 
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          height: 34,
-          margin: const EdgeInsets.symmetric(vertical: 1),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Icon(widget.icon, size: 17, color: fg),
-              const SizedBox(width: 10),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  color: fg,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
+    return Semantics(
+      label: widget.label,
+      button: true,
+      selected: widget.selected,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            height: 34,
+            margin: const EdgeInsets.symmetric(vertical: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(widget.icon, size: 17, color: fg),
+                const SizedBox(width: 10),
+                Text(
+                  widget.label,
+                  style: TextStyle(
+                    color: fg,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarIconButton extends StatelessWidget {
+  const _SidebarIconButton({
+    super.key,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    required this.tooltip,
+  });
+
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 28,
+          height: 28,
+          margin: const EdgeInsets.only(left: 2),
+          decoration: BoxDecoration(
+            color: selected
+                ? FilmlyPalette.accent.withValues(alpha: 0.12)
+                : Colors.transparent,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon,
+            color: selected
+                ? FilmlyPalette.accent
+                : FilmlyPalette.textSecondary,
+            size: 18,
           ),
         ),
       ),
@@ -421,4 +671,25 @@ class _NavItem {
 
 class _OpenSearchIntent extends Intent {
   const _OpenSearchIntent();
+}
+
+class _OpenSettingsIntent extends Intent {
+  const _OpenSettingsIntent();
+}
+
+class _NavigateIntent extends Intent {
+  const _NavigateIntent(this.location);
+  final String location;
+}
+
+class _BackIntent extends Intent {
+  const _BackIntent();
+}
+
+class _ToggleFullScreenIntent extends Intent {
+  const _ToggleFullScreenIntent();
+}
+
+class _MinimizeIntent extends Intent {
+  const _MinimizeIntent();
 }

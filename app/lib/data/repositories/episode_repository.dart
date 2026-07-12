@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
 
 import '../database/database.dart';
 import '../models/episode.dart';
@@ -18,7 +19,22 @@ class EpisodeRepository {
                 (t) => OrderingTerm.asc(t.episodeNumber),
               ]))
             .get();
-    return rows.map(_toDomain).toList(growable: false);
+    final unique = <(int, int), Episode>{};
+    for (final row in rows) {
+      final episode = _toDomain(row);
+      final key = (episode.seasonNumber, episode.episodeNumber);
+      final current = unique[key];
+      if (current == null || _quality(episode) > _quality(current)) {
+        unique[key] = episode;
+      }
+    }
+
+    final episodes = unique.values.toList(growable: false);
+    episodes.sort((a, b) {
+      final season = a.seasonNumber.compareTo(b.seasonNumber);
+      return season != 0 ? season : a.episodeNumber.compareTo(b.episodeNumber);
+    });
+    return episodes;
   }
 
   /// Returns episodes grouped into [Season] objects, sorted ascending.
@@ -86,19 +102,14 @@ class EpisodeRepository {
   }
 
   Future<int> countByShow(String showId) async {
-    final countExp = _db.episodes.id.count();
-    final result =
-        await (_db.selectOnly(_db.episodes)
-              ..addColumns([countExp])
-              ..where(_db.episodes.showId.equals(showId)))
-            .map((row) => row.read(countExp) ?? 0)
-            .getSingle();
-    return result;
+    return (await getByShow(showId)).length;
   }
 
   /// 删除指定电视剧的所有剧集
   Future<void> deleteByShow(String showId) async {
-    await (_db.delete(_db.episodes)..where((t) => t.showId.equals(showId))).go();
+    await (_db.delete(
+      _db.episodes,
+    )..where((t) => t.showId.equals(showId))).go();
   }
 
   Episode _toDomain(EpisodeRow row) => Episode(
@@ -111,4 +122,32 @@ class EpisodeRepository {
     fullPath: row.fullPath,
     dateAdded: row.dateAdded,
   );
+
+  static const _videoExtensions = {
+    '.mp4',
+    '.mkv',
+    '.avi',
+    '.mov',
+    '.m4v',
+    '.wmv',
+    '.flv',
+    '.webm',
+    '.ts',
+    '.m2ts',
+  };
+
+  /// Prefer a real playable file over stale generated rows and macOS
+  /// AppleDouble sidecars when older library versions produced duplicates.
+  static int _quality(Episode episode) {
+    final source = episode.fullPath ?? episode.path;
+    final name = p.basename(source);
+    if (name.startsWith('._') || name.startsWith('.')) return -100;
+
+    var score = 0;
+    if (_videoExtensions.contains(p.extension(source).toLowerCase())) {
+      score += 20;
+    }
+    if (episode.fullPath != null && episode.fullPath!.isNotEmpty) score += 2;
+    return score;
+  }
 }

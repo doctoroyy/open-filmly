@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/formatters/rating_formatter.dart';
 import '../data/models/media.dart';
 import '../providers/data_providers.dart';
 import 'filmly_design.dart';
@@ -257,7 +258,7 @@ class _MediaPosterCardState extends ConsumerState<MediaPosterCard> {
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
-            rating,
+            formatRating(rating) ?? rating,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 11,

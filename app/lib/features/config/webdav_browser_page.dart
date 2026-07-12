@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/library/media_library_entry_factory.dart';
+import '../../services/playback/external_subtitle_finder.dart';
+import '../../services/playback/playback_source_resolver.dart';
 import '../../services/webdav/webdav_service.dart';
 import '../../widgets/filmly_design.dart';
 import '../player/player_page.dart';
@@ -148,12 +150,26 @@ class _WebDavBrowserPageState extends ConsumerState<WebDavBrowserPage> {
 
     final url = _dav.fileUrl(entry.path);
     final headers = _dav.config?.authHeaders;
+    final subtitles =
+        ExternalSubtitleFinder.findAmongSiblings(
+              entry.path,
+              _entries.where((item) => !item.isDir).map((item) => item.path),
+            )
+            .map(
+              (subtitle) => PlaybackSubtitleSource(
+                uri: _dav.fileUrl(subtitle.path),
+                title: subtitle.label,
+                language: subtitle.languageHint,
+              ),
+            )
+            .toList(growable: false);
     context.push(
       '/player',
       extra: PlayerArgs(
         uri: url,
         title: entry.name,
         httpHeaders: (headers != null && headers.isNotEmpty) ? headers : null,
+        subtitles: subtitles,
       ),
     );
   }

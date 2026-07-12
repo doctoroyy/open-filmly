@@ -21,12 +21,19 @@ class FakeSmbProxyServer extends SmbProxyServer {
 }
 
 void main() {
+  late AppDatabase db;
+
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+  });
+
+  tearDown(() async {
+    await db.close();
+  });
+
   testWidgets('SmbBrowserPage deep directory browsing and attribute fallback', (
     tester,
   ) async {
-    final db = AppDatabase(NativeDatabase.memory());
-    addTearDown(db.close);
-
     // Create a fake folder structure:
     // /Movies
     //   /Movies/Action          (standard directory)
@@ -36,7 +43,8 @@ void main() {
     final actionDir = smbDir('/Movies/Action');
 
     // Create a directory that lacks the DIRECTORY attribute (0x10).
-    // Use 0x20 (ARCHIVE) like a normal file, but give it no extension to simulate Samba quirks.
+    // Use 0x20 (ARCHIVE) like a normal file, but give it no extension to
+    // simulate Samba quirks.
     final downloadsDir = SmbFile(
       '/Movies/Downloads',
       '\\\\nas\\Movies\\Downloads',
@@ -50,7 +58,8 @@ void main() {
     );
 
     final smb = FakeSmbService(
-      initialConfig: const SmbConfig(host: '203.0.113.10'),
+      initialConfig: const SmbConfig(host: '192.168.31.252'),
+      connected: false,
       directories: {
         '__shares__': [smbShare('Movies')],
         '/Movies': [actionDir, downloadsDir],
@@ -78,7 +87,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Fill in connection form and connect
-    await tester.enterText(find.byType(TextField).first, '203.0.113.10');
+    await tester.enterText(find.byType(TextField).first, '192.168.31.252');
     await tester.ensureVisible(find.text('连接'));
     await tester.tap(find.text('连接'));
     await tester.pumpAndSettle();

@@ -171,6 +171,24 @@ void main() {
     expect(res.statusCode, 404);
     await res.drain<void>();
   });
+
+  test(
+    'subtitle URL preserves extension and returns subtitle MIME type',
+    () async {
+      final subtitleUrl = proxy.urlFor(
+        'any/movie.chs.srt',
+        displayName: 'movie.chs.srt',
+      );
+      expect(Uri.parse(subtitleUrl).path, endsWith('/movie.chs.srt'));
+
+      final res = await request(subtitleUrl);
+      expect(
+        res.headers.value(HttpHeaders.contentTypeHeader),
+        'application/x-subrip; charset=utf-8',
+      );
+      await res.drain<void>();
+    },
+  );
 }
 
 Future<Uint8List> _collect(HttpClientResponse res) async {

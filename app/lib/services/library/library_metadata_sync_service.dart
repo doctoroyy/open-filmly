@@ -25,7 +25,12 @@ class LibraryMetadataSyncResult {
 /// 2. Search TMDB with the AI-cleaned title
 /// 3. Falls back to raw title if AI is unavailable
 class LibraryMetadataSyncService {
-  LibraryMetadataSyncService(this._repo, this._tmdb, this._recognizer, [this._episodeRepo]);
+  LibraryMetadataSyncService(
+    this._repo,
+    this._tmdb,
+    this._recognizer, [
+    this._episodeRepo,
+  ]);
 
   final MediaRepository _repo;
   final TmdbMetadataService _tmdb;
@@ -131,7 +136,7 @@ class LibraryMetadataSyncService {
           showId: updatedMedia.id,
           id: '${updatedMedia.id}_s${entry.episode!.seasonNumber}e${entry.episode!.episodeNumber}',
         );
-        await _episodeRepo!.upsert(episode);
+        await _episodeRepo.upsert(episode);
       } else {
         // 如果没有，自动生成一个默认 S01E01 剧集，以允许用户播放
         final defaultEpisode = Episode(
@@ -144,11 +149,11 @@ class LibraryMetadataSyncService {
           fullPath: updatedMedia.fullPath,
           dateAdded: DateTime.now().toIso8601String(),
         );
-        await _episodeRepo!.upsert(defaultEpisode);
+        await _episodeRepo.upsert(defaultEpisode);
       }
     } else if (payload.type == MediaType.movie && _episodeRepo != null) {
       // 若变更为电影，清除关联的所有剧集
-      await _episodeRepo!.deleteByShow(updatedMedia.id);
+      await _episodeRepo.deleteByShow(updatedMedia.id);
     }
 
     return true;

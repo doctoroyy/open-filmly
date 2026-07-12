@@ -73,6 +73,7 @@ final playbackSourceResolverProvider = Provider<PlaybackSourceResolver>((ref) {
     ref.watch(smbServiceProvider),
     ref.watch(smbProxyProvider),
     emby: ref.watch(embyServiceProvider),
+    webDav: ref.watch(webDavServiceProvider),
     webDavConfig: () {
       final config = ref.read(configProvider).asData?.value;
       if (config == null || config.webdavUrl.isEmpty) return null;

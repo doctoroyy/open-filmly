@@ -61,38 +61,42 @@ void main() {
         if (request.uri.path == '/search/movie') {
           request.response
             ..statusCode = 200
-            ..write(jsonEncode({
-              'results': [
-                {
-                  'id': 101,
-                  'title': '黑客帝国',
-                  'poster_path': '/matrix1.jpg',
-                  'release_date': '1999-03-30',
-                  'overview': 'Matrix movie 1'
-                },
-                {
-                  'id': 102,
-                  'title': '黑客帝国2：重装上阵',
-                  'poster_path': '/matrix2.jpg',
-                  'release_date': '2003-05-15',
-                  'overview': 'Matrix movie 2'
-                }
-              ]
-            }));
+            ..write(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 101,
+                    'title': '黑客帝国',
+                    'poster_path': '/matrix1.jpg',
+                    'release_date': '1999-03-30',
+                    'overview': 'Matrix movie 1',
+                  },
+                  {
+                    'id': 102,
+                    'title': '黑客帝国2：重装上阵',
+                    'poster_path': '/matrix2.jpg',
+                    'release_date': '2003-05-15',
+                    'overview': 'Matrix movie 2',
+                  },
+                ],
+              }),
+            );
         } else if (request.uri.path == '/search/tv') {
           request.response
             ..statusCode = 200
-            ..write(jsonEncode({
-              'results': [
-                {
-                  'id': 201,
-                  'name': '黑客帝国动画版',
-                  'poster_path': '/matrix_tv.jpg',
-                  'first_air_date': '2003-06-03',
-                  'overview': 'Matrix TV Show'
-                }
-              ]
-            }));
+            ..write(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 201,
+                    'name': '黑客帝国动画版',
+                    'poster_path': '/matrix_tv.jpg',
+                    'first_air_date': '2003-06-03',
+                    'overview': 'Matrix TV Show',
+                  },
+                ],
+              }),
+            );
         } else {
           request.response.statusCode = 404;
         }
@@ -103,7 +107,10 @@ void main() {
       final results = await tmdb.searchAll('黑客帝国', 'mock-key');
 
       expect(results.length, 3);
-      expect(results.any((r) => r.id == 101 && r.type == MediaType.movie), isTrue);
+      expect(
+        results.any((r) => r.id == 101 && r.type == MediaType.movie),
+        isTrue,
+      );
       expect(results.any((r) => r.id == 201 && r.type == MediaType.tv), isTrue);
       expect(results[0].title, '黑客帝国动画版'); // 按照年份最新排序
     });
@@ -113,16 +120,20 @@ void main() {
         if (request.uri.path == '/tv/201') {
           request.response
             ..statusCode = 200
-            ..write(jsonEncode({
-              'id': 201,
-              'name': '黑客帝国动画版',
-              'first_air_date': '2003-06-03',
-              'overview': 'Matrix TV Show Details',
-              'poster_path': '/matrix_tv.jpg',
-              'backdrop_path': '/matrix_tv_bd.jpg',
-              'vote_average': 8.5,
-              'genres': [{'name': 'Sci-Fi'}]
-            }));
+            ..write(
+              jsonEncode({
+                'id': 201,
+                'name': '黑客帝国动画版',
+                'first_air_date': '2003-06-03',
+                'overview': 'Matrix TV Show Details',
+                'poster_path': '/matrix_tv.jpg',
+                'backdrop_path': '/matrix_tv_bd.jpg',
+                'vote_average': 8.5,
+                'genres': [
+                  {'name': 'Sci-Fi'},
+                ],
+              }),
+            );
         } else {
           request.response.statusCode = 404;
         }
@@ -174,16 +185,20 @@ void main() {
         if (request.uri.path == '/movie/101') {
           request.response
             ..statusCode = 200
-            ..write(jsonEncode({
-              'id': 101,
-              'title': '黑客帝国',
-              'release_date': '1999-03-30',
-              'overview': 'Neo wakes up.',
-              'poster_path': '/matrix.jpg',
-              'backdrop_path': '/matrix_bd.jpg',
-              'vote_average': 8.7,
-              'genres': [{'name': 'Sci-Fi'}]
-            }));
+            ..write(
+              jsonEncode({
+                'id': 101,
+                'title': '黑客帝国',
+                'release_date': '1999-03-30',
+                'overview': 'Neo wakes up.',
+                'poster_path': '/matrix.jpg',
+                'backdrop_path': '/matrix_bd.jpg',
+                'vote_average': 8.7,
+                'genres': [
+                  {'name': 'Sci-Fi'},
+                ],
+              }),
+            );
         } else {
           request.response.statusCode = 404;
         }

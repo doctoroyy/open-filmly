@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/formatters/rating_formatter.dart';
 import '../core/router/app_router.dart';
 
 import '../data/models/media.dart';
@@ -260,7 +261,7 @@ class _GlobalSearchSheetState extends ConsumerState<_GlobalSearchSheet> {
             ),
             if (media.rating != null && media.rating!.isNotEmpty)
               Text(
-                '★ ${media.rating}',
+                '★ ${formatRating(media.rating)}',
                 style: const TextStyle(
                   color: Color(0xFFFFC857),
                   fontSize: 13,

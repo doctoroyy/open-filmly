@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../core/formatters/rating_formatter.dart';
 import '../../data/models/media.dart';
 import '../library/media_library_entry_factory.dart';
 
@@ -217,7 +218,7 @@ class TmdbMetadataService {
       overview: decoded['overview']?.toString() ?? '',
       stillUrl: _imageUrl(decoded['still_path']),
       airDate: decoded['air_date']?.toString() ?? '',
-      rating: (decoded['vote_average'])?.toString(),
+      rating: formatRating(decoded['vote_average']),
     );
   }
 
@@ -324,7 +325,7 @@ class TmdbMetadataService {
       year: year.isEmpty ? media.year : year,
       type: type,
       posterPath: posterPath,
-      rating: ratingValue?.toString(),
+      rating: formatRating(ratingValue),
       detailsJson: detailsJson,
     );
   }
@@ -367,7 +368,7 @@ class TmdbMetadataService {
     MediaType? type,
   }) async {
     final results = <TmdbSearchResult>[];
-    
+
     // 决定要检索的类型，若为 unknown 或 null 则电影和电视都搜索
     final typesToSearch = type != null && type != MediaType.unknown
         ? [type]
@@ -379,7 +380,7 @@ class TmdbMetadataService {
         MediaType.tv => '/search/tv',
         MediaType.unknown => '/search/multi',
       };
-      
+
       final hasNonAscii = query.codeUnits.any((c) => c > 127);
       final searchLanguages = hasNonAscii ? ['zh-CN'] : ['en-US', 'zh-CN'];
 
@@ -404,33 +405,41 @@ class TmdbMetadataService {
             final id = item['id'] as int?;
             if (id == null) continue;
 
-            final title = (t == MediaType.movie
-                ? (item['title'] ?? item['original_title'])
-                : (item['name'] ?? item['original_name']))?.toString() ?? '';
+            final title =
+                (t == MediaType.movie
+                        ? (item['title'] ?? item['original_title'])
+                        : (item['name'] ?? item['original_name']))
+                    ?.toString() ??
+                '';
             final overview = item['overview']?.toString() ?? '';
             final posterPath = _imageUrl(item['poster_path']);
-            final releaseDate = (t == MediaType.movie
-                ? item['release_date']
-                : item['first_air_date'])?.toString() ?? '';
+            final releaseDate =
+                (t == MediaType.movie
+                        ? item['release_date']
+                        : item['first_air_date'])
+                    ?.toString() ??
+                '';
 
             // 去重
             if (results.any((r) => r.id == id && r.type == t)) continue;
 
-            results.add(TmdbSearchResult(
-              id: id,
-              title: title,
-              overview: overview,
-              posterPath: posterPath,
-              releaseDate: releaseDate,
-              type: t,
-            ));
+            results.add(
+              TmdbSearchResult(
+                id: id,
+                title: title,
+                overview: overview,
+                posterPath: posterPath,
+                releaseDate: releaseDate,
+                type: t,
+              ),
+            );
           }
         } catch (_) {
           // 忽略单个请求异常
         }
       }
     }
-    
+
     // 排序：有海报的排在前面，若都有则按发行日期降序排序
     results.sort((a, b) {
       if (a.posterPath != null && b.posterPath == null) return -1;

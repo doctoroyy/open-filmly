@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -46,6 +48,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           mediaId: media.id,
           startAt: startAt,
           httpHeaders: source.httpHeaders,
+          subtitles: source.subtitles,
         ),
       );
     } catch (error) {
@@ -386,9 +389,6 @@ class _ContinueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = item.media;
-    final image = media.backdropPath?.isNotEmpty == true
-        ? media.backdropPath!
-        : media.posterPath;
     final fraction = item.progress.fractionWatched.clamp(0.0, 1.0);
 
     return GestureDetector(
@@ -405,22 +405,7 @@ class _ContinueCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _thumb(image, media),
-                    Center(
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: FilmlyPalette.accent.withValues(alpha: 0.92),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.play_arrow_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
+                    _thumb(media),
                     Positioned(
                       right: 8,
                       bottom: 10,
@@ -478,16 +463,49 @@ class _ContinueCard extends StatelessWidget {
     );
   }
 
-  Widget _thumb(String? url, Media media) {
-    if (url != null && url.isNotEmpty && url.startsWith('http')) {
+  Widget _thumb(Media media) {
+    return _image(
+      media.backdropPath,
+      media,
+      fallback: () => _image(media.posterPath, media),
+    );
+  }
+
+  Widget _image(String? path, Media media, {Widget Function()? fallback}) {
+    final value = path?.trim() ?? '';
+    if (value.isEmpty) return fallback?.call() ?? _placeholder(media);
+
+    if (value.startsWith('http://') || value.startsWith('https://')) {
       return CachedNetworkImage(
-        imageUrl: url,
+        imageUrl: value,
         fit: BoxFit.cover,
         placeholder: (_, _) => _placeholder(media),
-        errorWidget: (_, _, _) => _placeholder(media),
+        errorWidget: (_, _, _) => fallback?.call() ?? _placeholder(media),
       );
     }
-    return _placeholder(media);
+
+    final file = File(value);
+    if (file.existsSync()) {
+      return Image.file(
+        file,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback?.call() ?? _placeholder(media),
+      );
+    }
+
+    // TMDB backdrop paths are stored in existing databases as `/abc.jpg`.
+    // Resolve those paths at render time so old library entries immediately
+    // gain the same landscape artwork as newly enriched entries.
+    if (value.startsWith('/')) {
+      return CachedNetworkImage(
+        imageUrl: 'https://image.tmdb.org/t/p/w780$value',
+        fit: BoxFit.cover,
+        placeholder: (_, _) => _placeholder(media),
+        errorWidget: (_, _, _) => fallback?.call() ?? _placeholder(media),
+      );
+    }
+
+    return fallback?.call() ?? _placeholder(media);
   }
 
   Widget _placeholder(Media media) {

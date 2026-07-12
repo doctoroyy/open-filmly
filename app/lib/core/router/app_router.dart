@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/models/library_shelf.dart';
 import '../../data/models/media.dart';
 import '../../features/config/config_page.dart';
 import '../../features/config/emby_browser_page.dart';
@@ -82,12 +83,12 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         GoRoute(
           path: '/movies',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(type: MediaType.movie)),
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.movie)),
         ),
         GoRoute(
           path: '/tv',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(type: MediaType.tv)),
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.tv)),
         ),
         GoRoute(
           path: '/favorites',
@@ -96,61 +97,30 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         ),
         GoRoute(
           path: '/anime',
-          pageBuilder: (context, state) => _fadePage(
-            state,
-            const LibraryPage(
-              type: null,
-              customTitle: '动漫',
-              genreTerms: ['动漫', '动画', 'animation', 'anime'],
-            ),
-          ),
+          pageBuilder: (context, state) =>
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.anime)),
         ),
         GoRoute(
           path: '/variety',
-          pageBuilder: (context, state) => _fadePage(
-            state,
-            const LibraryPage(
-              type: null,
-              customTitle: '综艺',
-              genreTerms: [
-                '综艺',
-                '真人秀',
-                '脱口秀',
-                'reality',
-                'talk show',
-                'variety',
-              ],
-            ),
-          ),
+          pageBuilder: (context, state) =>
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.variety)),
         ),
         GoRoute(
           path: '/concert',
-          pageBuilder: (context, state) => _fadePage(
-            state,
-            const LibraryPage(
-              type: null,
-              customTitle: '演唱会',
-              genreTerms: ['演唱会', '音乐', 'concert', 'music'],
-            ),
-          ),
+          pageBuilder: (context, state) =>
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.concert)),
         ),
         GoRoute(
           path: '/documentary',
           pageBuilder: (context, state) => _fadePage(
             state,
-            const LibraryPage(
-              type: null,
-              customTitle: '纪录片',
-              genreTerms: ['纪录', '纪录片', 'documentary'],
-            ),
+            const LibraryPage(shelf: LibraryShelf.documentary),
           ),
         ),
         GoRoute(
           path: '/other',
-          pageBuilder: (context, state) => _fadePage(
-            state,
-            const LibraryPage(type: MediaType.unknown, customTitle: '其他'),
-          ),
+          pageBuilder: (context, state) =>
+              _fadePage(state, const LibraryPage(shelf: LibraryShelf.other)),
         ),
         GoRoute(
           path: '/unmatched',

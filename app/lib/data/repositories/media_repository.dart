@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../database/database.dart';
+import '../models/library_shelf.dart';
 import '../models/media.dart';
 import '../models/media_library_query.dart';
 
@@ -28,19 +29,30 @@ class MediaRepository {
 
   Future<List<Media>> browse({
     MediaType? type,
+    LibraryShelf? shelf,
     String searchTerm = '',
     MediaSort sort = MediaSort.title,
     int? limit,
     List<String> genreTerms = const [],
   }) async {
     final query = _db.select(_db.mediaItems);
-    if (type != null) {
+    // When filtering by exclusive shelf, load all rows then classify in memory
+    // (genres live in details JSON). Type-only queries can still push SQL.
+    if (shelf == null && type != null) {
       query.where((t) => t.type.equals(type.value));
     }
 
-    final items = (await query.get()).map(_toDomain).toList();
-    final normalized = searchTerm.trim().toLowerCase();
+    var items = (await query.get()).map(_toDomain).toList();
 
+    if (shelf != null) {
+      items = items
+          .where((media) => LibraryShelfClassifier.matches(media, shelf))
+          .toList();
+    } else if (type != null) {
+      // already filtered in SQL; keep for clarity if both null paths change
+    }
+
+    final normalized = searchTerm.trim().toLowerCase();
     final searchFiltered = normalized.isEmpty
         ? items
         : items.where((media) => _matchesSearch(media, normalized)).toList();

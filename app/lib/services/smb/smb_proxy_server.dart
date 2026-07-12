@@ -1,25 +1,21 @@
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
 import '../streaming/range_source.dart';
 
-/// Local HTTP proxy that streams a [RangeSource] (SMB today) to the player over
+/// Local HTTP proxy that streams a [RangeSource] (SMB today) to media_kit over
 /// HTTP, translating HTTP Range requests into ranged reads. This is what makes
-/// seeking work, and keeps the decoder on the rock-solid `http://` code path
+/// seeking work, and keeps libmpv on the rock-solid `http://` code path
 /// instead of relying on smb:// support in the bundled build.
 ///
 /// Binds to loopback only. Source ids are mapped to opaque tokens so the real
 /// path never appears in the URL handed to the player.
 class SmbProxyServer {
-  SmbProxyServer(this._source, {this.initialResponseBytes = 8 * 1024 * 1024});
-
-  static const _rangePrefix = 'bytes=';
+  SmbProxyServer(this._source);
 
   final RangeSource _source;
-  final int initialResponseBytes;
   HttpServer? _server;
   final Map<String, String> _pathByToken = {};
   final Map<String, String> _tokenByPath = {};
@@ -35,17 +31,21 @@ class SmbProxyServer {
   }
 
   /// Registers [sourceId] for streaming and returns a loopback URL that
-  /// the native player can open.
-  String urlFor(String sourceId) {
+  /// media_kit can play.
+  String urlFor(String sourceId, {String? displayName}) {
     final token = _tokenByPath[sourceId] ?? (++_counter).toString();
     _pathByToken[token] = sourceId;
     _tokenByPath[sourceId] = token;
-    return 'http://127.0.0.1:${port!}/stream/$token';
+    final suffix = displayName == null || displayName.isEmpty
+        ? ''
+        : '/${Uri.encodeComponent(displayName)}';
+    return 'http://127.0.0.1:${port!}/stream/$token$suffix';
   }
 
   Future<Response> _handle(Request request) async {
     final segments = request.url.pathSegments;
-    if (segments.length != 2 || segments.first != 'stream') {
+    if ((segments.length != 2 && segments.length != 3) ||
+        segments.first != 'stream') {
       return Response.notFound('Not found');
     }
     final sourceId = _pathByToken[segments[1]];
@@ -58,91 +58,42 @@ class SmbProxyServer {
 
       var start = 0;
       var end = total - 1; // inclusive
-      var statusCode = 200;
-      final range = request.headers[HttpHeaders.rangeHeader];
-      final requestedRange = _parseRange(range, total);
-      final hasRange = requestedRange != null;
-      if (requestedRange != null) {
-        start = requestedRange.start;
-        end = requestedRange.end;
-        statusCode = 206;
-      } else if (request.method.toUpperCase() == 'GET' &&
-          total > initialResponseBytes) {
-        end = initialResponseBytes - 1;
-        statusCode = 206;
+      final range = request.headers['range'];
+      final hasRange = range != null && range.startsWith('bytes=');
+      if (hasRange) {
+        final spec = range.substring(6).split('-');
+        if (spec[0].isNotEmpty) start = int.parse(spec[0]);
+        if (spec.length > 1 && spec[1].isNotEmpty) end = int.parse(spec[1]);
       }
 
-      if (hasRange && total == 0) {
-        return _rangeNotSatisfiable(total);
-      }
       if (total > 0 && (start < 0 || start >= total || start > end)) {
-        return _rangeNotSatisfiable(total);
+        return Response(416, headers: {'Content-Range': 'bytes */$total'});
       }
       if (end > total - 1) end = total - 1;
-      final length = total == 0 ? 0 : end - start + 1;
-
-      final headers = {
-        'Content-Type': 'application/octet-stream',
-        'Accept-Ranges': 'bytes',
-        'Content-Length': '$length',
-        if (statusCode == 206) 'Content-Range': 'bytes $start-$end/$total',
-      };
-      if (request.method.toUpperCase() == 'HEAD' || length == 0) {
-        return Response(statusCode, headers: headers);
-      }
+      final length = end - start + 1;
 
       final body = await _source.read(sourceId, start, end);
-      return Response(statusCode, body: body, headers: headers);
-    } on FormatException {
-      final total = await _source.length(sourceId);
-      return _rangeNotSatisfiable(total);
+      final headers = {
+        'Content-Type': _contentType(sourceId),
+        'Accept-Ranges': 'bytes',
+        'Content-Length': '$length',
+        if (hasRange) 'Content-Range': 'bytes $start-$end/$total',
+      };
+      return Response(hasRange ? 206 : 200, body: body, headers: headers);
     } catch (e) {
       return Response.internalServerError(body: 'Stream read error: $e');
     }
   }
 
-  _ByteRange? _parseRange(String? header, int total) {
-    if (header == null || header.isEmpty) return null;
-    if (!header.startsWith(_rangePrefix)) {
-      throw const FormatException('Unsupported range unit');
+  String _contentType(String sourceId) {
+    final lower = sourceId.toLowerCase();
+    if (lower.endsWith('.srt')) return 'application/x-subrip; charset=utf-8';
+    if (lower.endsWith('.ass') || lower.endsWith('.ssa')) {
+      return 'text/x-ssa; charset=utf-8';
     }
-
-    final spec = header.substring(_rangePrefix.length).split(',').first.trim();
-    final dash = spec.indexOf('-');
-    if (dash < 0) throw const FormatException('Invalid range');
-
-    final startText = spec.substring(0, dash).trim();
-    final endText = spec.substring(dash + 1).trim();
-    if (startText.isEmpty && endText.isEmpty) {
-      throw const FormatException('Invalid range');
-    }
-
-    if (startText.isEmpty) {
-      final suffixLength = int.tryParse(endText);
-      if (suffixLength == null || suffixLength <= 0) {
-        throw const FormatException('Invalid suffix range');
-      }
-      if (total == 0) return const _ByteRange(0, -1);
-      final length = math.min(suffixLength, total);
-      return _ByteRange(total - length, total - 1);
-    }
-
-    final start = int.tryParse(startText);
-    final explicitEnd = endText.isEmpty ? null : int.tryParse(endText);
-    if (start == null ||
-        start < 0 ||
-        (endText.isNotEmpty && explicitEnd == null)) {
-      throw const FormatException('Invalid range');
-    }
-
-    final end = explicitEnd ?? total - 1;
-    if (end < start) throw const FormatException('Invalid range');
-
-    return _ByteRange(start, math.min(end, total - 1));
-  }
-
-  Response _rangeNotSatisfiable(int total) {
-    return Response(416, headers: {'Content-Range': 'bytes */$total'});
+    if (lower.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
+    if (lower.endsWith('.sub')) return 'text/plain; charset=utf-8';
+    return 'application/octet-stream';
   }
 
   Future<void> stop() async {
@@ -151,11 +102,4 @@ class SmbProxyServer {
     _pathByToken.clear();
     _tokenByPath.clear();
   }
-}
-
-class _ByteRange {
-  const _ByteRange(this.start, this.end);
-
-  final int start;
-  final int end;
 }

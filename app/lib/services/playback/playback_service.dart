@@ -14,14 +14,38 @@ class PlaybackAudioTrack {
 }
 
 class PlaybackSubtitleTrack {
-  const PlaybackSubtitleTrack({required this.id, this.title, this.language});
+  const PlaybackSubtitleTrack({
+    required this.id,
+    this.title,
+    this.language,
+    this.uri = false,
+  });
 
   factory PlaybackSubtitleTrack.no() =>
       const PlaybackSubtitleTrack(id: '-1', title: 'Disabled');
 
+  factory PlaybackSubtitleTrack.uri(
+    String uri, {
+    String? title,
+    String? language,
+  }) => PlaybackSubtitleTrack(
+    id: uri,
+    title: title,
+    language: language,
+    uri: true,
+  );
+
   final String id;
   final String? title;
   final String? language;
+  final bool uri;
+}
+
+class PlaybackTracks {
+  const PlaybackTracks({required this.audio, required this.subtitle});
+
+  final List<PlaybackAudioTrack> audio;
+  final List<PlaybackSubtitleTrack> subtitle;
 }
 
 class _PendingOpen {
@@ -36,9 +60,8 @@ enum PlaybackVideoEvent { tap, doubleTap }
 
 /// Native VLC playback service.
 ///
-/// On macOS the video output is an AppKit platform view backed by VLCKit.
-/// On Windows the runner creates a native child window backed by libVLC.
-/// Playback commands and status polling go through the same method channel.
+/// macOS uses an AppKit platform view backed by VLCKit. Windows uses a native
+/// child window backed by libVLC. Both runners expose the same method channel.
 class PlaybackService {
   static const _channel = MethodChannel('com.openfilmly.vlc_player');
 
@@ -47,6 +70,10 @@ class PlaybackService {
   final _playingController = StreamController<bool>.broadcast();
   final _completedController = StreamController<bool>.broadcast();
   final _volumeController = StreamController<double>.broadcast();
+  final _bufferController = StreamController<Duration>.broadcast();
+  final _bufferingController = StreamController<bool>.broadcast();
+  final _errorController = StreamController<String>.broadcast();
+  final _tracksController = StreamController<PlaybackTracks>.broadcast();
   final _videoEventController =
       StreamController<PlaybackVideoEvent>.broadcast();
 
@@ -60,6 +87,7 @@ class PlaybackService {
   Duration _duration = Duration.zero;
   bool _playing = false;
   bool _completed = false;
+  bool _buffering = true;
   double _volume = 100;
   double _rate = 1.0;
   List<PlaybackAudioTrack> _audioTracks = const [];
@@ -77,6 +105,10 @@ class PlaybackService {
     playing: _playingController.stream,
     completed: _completedController.stream,
     volume: _volumeController.stream,
+    buffer: _bufferController.stream,
+    buffering: _bufferingController.stream,
+    error: _errorController.stream,
+    tracks: _tracksController.stream,
   );
 
   Stream<PlaybackVideoEvent> get videoEvents => _videoEventController.stream;
@@ -90,7 +122,8 @@ class PlaybackService {
     _startPolling();
   }
 
-  /// Updates the native Windows VLC child-window bounds. No-op on macOS.
+  /// Updates the Windows VLC child-window bounds. The macOS platform view
+  /// manages its own layout and never calls this method.
   Future<void> setNativeBounds(
     Rect bounds, {
     required double devicePixelRatio,
@@ -114,6 +147,8 @@ class PlaybackService {
     Duration? startAt,
     Map<String, String>? httpHeaders,
   }) async {
+    _buffering = true;
+    if (!_disposed) _bufferingController.add(true);
     final pending = _PendingOpen(
       uri: uri,
       startAt: startAt,
@@ -159,8 +194,20 @@ class PlaybackService {
   Future<void> setAudioTrack(PlaybackAudioTrack track) =>
       _invoke('setAudioTrack', {'trackId': int.tryParse(track.id) ?? -1});
 
-  Future<void> setSubtitleTrack(PlaybackSubtitleTrack track) =>
-      _invoke('setSubtitleTrack', {'trackId': int.tryParse(track.id) ?? -1});
+  Future<void> setSubtitleTrack(PlaybackSubtitleTrack track) async {
+    if (track.uri) {
+      await _invoke('addSubtitleTrack', {'uri': track.id});
+      _currentSubtitleTrack = track;
+      _tracksController.add(
+        PlaybackTracks(audio: _audioTracks, subtitle: _subtitleTracks),
+      );
+      return;
+    }
+    await _invoke('setSubtitleTrack', {
+      'trackId': int.tryParse(track.id) ?? -1,
+    });
+    _currentSubtitleTrack = track;
+  }
 
   double get rate => _rate;
 
@@ -173,6 +220,10 @@ class PlaybackService {
     _playingController.close();
     _completedController.close();
     _volumeController.close();
+    _bufferController.close();
+    _bufferingController.close();
+    _errorController.close();
+    _tracksController.close();
     _videoEventController.close();
   }
 
@@ -219,7 +270,7 @@ class PlaybackService {
       await _refreshStatus();
       await _refreshTracks();
     } on MissingPluginException {
-      // Ignore on platforms without the native VLC bridge.
+      // Ignore on platforms without a native VLC bridge.
     } finally {
       _refreshing = false;
     }
@@ -233,6 +284,9 @@ class PlaybackService {
     final completed = status['completed'] == true;
     final volume = (_asNum(status['volume']) ?? 100).toDouble();
     final rate = (_asNum(status['rate']) ?? 1).toDouble();
+    final buffer = Duration(milliseconds: _asInt(status['bufferMs']) ?? 0);
+    final buffering = status['buffering'] == true;
+    final error = status['error'] as String?;
 
     if (position != _position) {
       _position = position;
@@ -253,6 +307,14 @@ class PlaybackService {
     if (volume != _volume) {
       _volume = volume;
       if (!_disposed) _volumeController.add(volume);
+    }
+    if (!_disposed) _bufferController.add(buffer);
+    if (buffering != _buffering) {
+      _buffering = buffering;
+      if (!_disposed) _bufferingController.add(buffering);
+    }
+    if (error != null && error.isNotEmpty && !_disposed) {
+      _errorController.add(error);
     }
     _rate = rate;
   }
@@ -278,6 +340,9 @@ class PlaybackService {
     final currentAudioId = '${_asInt(tracks['currentAudio']) ?? -1}';
     final currentSubtitleId = '${_asInt(tracks['currentSubtitle']) ?? -1}';
 
+    final tracksChanged =
+        !_sameAudioTracks(_audioTracks, audio) ||
+        !_sameSubtitleTracks(_subtitleTracks, subtitle);
     _audioTracks = audio;
     _subtitleTracks = subtitle;
     _currentAudioTrack = audio.firstWhere(
@@ -288,6 +353,41 @@ class PlaybackService {
       (track) => track.id == currentSubtitleId,
       orElse: PlaybackSubtitleTrack.no,
     );
+    if (tracksChanged && !_disposed) {
+      _tracksController.add(
+        PlaybackTracks(audio: _audioTracks, subtitle: _subtitleTracks),
+      );
+    }
+  }
+
+  bool _sameAudioTracks(
+    List<PlaybackAudioTrack> a,
+    List<PlaybackAudioTrack> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].language != b[i].language) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _sameSubtitleTracks(
+    List<PlaybackSubtitleTrack> a,
+    List<PlaybackSubtitleTrack> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id ||
+          a[i].title != b[i].title ||
+          a[i].language != b[i].language) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _invoke(String method, [Map<String, Object?> args = const {}]) {
@@ -352,6 +452,10 @@ class PlaybackStreams {
     required this.playing,
     required this.completed,
     required this.volume,
+    required this.buffer,
+    required this.buffering,
+    required this.error,
+    required this.tracks,
   });
 
   final Stream<Duration> position;
@@ -359,6 +463,10 @@ class PlaybackStreams {
   final Stream<bool> playing;
   final Stream<bool> completed;
   final Stream<double> volume;
+  final Stream<Duration> buffer;
+  final Stream<bool> buffering;
+  final Stream<String> error;
+  final Stream<PlaybackTracks> tracks;
 
   PlaybackStreams get stream => this;
 }

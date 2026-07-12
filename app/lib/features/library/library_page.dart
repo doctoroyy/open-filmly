@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/router/app_router.dart';
 
+import '../../data/models/library_shelf.dart';
 import '../../data/models/media.dart';
 import '../../data/models/media_library_query.dart';
 import '../../providers/data_providers.dart';
@@ -13,17 +14,19 @@ import '../../widgets/media_poster_card.dart';
 import '../../widgets/responsive_media_grid.dart';
 
 /// Poster-wall library page with search + sorting.
+///
+/// Prefer [shelf] for exclusive sidebar categories (电影/动漫/…).
+/// [type] remains for legacy unmatched views.
 class LibraryPage extends ConsumerStatefulWidget {
-  const LibraryPage({
-    super.key,
-    required this.type,
-    this.customTitle,
-    this.genreTerms = const [],
-  });
+  const LibraryPage({super.key, this.type, this.shelf, this.customTitle})
+    : assert(
+        type != null || shelf != null,
+        'LibraryPage requires type and/or shelf',
+      );
 
   final MediaType? type;
+  final LibraryShelf? shelf;
   final String? customTitle;
-  final List<String> genreTerms;
 
   @override
   ConsumerState<LibraryPage> createState() => _LibraryPageState();
@@ -36,6 +39,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
 
   String get _title =>
       widget.customTitle ??
+      widget.shelf?.label ??
       switch (widget.type) {
         MediaType.movie => '电影',
         MediaType.tv => '剧集',
@@ -57,14 +61,16 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
     context.go('/');
   }
 
+  MediaLibraryQuery get _query => MediaLibraryQuery(
+    type: widget.type,
+    shelf: widget.shelf,
+    searchTerm: _searchTerm,
+    sort: _sort,
+  );
+
   @override
   Widget build(BuildContext context) {
-    final query = MediaLibraryQuery(
-      type: widget.type,
-      searchTerm: _searchTerm,
-      sort: _sort,
-      genreTerms: widget.genreTerms,
-    );
+    final query = _query;
     final async = ref.watch(mediaBrowseProvider(query));
     final itemCount = async.asData?.value.length;
 
@@ -250,7 +256,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage> {
             label: '添加来源',
             icon: Icons.add_rounded,
             accent: true,
-            onTap: () => context.go('/sources'),
+            onTap: () => context.push('/sources'),
           ),
         ],
       ),

@@ -16,11 +16,24 @@ void main() {
   late SmbProxyServer proxy;
   late PlaybackSourceResolver resolver;
   final bytes = Uint8List.fromList(List<int>.generate(256, (i) => i));
+  final subtitleBytes = Uint8List.fromList('subtitle'.codeUnits);
 
   setUp(() async {
     smb = FakeSmbService(
       initialConfig: const SmbConfig(host: 'nas', username: 'guest'),
-      fileData: {'/Media/Movies/Dune.2021.1080p.mkv': bytes},
+      directories: {
+        '/Media/Movies': [
+          smbFile('/Media/Movies/Dune.2021.1080p.mkv', size: bytes.length),
+          smbFile(
+            '/Media/Movies/Dune.2021.1080p.zh-CN.srt',
+            size: subtitleBytes.length,
+          ),
+        ],
+      },
+      fileData: {
+        '/Media/Movies/Dune.2021.1080p.mkv': bytes,
+        '/Media/Movies/Dune.2021.1080p.zh-CN.srt': subtitleBytes,
+      },
     );
     proxy = SmbProxyServer(smb);
     resolver = PlaybackSourceResolver(smb, proxy);
@@ -38,6 +51,8 @@ void main() {
 
     final source = await resolver.resolve(entry.media);
     expect(source.uri, startsWith('http://127.0.0.1:'));
+    expect(source.subtitles, hasLength(1));
+    expect(source.subtitles.single.language, 'zh-cn');
 
     final client = HttpClient();
     final request = await client.getUrl(Uri.parse(source.uri));
@@ -50,6 +65,16 @@ void main() {
 
     expect(response.statusCode, 200);
     expect(body, bytes);
+
+    final subtitleRequest = await client.getUrl(
+      Uri.parse(source.subtitles.single.uri),
+    );
+    final subtitleResponse = await subtitleRequest.close();
+    final subtitleBody = BytesBuilder();
+    await for (final chunk in subtitleResponse) {
+      subtitleBody.add(chunk);
+    }
+    expect(subtitleBody.takeBytes(), subtitleBytes);
     client.close(force: true);
   });
 
@@ -82,9 +107,17 @@ void main() {
   });
 
   test('resolves WebDAV media into an authed HTTP URL', () async {
+    final dav = _FakeWebDavService(const [
+      WebDavEntry(
+        name: 'Dune 2021.zh-CN.srt',
+        path: '/Movies/Dune 2021.zh-CN.srt',
+        isDir: false,
+      ),
+    ]);
     final resolverWithDav = PlaybackSourceResolver(
       smb,
       proxy,
+      webDav: dav,
       webDavConfig: () => const WebDavConfig(
         url: 'https://dav.example.com/dav',
         username: 'user',
@@ -101,5 +134,31 @@ void main() {
     expect(source.uri, 'https://dav.example.com/dav/Movies/Dune%202021.mkv');
     expect(source.httpHeaders, isNotNull);
     expect(source.httpHeaders!['Authorization'], startsWith('Basic '));
+    expect(source.subtitles, hasLength(1));
+    expect(
+      source.subtitles.single.uri,
+      'https://dav.example.com/dav/Movies/Dune%202021.zh-CN.srt',
+    );
   });
+}
+
+class _FakeWebDavService extends WebDavService {
+  _FakeWebDavService(this.entries);
+
+  final List<WebDavEntry> entries;
+  WebDavConfig? _activeConfig;
+
+  @override
+  bool get isConnected => _activeConfig != null;
+
+  @override
+  WebDavConfig? get config => _activeConfig;
+
+  @override
+  Future<void> connect(WebDavConfig config) async {
+    _activeConfig = config;
+  }
+
+  @override
+  Future<List<WebDavEntry>> listDir([String dirPath = '/']) async => entries;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/formatters/rating_formatter.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/media.dart';
 import '../../data/models/playback_progress.dart';
@@ -118,11 +119,11 @@ class MediaDetailPage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _CastRow(mediaId: media.id),
               if (media.type == MediaType.tv) ...[
                 _episodesSection(context, ref, media),
                 const SizedBox(height: 28),
               ],
+              _CastRow(mediaId: media.id),
               _infoBlock(context, '片源路径', source),
               if (media.fileHash != null && media.fileHash!.isNotEmpty) ...[
                 const SizedBox(height: 16),
@@ -160,75 +161,14 @@ class MediaDetailPage extends ConsumerWidget {
             ),
           );
         }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '剧集列表',
-              style: TextStyle(
-                color: FilmlyPalette.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.4,
-              ),
-            ),
-            const SizedBox(height: 16),
-            for (final season in seasons) ...[
-              _seasonHeader(context, season),
-              const SizedBox(height: 8),
-              ...season.episodes.map(
-                (ep) => _episodeTile(context, ref, ep, media),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ],
+        return _SeasonEpisodeBrowser(
+          seasons: seasons,
+          show: media,
+          onPlay: (episode) => _playEpisode(context, ref, episode, media),
+          onShowDetails: (episode) =>
+              _showEpisodeDetails(context, episode, media),
         );
       },
-    );
-  }
-
-  Widget _seasonHeader(BuildContext context, Season season) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 4),
-      child: Row(
-        children: [
-          const Icon(Icons.folder_rounded, size: 18, color: Color(0xFF9D8CFF)),
-          const SizedBox(width: 8),
-          Text(
-            season.label,
-            style: const TextStyle(
-              color: FilmlyPalette.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '${season.episodes.length} 集',
-            style: const TextStyle(
-              color: FilmlyPalette.textMuted,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _episodeTile(
-    BuildContext context,
-    WidgetRef ref,
-    Episode episode,
-    Media show,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: _EpisodeTile(
-        episode: episode,
-        show: show,
-        onPlay: () => _playEpisode(context, ref, episode, show),
-        onShowDetails: () => _showEpisodeDetails(context, episode, show),
-      ),
     );
   }
 
@@ -268,6 +208,12 @@ class MediaDetailPage extends ConsumerWidget {
       final source = await ref
           .read(playbackSourceResolverProvider)
           .resolve(playable);
+      final progress = await ref
+          .read(playbackProgressRepositoryProvider)
+          .getByMediaId(episode.id);
+      final startAt = progress != null && progress.hasResumePoint
+          ? progress.position
+          : null;
       if (!context.mounted) return;
       context.push(
         '/player',
@@ -275,7 +221,11 @@ class MediaDetailPage extends ConsumerWidget {
           uri: source.uri,
           title: '${show.title} - ${episode.displayLabel}',
           mediaId: episode.id,
+          startAt: startAt,
           httpHeaders: source.httpHeaders,
+          subtitles: source.subtitles,
+          showId: show.id,
+          showTitle: show.title,
         ),
       );
     } catch (e) {
@@ -305,6 +255,7 @@ class MediaDetailPage extends ConsumerWidget {
           mediaId: media.id,
           startAt: startAt,
           httpHeaders: source.httpHeaders,
+          subtitles: source.subtitles,
         ),
       );
     } catch (e) {
@@ -349,9 +300,128 @@ class MediaDetailPage extends ConsumerWidget {
   }
 }
 
-/// Glass-styled episode row: tap to view details, play button to start.
-class _EpisodeTile extends StatefulWidget {
-  const _EpisodeTile({
+/// NetEase-style season tabs with one horizontal row for the selected season.
+class _SeasonEpisodeBrowser extends StatefulWidget {
+  const _SeasonEpisodeBrowser({
+    required this.seasons,
+    required this.show,
+    required this.onPlay,
+    required this.onShowDetails,
+  });
+
+  final List<Season> seasons;
+  final Media show;
+  final ValueChanged<Episode> onPlay;
+  final ValueChanged<Episode> onShowDetails;
+
+  @override
+  State<_SeasonEpisodeBrowser> createState() => _SeasonEpisodeBrowserState();
+}
+
+class _SeasonEpisodeBrowserState extends State<_SeasonEpisodeBrowser> {
+  late int _selectedSeason;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSeason = widget.seasons.first.number;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SeasonEpisodeBrowser oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.seasons.any((season) => season.number == _selectedSeason)) {
+      _selectedSeason = widget.seasons.first.number;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final season = widget.seasons.firstWhere(
+      (item) => item.number == _selectedSeason,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 46,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: widget.seasons.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 32),
+            itemBuilder: (context, index) {
+              final item = widget.seasons[index];
+              final selected = item.number == _selectedSeason;
+              return GestureDetector(
+                key: Key('season_tab_${item.number}'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _selectedSeason = item.number),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.only(top: 4, bottom: 9),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: selected
+                            ? FilmlyPalette.textPrimary
+                            : Colors.transparent,
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                  child: Text(
+                    '第${item.number}季',
+                    style: TextStyle(
+                      color: selected
+                          ? FilmlyPalette.textPrimary
+                          : FilmlyPalette.textMuted,
+                      fontSize: 17,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 14),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: SizedBox(
+            key: ValueKey(_selectedSeason),
+            height: 176,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: season.episodes.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 16),
+              itemBuilder: (context, index) {
+                final episode = season.episodes[index];
+                return _EpisodeCard(
+                  key: Key('episode_card_${episode.id}'),
+                  episode: episode,
+                  show: widget.show,
+                  onPlay: () => widget.onPlay(episode),
+                  onShowDetails: () => widget.onShowDetails(episode),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EpisodeCard extends ConsumerStatefulWidget {
+  const _EpisodeCard({
+    super.key,
     required this.episode,
     required this.show,
     required this.onPlay,
@@ -364,75 +434,140 @@ class _EpisodeTile extends StatefulWidget {
   final VoidCallback onShowDetails;
 
   @override
-  State<_EpisodeTile> createState() => _EpisodeTileState();
+  ConsumerState<_EpisodeCard> createState() => _EpisodeCardState();
 }
 
-class _EpisodeTileState extends State<_EpisodeTile> {
+class _EpisodeCardState extends ConsumerState<_EpisodeCard> {
   bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onShowDetails,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: _hovered
-                ? FilmlyPalette.surfaceStrong
-                : FilmlyPalette.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: FilmlyPalette.divider),
-          ),
-          child: Row(
+    final details = ref
+        .watch(
+          episodeDetailsProvider((
+            showId: widget.show.id,
+            season: widget.episode.seasonNumber,
+            episode: widget.episode.episodeNumber,
+          )),
+        )
+        .asData
+        ?.value;
+    final title = details?.name.isNotEmpty == true
+        ? details!.name
+        : (widget.episode.title.isEmpty
+              ? '第 ${widget.episode.episodeNumber} 集'
+              : widget.episode.title);
+
+    return SizedBox(
+      width: 224,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onPlay,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: FilmlyPalette.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  'E${widget.episode.episodeNumber}',
-                  style: const TextStyle(
-                    color: FilmlyPalette.accent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _still(details?.stillUrl),
+                      AnimatedOpacity(
+                        opacity: _hovered ? 1 : 0,
+                        duration: const Duration(milliseconds: 150),
+                        child: ColoredBox(
+                          color: Colors.black.withValues(alpha: 0.24),
+                          child: const Center(
+                            child: Icon(
+                              Icons.play_circle_fill_rounded,
+                              color: Colors.white,
+                              size: 38,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 7,
+                        right: 7,
+                        child: AnimatedOpacity(
+                          opacity: _hovered ? 1 : 0,
+                          duration: const Duration(milliseconds: 150),
+                          child: GestureDetector(
+                            onTap: widget.onShowDetails,
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.58),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.info_outline_rounded,
+                                color: Colors.white,
+                                size: 17,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  widget.episode.title.isEmpty
-                      ? widget.episode.displayLabel
-                      : widget.episode.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: FilmlyPalette.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+              const SizedBox(height: 9),
+              Text(
+                '${widget.episode.episodeNumber}. $title',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: FilmlyPalette.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.2,
                 ),
-              ),
-              IconButton(
-                icon: const Icon(
-                  Icons.play_circle_fill_rounded,
-                  color: FilmlyPalette.textSecondary,
-                  size: 26,
-                ),
-                tooltip: '播放',
-                onPressed: widget.onPlay,
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _still(String? url) {
+    if (url != null && url.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => _stillPlaceholder(),
+        errorWidget: (_, _, _) => _stillPlaceholder(),
+      );
+    }
+    return _stillPlaceholder();
+  }
+
+  Widget _stillPlaceholder() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFDDE2E7), Color(0xFFEEF1F3)],
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        'E${widget.episode.episodeNumber.toString().padLeft(2, '0')}',
+        style: const TextStyle(
+          color: FilmlyPalette.textMuted,
+          fontSize: 24,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
         ),
       ),
     );
@@ -582,7 +717,7 @@ class _EpisodeDetailsSheet extends ConsumerWidget {
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  rating,
+                  formatRating(rating) ?? rating,
                   style: const TextStyle(
                     color: FilmlyPalette.textSecondary,
                     fontSize: 12,
@@ -656,7 +791,8 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = <String>[
-      if (media.rating != null && media.rating!.isNotEmpty) '★ ${media.rating}',
+      if (media.rating != null && media.rating!.isNotEmpty)
+        '★ ${formatRating(media.rating)}',
       if (media.year.isNotEmpty) media.year,
       ...media.genres.take(3),
     ].join('  ·  ');
@@ -798,9 +934,13 @@ class _Hero extends StatelessWidget {
 
   Widget _background() {
     final url = backdrop;
-    if (url != null && url.isNotEmpty && url.startsWith('http')) {
+    if (url != null && url.isNotEmpty) {
+      final resolved = url.startsWith('/')
+          ? 'https://image.tmdb.org/t/p/w1280$url'
+          : url;
+      if (!resolved.startsWith('http')) return _gradient();
       return CachedNetworkImage(
-        imageUrl: url,
+        imageUrl: resolved,
         fit: BoxFit.cover,
         alignment: Alignment.topCenter,
         placeholder: (_, _) => _gradient(),
@@ -879,7 +1019,6 @@ class _HeroIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      key: key,
       onTap: onTap,
       child: Container(
         width: 38,
@@ -1188,7 +1327,7 @@ class _ReMatchDialogState extends ConsumerState<_ReMatchDialog> {
                             size: 44,
                             color: FilmlyPalette.textMuted,
                           ),
-                          const SizedBox(height: 16),
+                          SizedBox(height: 16),
                           Text(
                             '未配置 TMDB API 密钥',
                             style: TextStyle(
@@ -1197,7 +1336,7 @@ class _ReMatchDialogState extends ConsumerState<_ReMatchDialog> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          SizedBox(height: 8),
                           Text(
                             '请先前往左侧的“设置”页面输入有效的 TMDB API Key。',
                             style: TextStyle(
@@ -1311,7 +1450,7 @@ class _ReMatchDialogState extends ConsumerState<_ReMatchDialog> {
                         : ListView.separated(
                             physics: const BouncingScrollPhysics(),
                             itemCount: _results.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final item = _results[index];
@@ -1337,7 +1476,7 @@ class _ReMatchDialogState extends ConsumerState<_ReMatchDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         CircularProgressIndicator(strokeWidth: 3),
-                        const SizedBox(height: 16),
+                        SizedBox(height: 16),
                         Text(
                           '正在同步更新影片元数据...',
                           style: TextStyle(
@@ -1460,7 +1599,7 @@ class _ResultCardState extends State<_ResultCard> {
                       ? CachedNetworkImage(
                           imageUrl: widget.result.posterPath!,
                           fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) => Container(
+                          errorWidget: (_, _, _) => Container(
                             color: Colors.white.withValues(alpha: 0.1),
                             child: const Icon(
                               Icons.movie_rounded,

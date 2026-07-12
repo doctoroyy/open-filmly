@@ -162,6 +162,52 @@ void main() {
       final count = await episodeRepo.countByShow(showId);
       expect(count, 3);
     });
+
+    test('deduplicates season episodes and prefers a playable video', () async {
+      const showId = 'tv:duplicate-show';
+      await mediaRepo.upsert(
+        const Media(
+          id: showId,
+          title: 'Duplicate Show',
+          year: '2024',
+          type: MediaType.tv,
+          path: '/tv/Duplicate Show',
+        ),
+      );
+
+      await episodeRepo.upsertAll([
+        const Episode(
+          id: 'generated-s1e1',
+          showId: showId,
+          seasonNumber: 1,
+          episodeNumber: 1,
+          title: 'Stale metadata',
+          path: '/tv/Duplicate Show',
+        ),
+        const Episode(
+          id: 'apple-double-s1e1',
+          showId: showId,
+          seasonNumber: 1,
+          episodeNumber: 1,
+          title: 'AppleDouble',
+          path: '/tv/Duplicate Show/._Show.S01E01.mkv',
+        ),
+        const Episode(
+          id: 'video-s1e1',
+          showId: showId,
+          seasonNumber: 1,
+          episodeNumber: 1,
+          title: 'Pilot',
+          path: '/tv/Duplicate Show/Show.S01E01.mkv',
+          fullPath: '/tv/Duplicate Show/Show.S01E01.mkv',
+        ),
+      ]);
+
+      final episodes = await episodeRepo.getByShow(showId);
+      expect(episodes, hasLength(1));
+      expect(episodes.single.id, 'video-s1e1');
+      expect(await episodeRepo.countByShow(showId), 1);
+    });
   });
 
   group('TV detail page shows episodes', () {
@@ -180,7 +226,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
     }
 
-    testWidgets('TV detail page renders episode list', (tester) async {
+    testWidgets('TV detail page switches seasons with tabs', (tester) async {
       tester.view.physicalSize = const Size(1600, 1400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -228,17 +274,22 @@ void main() {
 
       // Show info is displayed
       expect(find.text('Dark'), findsWidgets);
-      expect(find.text('剧集列表'), findsOneWidget);
 
-      // Season headers
-      expect(find.text('Season 1'), findsOneWidget);
-      expect(find.text('Season 2'), findsOneWidget);
+      // Seasons are horizontal tabs; only the selected season is rendered.
+      expect(find.text('第1季'), findsOneWidget);
+      expect(find.text('第2季'), findsOneWidget);
+      expect(find.textContaining('Secrets'), findsOneWidget);
+      expect(find.textContaining('Lies'), findsOneWidget);
+      expect(find.textContaining('Beginnings and Endings'), findsNothing);
+      expect(find.byKey(const Key('episode_card_dark-s01e01')), findsOneWidget);
 
-      // Episode titles (shown beside an "E<n>" badge in the new glass tile)
-      expect(find.text('Secrets'), findsOneWidget);
-      expect(find.text('Lies'), findsOneWidget);
-      expect(find.text('Beginnings and Endings'), findsOneWidget);
-      expect(find.text('E1'), findsWidgets);
+      await tester.tap(find.byKey(const Key('season_tab_2')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Secrets'), findsNothing);
+      expect(find.textContaining('Lies'), findsNothing);
+      expect(find.textContaining('Beginnings and Endings'), findsOneWidget);
+      expect(find.byKey(const Key('episode_card_dark-s02e01')), findsOneWidget);
     });
 
     testWidgets('TV detail shows empty state when no episodes', (tester) async {

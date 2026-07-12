@@ -6,6 +6,7 @@ import '../data/database/database.dart';
 import '../data/models/app_config.dart';
 import '../data/models/continue_watching_item.dart';
 import '../data/models/episode.dart';
+import '../data/models/library_shelf.dart';
 import '../data/models/media.dart';
 import '../data/models/media_library_query.dart';
 import '../data/models/playback_progress.dart';
@@ -112,6 +113,7 @@ final mediaBrowseProvider =
           .watch(mediaRepositoryProvider)
           .browse(
             type: query.type,
+            shelf: query.shelf,
             searchTerm: query.searchTerm,
             sort: query.sort,
             genreTerms: query.genreTerms,
@@ -140,18 +142,22 @@ final topRatedMediaProvider = FutureProvider<List<Media>>((ref) {
       .browse(sort: MediaSort.rating, limit: 8);
 });
 
-/// Featured movies for the home overview.
+/// Featured movies for the home overview (exclusive [LibraryShelf.movie]).
 final featuredMoviesProvider = FutureProvider<List<Media>>((ref) {
   return ref
       .watch(mediaRepositoryProvider)
-      .browse(type: MediaType.movie, sort: MediaSort.recentlyAdded, limit: 8);
+      .browse(
+        shelf: LibraryShelf.movie,
+        sort: MediaSort.recentlyAdded,
+        limit: 8,
+      );
 });
 
-/// Featured TV shows for the home overview.
+/// Featured TV shows for the home overview (exclusive [LibraryShelf.tv]).
 final featuredTvProvider = FutureProvider<List<Media>>((ref) {
   return ref
       .watch(mediaRepositoryProvider)
-      .browse(type: MediaType.tv, sort: MediaSort.recentlyAdded, limit: 8);
+      .browse(shelf: LibraryShelf.tv, sort: MediaSort.recentlyAdded, limit: 8);
 });
 
 /// Global dashboard search across the whole library.

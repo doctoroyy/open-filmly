@@ -27,6 +27,7 @@ dependencies:
   webdav_client: ^1.2.2
   flutter_cache_manager: ^3.4.1
   flutter_skill: ^0.9.36
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
