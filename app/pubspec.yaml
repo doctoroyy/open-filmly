@@ -30,6 +30,7 @@ dependencies:
   window_manager: ^0.5.2
   flutter_vlc_player:
     path: packages/flutter_vlc_player
+  cupertino_native: ^0.1.1
 
 dev_dependencies:
   flutter_test:

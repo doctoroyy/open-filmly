@@ -1,4 +1,6 @@
 PODS:
+  - cupertino_native (0.0.1):
+    - Flutter
   - Flutter (1.0.0)
   - flutter_vlc_player (3.0.3):
     - Flutter
@@ -6,6 +8,7 @@ PODS:
   - MobileVLCKit (3.6.1b1)
 
 DEPENDENCIES:
+  - cupertino_native (from `.symlinks/plugins/cupertino_native/ios`)
   - Flutter (from `Flutter`)
   - flutter_vlc_player (from `.symlinks/plugins/flutter_vlc_player/ios`)
 
@@ -14,16 +17,19 @@ SPEC REPOS:
     - MobileVLCKit
 
 EXTERNAL SOURCES:
+  cupertino_native:
+    :path: ".symlinks/plugins/cupertino_native/ios"
   Flutter:
     :path: Flutter
   flutter_vlc_player:
     :path: ".symlinks/plugins/flutter_vlc_player/ios"
 
 SPEC CHECKSUMS:
+  cupertino_native: 1db0611c94f9a9ea28433ed16a344dcb996370b5
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_vlc_player: 5464f594a9338e080d240bbe7b10ffe30c7bc8bc
   MobileVLCKit: 2d9c7c373393ae43086aeeff890bf0b1afc15c5c
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: d71a8f9d234bf288cee64b372c30c196c8075224
 
 COCOAPODS: 1.16.2

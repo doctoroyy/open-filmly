@@ -1,5 +1,4 @@
-import 'dart:ui';
-
+import 'package:cupertino_native/cupertino_native.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -269,10 +268,6 @@ class _MobileNavigation extends StatefulWidget {
 }
 
 class _MobileNavigationState extends State<_MobileNavigation> {
-  final _barKey = GlobalKey();
-  bool _dragging = false;
-  int? _dragIndex;
-
   int get _current => widget.moreSelected
       ? 4
       : widget.selectedIndex < 0
@@ -287,22 +282,6 @@ class _MobileNavigationState extends State<_MobileNavigation> {
     } else if (!fromDrag) {
       _showMore(context);
     }
-  }
-
-  int? _indexForGlobalPosition(Offset globalPosition) {
-    final box = _barKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-    final local = box.globalToLocal(globalPosition);
-    if (local.dx < 0 || local.dx > box.size.width) return null;
-    return (local.dx / (box.size.width / 5)).floor().clamp(0, 4);
-  }
-
-  void _updateDrag(Offset globalPosition) {
-    final index = _indexForGlobalPosition(globalPosition);
-    if (index == null || index == _dragIndex) return;
-    setState(() => _dragIndex = index);
-    HapticFeedback.selectionClick();
-    if (index < 4) _select(index, fromDrag: true);
   }
 
   @override
@@ -331,120 +310,23 @@ class _MobileNavigationState extends State<_MobileNavigation> {
 
   Widget _buildIOSNavigation(BuildContext context) {
     final bottomInset = MediaQuery.paddingOf(context).bottom;
-    final activeIndex = _dragging ? (_dragIndex ?? _current) : _current;
-    const items = [
-      (CupertinoIcons.house_fill, CupertinoIcons.house, '首页'),
-      (CupertinoIcons.clock_fill, CupertinoIcons.clock, '最近'),
-      (CupertinoIcons.film_fill, CupertinoIcons.film, '电影'),
-      (CupertinoIcons.tv_fill, CupertinoIcons.tv, '电视剧'),
-      (
-        CupertinoIcons.ellipsis_circle_fill,
-        CupertinoIcons.ellipsis_circle,
-        '更多',
-      ),
-    ];
-
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset > 0 ? 5 : 9),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(23),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: GestureDetector(
-            key: _barKey,
-            behavior: HitTestBehavior.opaque,
-            onLongPressStart: (details) {
-              setState(() {
-                _dragging = true;
-                _dragIndex = _indexForGlobalPosition(details.globalPosition);
-              });
-              HapticFeedback.mediumImpact();
-            },
-            onLongPressMoveUpdate: (details) =>
-                _updateDrag(details.globalPosition),
-            onLongPressEnd: (_) {
-              final index = _dragIndex;
-              setState(() {
-                _dragging = false;
-                _dragIndex = null;
-              });
-              if (index == 4) _showMore(context);
-            },
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: CupertinoColors.systemBackground
-                    .resolveFrom(context)
-                    .withValues(alpha: 0.64),
-                borderRadius: BorderRadius.circular(23),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.52),
-                  width: 0.7,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.065),
-                    blurRadius: 16,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: SizedBox(
-                height: 58,
-                child: Stack(
-                  children: [
-                    AnimatedAlign(
-                      alignment: Alignment(-1 + activeIndex * 0.5, 0),
-                      duration: const Duration(milliseconds: 220),
-                      curve: Curves.easeOutCubic,
-                      child: FractionallySizedBox(
-                        widthFactor: 0.19,
-                        child: Container(
-                          height: 46,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.46),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.70),
-                              width: 0.7,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.045),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        for (var i = 0; i < items.length; i++)
-                          Expanded(
-                            child: Semantics(
-                              button: true,
-                              selected: i == _current,
-                              label: items[i].$3,
-                              hint: '轻点切换，长按后可左右滑动选择',
-                              child: _IOSTabItem(
-                                active: i == activeIndex,
-                                emphasized: _dragging && i == activeIndex,
-                                activeIcon: items[i].$1,
-                                icon: items[i].$2,
-                                label: items[i].$3,
-                                onTap: () => _select(i),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+      padding: EdgeInsets.fromLTRB(12, 0, 12, bottomInset > 0 ? 2 : 8),
+      child: CNTabBar(
+        height: 78,
+        shrinkCentered: false,
+        items: const [
+          CNTabBarItem(label: '首页', icon: CNSymbol('house.fill')),
+          CNTabBarItem(label: '最近', icon: CNSymbol('clock.fill')),
+          CNTabBarItem(label: '电影', icon: CNSymbol('film.fill')),
+          CNTabBarItem(label: '电视剧', icon: CNSymbol('tv.fill')),
+          CNTabBarItem(label: '更多', icon: CNSymbol('ellipsis')),
+        ],
+        currentIndex: _current,
+        onTap: (index) {
+          HapticFeedback.selectionClick();
+          _select(index);
+        },
       ),
     );
   }
@@ -535,58 +417,6 @@ class _MobileNavigationState extends State<_MobileNavigation> {
                 Navigator.pop(context);
                 widget.onNavigate('/config');
               },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _IOSTabItem extends StatelessWidget {
-  const _IOSTabItem({
-    required this.active,
-    required this.emphasized,
-    required this.activeIcon,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final bool active;
-  final bool emphasized;
-  final IconData activeIcon;
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = active
-        ? CupertinoColors.activeBlue
-        : CupertinoColors.secondaryLabel.resolveFrom(context);
-    return CupertinoButton(
-      minimumSize: const Size(44, 44),
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      onPressed: onTap,
-      child: AnimatedScale(
-        scale: emphasized ? 1.06 : 1,
-        duration: const Duration(milliseconds: 140),
-        curve: Curves.easeOutCubic,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(active ? activeIcon : icon, size: 20, color: color),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              style: TextStyle(
-                color: color,
-                fontSize: 9.5,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                letterSpacing: -0.25,
-              ),
             ),
           ],
         ),

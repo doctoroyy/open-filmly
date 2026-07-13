@@ -1,8 +1,11 @@
 PODS:
+  - cupertino_native (0.0.1):
+    - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - VLCKit (3.7.3)
 
 DEPENDENCIES:
+  - cupertino_native (from `Flutter/ephemeral/.symlinks/plugins/cupertino_native/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - VLCKit (= 3.7.3)
 
@@ -11,13 +14,16 @@ SPEC REPOS:
     - VLCKit
 
 EXTERNAL SOURCES:
+  cupertino_native:
+    :path: Flutter/ephemeral/.symlinks/plugins/cupertino_native/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
 
 SPEC CHECKSUMS:
+  cupertino_native: 69ee8a8bac1c467f04256be9d78899a180287d9a
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   VLCKit: 4f2c462daaab6de88b93ab7609bdefbada557a4d
 
-PODFILE CHECKSUM: 08bc81ad451b4ec359229ed991eb16e110f15ae6
+PODFILE CHECKSUM: 480ef49c8b30c600caff92434b4866fbbdb1ad6f
 
 COCOAPODS: 1.16.2
