@@ -345,11 +345,11 @@ class _MobileNavigationState extends State<_MobileNavigation> {
     ];
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(10, 0, 10, bottomInset > 0 ? 6 : 10),
+      padding: EdgeInsets.fromLTRB(16, 0, 16, bottomInset > 0 ? 5 : 9),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(23),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
           child: GestureDetector(
             key: _barKey,
             behavior: HitTestBehavior.opaque,
@@ -374,42 +374,71 @@ class _MobileNavigationState extends State<_MobileNavigation> {
               decoration: BoxDecoration(
                 color: CupertinoColors.systemBackground
                     .resolveFrom(context)
-                    .withValues(alpha: 0.76),
-                borderRadius: BorderRadius.circular(28),
+                    .withValues(alpha: 0.64),
+                borderRadius: BorderRadius.circular(23),
                 border: Border.all(
-                  color: CupertinoColors.separator
-                      .resolveFrom(context)
-                      .withValues(alpha: 0.22),
+                  color: Colors.white.withValues(alpha: 0.52),
+                  width: 0.7,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.10),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
+                    color: Colors.black.withValues(alpha: 0.065),
+                    blurRadius: 16,
+                    offset: const Offset(0, 5),
                   ),
                 ],
               ),
               child: SizedBox(
-                height: 64,
-                child: Row(
+                height: 58,
+                child: Stack(
                   children: [
-                    for (var i = 0; i < items.length; i++)
-                      Expanded(
-                        child: Semantics(
-                          button: true,
-                          selected: i == _current,
-                          label: items[i].$3,
-                          hint: '轻点切换，长按后可左右滑动选择',
-                          child: _IOSTabItem(
-                            active: i == activeIndex,
-                            emphasized: _dragging && i == activeIndex,
-                            activeIcon: items[i].$1,
-                            icon: items[i].$2,
-                            label: items[i].$3,
-                            onTap: () => _select(i),
+                    AnimatedAlign(
+                      alignment: Alignment(-1 + activeIndex * 0.5, 0),
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      child: FractionallySizedBox(
+                        widthFactor: 0.19,
+                        child: Container(
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.46),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.70),
+                              width: 0.7,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.045),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
                           ),
                         ),
                       ),
+                    ),
+                    Row(
+                      children: [
+                        for (var i = 0; i < items.length; i++)
+                          Expanded(
+                            child: Semantics(
+                              button: true,
+                              selected: i == _current,
+                              label: items[i].$3,
+                              hint: '轻点切换，长按后可左右滑动选择',
+                              child: _IOSTabItem(
+                                active: i == activeIndex,
+                                emphasized: _dragging && i == activeIndex,
+                                activeIcon: items[i].$1,
+                                icon: items[i].$2,
+                                label: items[i].$3,
+                                onTap: () => _select(i),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -541,36 +570,25 @@ class _IOSTabItem extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 5),
       onPressed: onTap,
       child: AnimatedScale(
-        scale: emphasized ? 1.08 : 1,
-        duration: const Duration(milliseconds: 180),
+        scale: emphasized ? 1.06 : 1,
+        duration: const Duration(milliseconds: 140),
         curve: Curves.easeOutCubic,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: active
-                ? CupertinoColors.activeBlue.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(active ? activeIcon : icon, size: 21, color: color),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 10,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  letterSpacing: -0.2,
-                ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(active ? activeIcon : icon, size: 20, color: color),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                color: color,
+                fontSize: 9.5,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                letterSpacing: -0.25,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

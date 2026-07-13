@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -217,21 +219,28 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMac = Theme.of(context).platform == TargetPlatform.macOS;
+    final isIOS = Platform.isIOS;
     return Padding(
-      padding: EdgeInsets.fromLTRB(28, isMac ? 34 : 18, 24, 10),
+      padding: EdgeInsets.fromLTRB(
+        isIOS ? 20 : 28,
+        isMac ? 34 : (isIOS ? 14 : 18),
+        isIOS ? 18 : 24,
+        10,
+      ),
       child: Row(
         children: [
-          const Text(
+          Text(
             '首页',
             style: TextStyle(
               color: FilmlyPalette.textPrimary,
-              fontSize: 22,
+              fontSize: isIOS ? 28 : 22,
               fontWeight: FontWeight.w700,
-              letterSpacing: -0.4,
+              letterSpacing: isIOS ? -0.8 : -0.4,
             ),
           ),
           const Spacer(),
           _circleButton(
+            context,
             Icons.search_rounded,
             onSearch,
             tooltip: '搜索 (⌘F)',
@@ -239,6 +248,7 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           _circleButton(
+            context,
             Icons.refresh_rounded,
             refreshing ? null : onRefresh,
             tooltip: '刷新媒体库',
@@ -247,6 +257,7 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           _circleButton(
+            context,
             Icons.add_rounded,
             onSources,
             tooltip: '添加来源',
@@ -258,12 +269,39 @@ class _TopBar extends StatelessWidget {
   }
 
   Widget _circleButton(
+    BuildContext context,
     IconData icon,
     VoidCallback? onTap, {
     required String tooltip,
     bool spinning = false,
     Key? key,
   }) {
+    if (Platform.isIOS) {
+      return Tooltip(
+        message: tooltip,
+        child: ClipOval(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: CupertinoButton(
+              key: key,
+              minimumSize: const Size(36, 36),
+              padding: EdgeInsets.zero,
+              color: CupertinoColors.systemBackground
+                  .resolveFrom(context)
+                  .withValues(alpha: 0.58),
+              onPressed: onTap,
+              child: spinning
+                  ? const CupertinoActivityIndicator(radius: 9)
+                  : Icon(
+                      icon,
+                      color: CupertinoColors.label.resolveFrom(context),
+                      size: 18,
+                    ),
+            ),
+          ),
+        ),
+      );
+    }
     return Tooltip(
       message: tooltip,
       child: GestureDetector(
