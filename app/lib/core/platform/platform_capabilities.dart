@@ -15,6 +15,9 @@ abstract final class PlatformCapabilities {
   static bool get isMacOS =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
+  static bool get isIOS =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
   static bool get isWindows =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 }

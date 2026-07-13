@@ -1,3 +1,6 @@
+import 'dart:ui';
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -182,6 +185,7 @@ class _AppShellState extends ConsumerState<AppShell> {
               final sourcesSelected = _location(context).startsWith('/sources');
 
               return Scaffold(
+                extendBody: !useSidebar && PlatformCapabilities.isIOS,
                 backgroundColor: FilmlyPalette.background,
                 body: useSidebar
                     ? Stack(
@@ -249,7 +253,7 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 }
 
-class _MobileNavigation extends StatelessWidget {
+class _MobileNavigation extends StatefulWidget {
   const _MobileNavigation({
     required this.selectedIndex,
     required this.moreSelected,
@@ -261,23 +265,56 @@ class _MobileNavigation extends StatelessWidget {
   final ValueChanged<String> onNavigate;
 
   @override
+  State<_MobileNavigation> createState() => _MobileNavigationState();
+}
+
+class _MobileNavigationState extends State<_MobileNavigation> {
+  final _barKey = GlobalKey();
+  bool _dragging = false;
+  int? _dragIndex;
+
+  int get _current => widget.moreSelected
+      ? 4
+      : widget.selectedIndex < 0
+      ? 0
+      : widget.selectedIndex > 3
+      ? 3
+      : widget.selectedIndex;
+
+  void _select(int index, {bool fromDrag = false}) {
+    if (index < 4) {
+      widget.onNavigate(AppShell._navItems[index].path);
+    } else if (!fromDrag) {
+      _showMore(context);
+    }
+  }
+
+  int? _indexForGlobalPosition(Offset globalPosition) {
+    final box = _barKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    final local = box.globalToLocal(globalPosition);
+    if (local.dx < 0 || local.dx > box.size.width) return null;
+    return (local.dx / (box.size.width / 5)).floor().clamp(0, 4);
+  }
+
+  void _updateDrag(Offset globalPosition) {
+    final index = _indexForGlobalPosition(globalPosition);
+    if (index == null || index == _dragIndex) return;
+    setState(() => _dragIndex = index);
+    HapticFeedback.selectionClick();
+    if (index < 4) _select(index, fromDrag: true);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final current = moreSelected
-        ? 4
-        : selectedIndex < 0
-        ? 0
-        : selectedIndex > 3
-        ? 3
-        : selectedIndex;
+    if (PlatformCapabilities.isIOS) {
+      return _buildIOSNavigation(context);
+    }
     return NavigationBar(
       height: 68,
-      selectedIndex: current,
+      selectedIndex: _current,
       onDestinationSelected: (index) {
-        if (index < 4) {
-          onNavigate(AppShell._navItems[index].path);
-        } else {
-          _showMore(context);
-        }
+        _select(index);
       },
       destinations: const [
         NavigationDestination(icon: Icon(Icons.home_rounded), label: '首页'),
@@ -292,7 +329,142 @@ class _MobileNavigation extends StatelessWidget {
     );
   }
 
+  Widget _buildIOSNavigation(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final activeIndex = _dragging ? (_dragIndex ?? _current) : _current;
+    const items = [
+      (CupertinoIcons.house_fill, CupertinoIcons.house, '首页'),
+      (CupertinoIcons.clock_fill, CupertinoIcons.clock, '最近'),
+      (CupertinoIcons.film_fill, CupertinoIcons.film, '电影'),
+      (CupertinoIcons.tv_fill, CupertinoIcons.tv, '电视剧'),
+      (
+        CupertinoIcons.ellipsis_circle_fill,
+        CupertinoIcons.ellipsis_circle,
+        '更多',
+      ),
+    ];
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(10, 0, 10, bottomInset > 0 ? 6 : 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: GestureDetector(
+            key: _barKey,
+            behavior: HitTestBehavior.opaque,
+            onLongPressStart: (details) {
+              setState(() {
+                _dragging = true;
+                _dragIndex = _indexForGlobalPosition(details.globalPosition);
+              });
+              HapticFeedback.mediumImpact();
+            },
+            onLongPressMoveUpdate: (details) =>
+                _updateDrag(details.globalPosition),
+            onLongPressEnd: (_) {
+              final index = _dragIndex;
+              setState(() {
+                _dragging = false;
+                _dragIndex = null;
+              });
+              if (index == 4) _showMore(context);
+            },
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemBackground
+                    .resolveFrom(context)
+                    .withValues(alpha: 0.76),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: CupertinoColors.separator
+                      .resolveFrom(context)
+                      .withValues(alpha: 0.22),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.10),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: SizedBox(
+                height: 64,
+                child: Row(
+                  children: [
+                    for (var i = 0; i < items.length; i++)
+                      Expanded(
+                        child: Semantics(
+                          button: true,
+                          selected: i == _current,
+                          label: items[i].$3,
+                          hint: '轻点切换，长按后可左右滑动选择',
+                          child: _IOSTabItem(
+                            active: i == activeIndex,
+                            emphasized: _dragging && i == activeIndex,
+                            activeIcon: items[i].$1,
+                            icon: items[i].$2,
+                            label: items[i].$3,
+                            onTap: () => _select(i),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showMore(BuildContext context) {
+    if (PlatformCapabilities.isIOS) {
+      return showCupertinoModalPopup<void>(
+        context: context,
+        builder: (popupContext) => CupertinoActionSheet(
+          title: const Text('更多媒体库'),
+          message: const Text('选择要打开的内容'),
+          actions: [
+            for (final item in AppShell._navItems.skip(4))
+              CupertinoActionSheetAction(
+                onPressed: () {
+                  Navigator.pop(popupContext);
+                  widget.onNavigate(item.path);
+                },
+                child: Text(item.label),
+              ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(popupContext);
+                widget.onNavigate('/favorites');
+              },
+              child: const Text('收藏'),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(popupContext);
+                widget.onNavigate('/sources');
+              },
+              child: const Text('来源'),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.pop(popupContext);
+                widget.onNavigate('/config');
+              },
+              child: const Text('设置'),
+            ),
+          ],
+          cancelButton: CupertinoActionSheetAction(
+            onPressed: () => Navigator.pop(popupContext),
+            child: const Text('取消'),
+          ),
+        ),
+      );
+    }
     return showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -307,7 +479,7 @@ class _MobileNavigation extends StatelessWidget {
                 title: Text(item.label),
                 onTap: () {
                   Navigator.pop(context);
-                  onNavigate(item.path);
+                  widget.onNavigate(item.path);
                 },
               ),
             const Divider(),
@@ -316,7 +488,7 @@ class _MobileNavigation extends StatelessWidget {
               title: const Text('收藏'),
               onTap: () {
                 Navigator.pop(context);
-                onNavigate('/favorites');
+                widget.onNavigate('/favorites');
               },
             ),
             ListTile(
@@ -324,7 +496,7 @@ class _MobileNavigation extends StatelessWidget {
               title: const Text('来源'),
               onTap: () {
                 Navigator.pop(context);
-                onNavigate('/sources');
+                widget.onNavigate('/sources');
               },
             ),
             ListTile(
@@ -332,10 +504,73 @@ class _MobileNavigation extends StatelessWidget {
               title: const Text('设置'),
               onTap: () {
                 Navigator.pop(context);
-                onNavigate('/config');
+                widget.onNavigate('/config');
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IOSTabItem extends StatelessWidget {
+  const _IOSTabItem({
+    required this.active,
+    required this.emphasized,
+    required this.activeIcon,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool active;
+  final bool emphasized;
+  final IconData activeIcon;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active
+        ? CupertinoColors.activeBlue
+        : CupertinoColors.secondaryLabel.resolveFrom(context);
+    return CupertinoButton(
+      minimumSize: const Size(44, 44),
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      onPressed: onTap,
+      child: AnimatedScale(
+        scale: emphasized ? 1.08 : 1,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: active
+                ? CupertinoColors.activeBlue.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(active ? activeIcon : icon, size: 21, color: color),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 10,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
