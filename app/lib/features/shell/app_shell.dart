@@ -1,9 +1,9 @@
-import 'package:cupertino_native/cupertino_native.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:native_glass_navbar/native_glass_navbar.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../core/platform/desktop_window.dart';
@@ -309,24 +309,78 @@ class _MobileNavigationState extends State<_MobileNavigation> {
   }
 
   Widget _buildIOSNavigation(BuildContext context) {
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, bottomInset > 0 ? 2 : 8),
-      child: CNTabBar(
-        height: 78,
-        shrinkCentered: false,
-        items: const [
-          CNTabBarItem(label: '首页', icon: CNSymbol('house.fill')),
-          CNTabBarItem(label: '最近', icon: CNSymbol('clock.fill')),
-          CNTabBarItem(label: '电影', icon: CNSymbol('film.fill')),
-          CNTabBarItem(label: '电视剧', icon: CNSymbol('tv.fill')),
-          CNTabBarItem(label: '更多', icon: CNSymbol('ellipsis')),
-        ],
+    return NativeGlassNavBar(
+      currentIndex: _current,
+      tintColor: CupertinoColors.activeBlue,
+      tabs: const [
+        NativeGlassNavBarItem(label: '首页', symbol: 'house'),
+        NativeGlassNavBarItem(label: '最近', symbol: 'clock'),
+        NativeGlassNavBarItem(label: '电影', symbol: 'film'),
+        NativeGlassNavBarItem(label: '电视剧', symbol: 'tv'),
+        NativeGlassNavBarItem(label: '更多', symbol: 'ellipsis'),
+      ],
+      onTap: (index) {
+        HapticFeedback.selectionClick();
+        _select(index);
+      },
+      fallback: CupertinoTabBar(
+        height: 58,
         currentIndex: _current,
-        onTap: (index) {
-          HapticFeedback.selectionClick();
-          _select(index);
-        },
+        onTap: _select,
+        border: null,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.house),
+            ),
+            activeIcon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.house_fill),
+            ),
+            label: '首页',
+          ),
+          BottomNavigationBarItem(
+            icon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.clock),
+            ),
+            activeIcon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.clock_fill),
+            ),
+            label: '最近',
+          ),
+          BottomNavigationBarItem(
+            icon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.film),
+            ),
+            activeIcon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.film_fill),
+            ),
+            label: '电影',
+          ),
+          BottomNavigationBarItem(
+            icon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.tv),
+            ),
+            activeIcon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.tv_fill),
+            ),
+            label: '电视剧',
+          ),
+          BottomNavigationBarItem(
+            icon: Padding(
+              padding: EdgeInsets.only(bottom: 5),
+              child: Icon(CupertinoIcons.ellipsis),
+            ),
+            label: '更多',
+          ),
+        ],
       ),
     );
   }

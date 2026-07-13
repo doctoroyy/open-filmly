@@ -241,14 +241,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
-  cupertino_native:
-    dependency: "direct main"
-    description:
-      name: cupertino_native
-      sha256: "5f42e85a091797afb86bb30a25fffd7188335de97278fa4bb80c0f564c874e89"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.1"
   dart_style:
     dependency: transitive
     description:
@@ -661,6 +653,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.0"
+  native_glass_navbar:
+    dependency: "direct main"
+    description:
+      name: native_glass_navbar
+      sha256: b25d40160e6489cf13fb3cce38eac0d65c4310bc88d48add637d72582c0eef01
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
   native_toolchain_c:
     dependency: transitive
     description:
