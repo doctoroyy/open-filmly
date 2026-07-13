@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 
 class PlaybackAudioTrack {
   const PlaybackAudioTrack({required this.id, this.title, this.language});
@@ -76,6 +80,7 @@ class PlaybackService {
   final _tracksController = StreamController<PlaybackTracks>.broadcast();
   final _videoEventController =
       StreamController<PlaybackVideoEvent>.broadcast();
+  final mobileController = ValueNotifier<VlcPlayerController?>(null);
 
   int? _viewId;
   _PendingOpen? _pendingOpen;
@@ -94,6 +99,7 @@ class PlaybackService {
   List<PlaybackSubtitleTrack> _subtitleTracks = const [];
   PlaybackAudioTrack _currentAudioTrack = PlaybackAudioTrack.no();
   PlaybackSubtitleTrack _currentSubtitleTrack = PlaybackSubtitleTrack.no();
+  VlcPlayerController? _mobileController;
 
   PlaybackService() {
     _channel.setMethodCallHandler(_handleNativeEvent);
@@ -155,15 +161,35 @@ class PlaybackService {
       httpHeaders: httpHeaders,
     );
     _pendingOpen = pending;
+    if (_isMobile) {
+      await _openMobile(pending);
+      return;
+    }
     if (_viewId != null) {
       await _openAttached(pending);
     }
   }
 
-  Future<void> playOrPause() => _invoke('playOrPause');
+  Future<void> playOrPause() async {
+    final mobile = _mobileController;
+    if (mobile != null) {
+      if (mobile.value.isPlaying) {
+        await mobile.pause();
+      } else {
+        await mobile.play();
+      }
+      return;
+    }
+    await _invoke('playOrPause');
+  }
 
   Future<void> seek(Duration position) async {
-    await _invoke('seek', {'positionMs': position.inMilliseconds});
+    final mobile = _mobileController;
+    if (mobile != null) {
+      await mobile.seekTo(position);
+    } else {
+      await _invoke('seek', {'positionMs': position.inMilliseconds});
+    }
     _position = position;
     _positionController.add(position);
   }
@@ -171,7 +197,12 @@ class PlaybackService {
   /// Volume is expressed on a 0-100 scale.
   Future<void> setVolume(double volume) async {
     final clamped = volume.clamp(0.0, 100.0);
-    await _invoke('setVolume', {'volume': clamped.round()});
+    final mobile = _mobileController;
+    if (mobile != null) {
+      await mobile.setVolume(clamped.round());
+    } else {
+      await _invoke('setVolume', {'volume': clamped.round()});
+    }
     _volume = clamped;
     _volumeController.add(clamped);
   }
@@ -179,7 +210,12 @@ class PlaybackService {
   /// Set playback speed (1.0 = normal, 0.5 = half, 2.0 = double).
   Future<void> setRate(double rate) async {
     final clamped = rate.clamp(0.25, 4.0);
-    await _invoke('setRate', {'rate': clamped});
+    final mobile = _mobileController;
+    if (mobile != null) {
+      await mobile.setPlaybackSpeed(clamped);
+    } else {
+      await _invoke('setRate', {'rate': clamped});
+    }
     _rate = clamped;
   }
 
@@ -191,10 +227,35 @@ class PlaybackService {
 
   PlaybackSubtitleTrack get currentSubtitleTrack => _currentSubtitleTrack;
 
-  Future<void> setAudioTrack(PlaybackAudioTrack track) =>
-      _invoke('setAudioTrack', {'trackId': int.tryParse(track.id) ?? -1});
+  Future<void> setAudioTrack(PlaybackAudioTrack track) async {
+    final id = int.tryParse(track.id) ?? -1;
+    final mobile = _mobileController;
+    if (mobile != null) {
+      await mobile.setAudioTrack(id);
+    } else {
+      await _invoke('setAudioTrack', {'trackId': id});
+    }
+    _currentAudioTrack = track;
+  }
 
   Future<void> setSubtitleTrack(PlaybackSubtitleTrack track) async {
+    final mobile = _mobileController;
+    if (mobile != null) {
+      if (track.uri) {
+        final uri = track.id;
+        if (uri.startsWith('http://') || uri.startsWith('https://')) {
+          await mobile.addSubtitleFromNetwork(uri);
+        } else {
+          await mobile.addSubtitleFromFile(
+            File(Uri.tryParse(uri)?.toFilePath() ?? uri),
+          );
+        }
+      } else {
+        await mobile.setSpuTrack(int.tryParse(track.id) ?? -1);
+      }
+      _currentSubtitleTrack = track;
+      return;
+    }
     if (track.uri) {
       try {
         await _invoke('addSubtitleTrack', {'uri': track.id});
@@ -231,6 +292,124 @@ class PlaybackService {
     _errorController.close();
     _tracksController.close();
     _videoEventController.close();
+    final mobile = _mobileController;
+    _mobileController = null;
+    mobileController.value = null;
+    mobileController.dispose();
+    if (mobile != null) unawaited(mobile.dispose());
+  }
+
+  bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.android);
+
+  Future<void> _openMobile(_PendingOpen pending) async {
+    final previous = _mobileController;
+    if (previous != null) {
+      previous.removeListener(_refreshMobileStatus);
+      await previous.dispose();
+    }
+
+    final options = VlcPlayerOptions(
+      advanced: VlcAdvancedOptions([
+        VlcAdvancedOptions.networkCaching(8000),
+        VlcAdvancedOptions.fileCaching(3000),
+      ]),
+      http: VlcHttpOptions([
+        VlcHttpOptions.httpReconnect(true),
+        if (pending.httpHeaders?['User-Agent'] case final userAgent?)
+          VlcHttpOptions.httpUserAgent(userAgent),
+      ]),
+      extras: _mobileHeaderOptions(pending.httpHeaders),
+    );
+    final uri = pending.uri;
+    final controller = uri.startsWith('http://') || uri.startsWith('https://')
+        ? VlcPlayerController.network(uri, hwAcc: HwAcc.full, options: options)
+        : VlcPlayerController.file(
+            File(Uri.tryParse(uri)?.toFilePath() ?? uri),
+            hwAcc: HwAcc.full,
+            options: options,
+          );
+    controller.addListener(_refreshMobileStatus);
+    controller.addOnInitListener(() {
+      final startAt = pending.startAt;
+      if (startAt != null && startAt > Duration.zero) {
+        unawaited(controller.seekTo(startAt));
+      }
+      unawaited(_refreshMobileTracks());
+    });
+    _mobileController = controller;
+    mobileController.value = controller;
+  }
+
+  List<String> _mobileHeaderOptions(Map<String, String>? headers) {
+    final authorization = headers?['Authorization'];
+    if (authorization == null || !authorization.startsWith('Basic ')) {
+      return const [];
+    }
+    try {
+      final credentials = utf8.decode(base64Decode(authorization.substring(6)));
+      return [':http-user-pwd=$credentials'];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _refreshMobileStatus() {
+    final controller = _mobileController;
+    if (_disposed || controller == null) return;
+    final value = controller.value;
+    _position = value.position;
+    _duration = value.duration;
+    _playing = value.isPlaying;
+    _completed = value.isEnded;
+    _buffering = value.isBuffering;
+    _volume = value.volume.toDouble();
+    _rate = value.playbackSpeed;
+    _positionController.add(_position);
+    _durationController.add(_duration);
+    _playingController.add(_playing);
+    _completedController.add(_completed);
+    _bufferingController.add(_buffering);
+    _volumeController.add(_volume);
+    final bufferedMs = (_duration.inMilliseconds * value.bufferPercent / 100)
+        .round();
+    _bufferController.add(Duration(milliseconds: bufferedMs));
+    if (value.hasError && value.errorDescription.isNotEmpty) {
+      _errorController.add(value.errorDescription);
+    }
+  }
+
+  Future<void> _refreshMobileTracks() async {
+    final controller = _mobileController;
+    if (controller == null || !controller.value.isInitialized) return;
+    final audio = await controller.getAudioTracks();
+    final subtitle = await controller.getSpuTracks();
+    _audioTracks = audio.entries
+        .map(
+          (entry) => PlaybackAudioTrack(id: '${entry.key}', title: entry.value),
+        )
+        .toList(growable: false);
+    _subtitleTracks = subtitle.entries
+        .map(
+          (entry) =>
+              PlaybackSubtitleTrack(id: '${entry.key}', title: entry.value),
+        )
+        .toList(growable: false);
+    final currentAudio = controller.value.activeAudioTrack;
+    final currentSubtitle = controller.value.activeSpuTrack;
+    _currentAudioTrack = _audioTracks.firstWhere(
+      (track) => track.id == '$currentAudio',
+      orElse: PlaybackAudioTrack.no,
+    );
+    _currentSubtitleTrack = _subtitleTracks.firstWhere(
+      (track) => track.id == '$currentSubtitle',
+      orElse: PlaybackSubtitleTrack.no,
+    );
+    _tracksController.add(
+      PlaybackTracks(audio: _audioTracks, subtitle: _subtitleTracks),
+    );
   }
 
   Future<void> _openAttached(_PendingOpen pending) async {

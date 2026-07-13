@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 
 import 'playback_service.dart';
 
@@ -34,6 +35,22 @@ class VlcVideoView extends StatelessWidget {
       TargetPlatform.windows => _WindowsVlcVideoView(
         service: service,
         nativeOverlayInsets: nativeOverlayInsets,
+      ),
+      TargetPlatform.iOS || TargetPlatform.android => ValueListenableBuilder(
+        valueListenable: service.mobileController,
+        builder: (context, controller, _) {
+          if (controller == null) {
+            return const ColoredBox(color: Colors.black);
+          }
+          return LayoutBuilder(
+            builder: (context, constraints) => VlcPlayer(
+              controller: controller,
+              aspectRatio: constraints.maxWidth / constraints.maxHeight,
+              placeholder: const ColoredBox(color: Colors.black),
+              virtualDisplay: false,
+            ),
+          );
+        },
       ),
       _ => const ColoredBox(color: Colors.black),
     };

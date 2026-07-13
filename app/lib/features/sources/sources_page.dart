@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/platform/platform_capabilities.dart';
 import '../../widgets/filmly_design.dart';
 
 /// Sources management page — shows all supported media source types,
@@ -47,7 +48,9 @@ class SourcesPage extends StatelessWidget {
               key: const Key('source_card_local'),
               icon: Icons.folder_rounded,
               title: '本地目录',
-              subtitle: '添加电脑上的文件夹，扫描其中的影片',
+              subtitle: PlatformCapabilities.isMobile
+                  ? '从设备文件中导入本地影片'
+                  : '添加电脑上的文件夹，扫描其中的影片',
               color: const Color(0xFF66A3FF),
               onTap: () => context.go('/sources/local'),
             ),

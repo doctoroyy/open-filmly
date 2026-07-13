@@ -1,0 +1,29 @@
+PODS:
+  - Flutter (1.0.0)
+  - flutter_vlc_player (3.0.3):
+    - Flutter
+    - MobileVLCKit (~> 3.6.1b1)
+  - MobileVLCKit (3.6.1b1)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_vlc_player (from `.symlinks/plugins/flutter_vlc_player/ios`)
+
+SPEC REPOS:
+  trunk:
+    - MobileVLCKit
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_vlc_player:
+    :path: ".symlinks/plugins/flutter_vlc_player/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_vlc_player: 5464f594a9338e080d240bbe7b10ffe30c7bc8bc
+  MobileVLCKit: 2d9c7c373393ae43086aeeff890bf0b1afc15c5c
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.16.2

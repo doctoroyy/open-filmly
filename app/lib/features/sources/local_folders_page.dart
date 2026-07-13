@@ -1,8 +1,13 @@
+import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
+import '../../core/platform/platform_capabilities.dart';
 import '../../providers/data_providers.dart';
 import '../../widgets/filmly_design.dart';
 
@@ -21,6 +26,10 @@ class _LocalFoldersPageState extends ConsumerState<LocalFoldersPage> {
   bool _enriching = false;
 
   Future<void> _addFolder() async {
+    if (PlatformCapabilities.isMobile) {
+      await _importMobileFiles();
+      return;
+    }
     final path = await getDirectoryPath(confirmButtonText: '选择此文件夹');
     if (path == null || !mounted) return;
 
@@ -38,6 +47,47 @@ class _LocalFoldersPageState extends ConsumerState<LocalFoldersPage> {
         .read(configProvider.notifier)
         .save(config.copyWith(selectedFolders: folders));
     _showSnack('已添加：$path');
+  }
+
+  Future<void> _importMobileFiles() async {
+    const videoTypes = XTypeGroup(
+      label: '视频',
+      extensions: ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'm2ts'],
+    );
+    final files = await openFiles(acceptedTypeGroups: const [videoTypes]);
+    if (files.isEmpty || !mounted) return;
+
+    setState(() => _scanning = true);
+    try {
+      final documents = await getApplicationDocumentsDirectory();
+      final importDir = Directory(p.join(documents.path, 'ImportedMedia'));
+      await importDir.create(recursive: true);
+
+      var imported = 0;
+      for (final file in files) {
+        final target = File(p.join(importDir.path, p.basename(file.name)));
+        await target.writeAsBytes(await file.readAsBytes(), flush: true);
+        imported++;
+      }
+
+      final config = ref.read(configProvider).asData?.value;
+      if (config == null) return;
+      final folders = [...config.selectedFolders];
+      if (!folders.contains(importDir.path)) folders.add(importDir.path);
+      await ref
+          .read(configProvider.notifier)
+          .save(config.copyWith(selectedFolders: folders));
+
+      final result = await ref.read(libraryScannerProvider).scanFolders([
+        importDir.path,
+      ]);
+      invalidateLibraryViews(ref);
+      _showSnack('已导入 $imported 个文件，识别 ${result.importedItems} 项');
+    } catch (e) {
+      _showSnack('导入本地视频失败：$e');
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
   }
 
   Future<void> _removeFolder(String folder) async {
@@ -174,12 +224,16 @@ class _LocalFoldersPageState extends ConsumerState<LocalFoldersPage> {
               icon: Icons.chevron_left_rounded,
               onTap: () => _goBack(context),
             ),
-            title: '本地目录',
-            subtitle: '已添加 ${folders.length} 个文件夹，用于扫描本地影片。',
+            title: PlatformCapabilities.isMobile ? '本地视频' : '本地目录',
+            subtitle: PlatformCapabilities.isMobile
+                ? '已添加 ${folders.length} 个导入目录。'
+                : '已添加 ${folders.length} 个文件夹，用于扫描本地影片。',
           ),
           const SizedBox(height: 24),
-          const Text(
-            '选择包含影片的文件夹，系统会递归扫描所有视频文件并导入媒体库。',
+          Text(
+            PlatformCapabilities.isMobile
+                ? '从系统文件选择器导入视频，文件会复制到应用目录并加入媒体库。'
+                : '选择包含影片的文件夹，系统会递归扫描所有视频文件并导入媒体库。',
             style: TextStyle(
               color: FilmlyPalette.textSecondary,
               fontSize: 14,
@@ -192,8 +246,10 @@ class _LocalFoldersPageState extends ConsumerState<LocalFoldersPage> {
             runSpacing: 12,
             children: [
               FilmlyGlassButton(
-                label: '添加文件夹',
-                icon: Icons.create_new_folder_rounded,
+                label: PlatformCapabilities.isMobile ? '导入视频' : '添加文件夹',
+                icon: PlatformCapabilities.isMobile
+                    ? Icons.video_file_rounded
+                    : Icons.create_new_folder_rounded,
                 accent: true,
                 onTap: _addFolder,
               ),
