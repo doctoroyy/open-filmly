@@ -234,6 +234,23 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
               children: [
                 _field(_tmdb, 'TMDB API Key', hint: '用于抓取海报、评分、简介'),
                 _field(_gemini, 'Gemini API Key（可选）', hint: '用于 AI 智能识别文件名'),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'API 设置可以单独保存，不需要先填写扫描目录。',
+                    style: TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+                FilmlyGlassButton(
+                  label: _saving ? '保存中…' : '保存元数据设置',
+                  icon: _saving ? null : Icons.save_outlined,
+                  leading: _saving ? _spinner() : null,
+                  onTap: _saving ? null : _save,
+                ),
               ],
             ),
             const SizedBox(height: 24),

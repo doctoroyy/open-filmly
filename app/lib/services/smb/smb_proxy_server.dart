@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -13,7 +14,7 @@ import '../streaming/range_source.dart';
 /// Binds to loopback only. Source ids are mapped to opaque tokens so the real
 /// path never appears in the URL handed to the player.
 class SmbProxyServer {
-  SmbProxyServer(this._source, {this.initialResponseBytes = 8 * 1024 * 1024});
+  SmbProxyServer(this._source, {this.initialResponseBytes = 32 * 1024 * 1024});
 
   static const _rangePrefix = 'bytes=';
 
@@ -22,6 +23,8 @@ class SmbProxyServer {
   HttpServer? _server;
   final Map<String, String> _pathByToken = {};
   final Map<String, String> _tokenByPath = {};
+  final Map<String, Uint8List> _bytesByToken = {};
+  final Map<String, String> _contentTypeByToken = {};
   int _counter = 0;
 
   int? get port => _server?.port;
@@ -45,13 +48,34 @@ class SmbProxyServer {
     return 'http://127.0.0.1:${port!}/stream/$token$suffix';
   }
 
+  /// Registers a small in-memory resource, primarily a subtitle normalized to
+  /// UTF-8. It uses the same loopback origin as video so libVLC can load it
+  /// without SMB/WebDAV credentials or platform-specific charset handling.
+  String urlForBytes(
+    List<int> bytes, {
+    required String displayName,
+    String? contentType,
+  }) {
+    final token = 'memory-${++_counter}';
+    _bytesByToken[token] = Uint8List.fromList(bytes);
+    _contentTypeByToken[token] = contentType ?? _contentType(displayName);
+    return 'http://127.0.0.1:${port!}/stream/$token/'
+        '${Uri.encodeComponent(displayName)}';
+  }
+
   Future<Response> _handle(Request request) async {
     final segments = request.url.pathSegments;
     if ((segments.length != 2 && segments.length != 3) ||
         segments.first != 'stream') {
       return Response.notFound('Not found');
     }
-    final sourceId = _pathByToken[segments[1]];
+    final token = segments[1];
+    final memory = _bytesByToken[token];
+    if (memory != null) {
+      return _handleMemory(request, token, memory);
+    }
+
+    final sourceId = _pathByToken[token];
     if (sourceId == null) {
       return Response.notFound('Unknown token');
     }
@@ -101,6 +125,49 @@ class SmbProxyServer {
       return _rangeNotSatisfiable(total);
     } catch (e) {
       return Response.internalServerError(body: 'Stream read error: $e');
+    }
+  }
+
+  Response _handleMemory(Request request, String token, Uint8List data) {
+    try {
+      final total = data.length;
+      var start = 0;
+      var end = total - 1;
+      var statusCode = 200;
+      final requestedRange = _parseRange(
+        request.headers[HttpHeaders.rangeHeader],
+        total,
+      );
+      if (requestedRange != null) {
+        start = requestedRange.start;
+        end = requestedRange.end;
+        statusCode = 206;
+      }
+      if (requestedRange != null && total == 0) {
+        return _rangeNotSatisfiable(total);
+      }
+      if (total > 0 && (start < 0 || start >= total || start > end)) {
+        return _rangeNotSatisfiable(total);
+      }
+      if (end > total - 1) end = total - 1;
+      final length = total == 0 ? 0 : end - start + 1;
+      final headers = {
+        'Content-Type':
+            _contentTypeByToken[token] ?? 'application/octet-stream',
+        'Accept-Ranges': 'bytes',
+        'Content-Length': '$length',
+        if (statusCode == 206) 'Content-Range': 'bytes $start-$end/$total',
+      };
+      if (request.method.toUpperCase() == 'HEAD' || length == 0) {
+        return Response(statusCode, headers: headers);
+      }
+      return Response(
+        statusCode,
+        body: Stream<List<int>>.value(data.sublist(start, end + 1)),
+        headers: headers,
+      );
+    } on FormatException {
+      return _rangeNotSatisfiable(data.length);
     }
   }
 
@@ -163,6 +230,8 @@ class SmbProxyServer {
     _server = null;
     _pathByToken.clear();
     _tokenByPath.clear();
+    _bytesByToken.clear();
+    _contentTypeByToken.clear();
   }
 }
 

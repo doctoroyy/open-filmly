@@ -1,9 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:path/path.dart' as p;
 
 import '../../data/models/media.dart';
 import '../emby/emby_service.dart';
 import '../library/media_library_entry_factory.dart';
 import 'external_subtitle_finder.dart';
+import 'subtitle_text_normalizer.dart';
 import '../smb/smb_proxy_server.dart';
 import '../smb/smb_service.dart';
 import '../webdav/webdav_service.dart';
@@ -139,10 +142,7 @@ class PlaybackSourceResolver {
       return [
         for (final subtitle in matched)
           PlaybackSubtitleSource(
-            uri: _proxy.urlFor(
-              subtitle.path,
-              displayName: p.basename(subtitle.path),
-            ),
+            uri: await _normalizedSmbSubtitleUrl(subtitle.path),
             title: subtitle.label,
             language: subtitle.languageHint,
           ),
@@ -175,13 +175,55 @@ class PlaybackSourceResolver {
       return [
         for (final subtitle in matched)
           PlaybackSubtitleSource(
-            uri: WebDavService.buildFileUrl(base, subtitle.path),
+            uri: await _normalizedWebDavSubtitleUrl(
+              service,
+              base,
+              subtitle.path,
+            ),
             title: subtitle.label,
             language: subtitle.languageHint,
           ),
       ];
     } catch (_) {
       return const [];
+    }
+  }
+
+  Future<String> _normalizedSmbSubtitleUrl(String path) async {
+    try {
+      final length = await _smb.length(path);
+      if (length <= 0 || length > 16 * 1024 * 1024) {
+        throw const FormatException('Unsupported subtitle size');
+      }
+      final stream = await _smb.read(path, 0, length - 1);
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in stream) {
+        builder.add(chunk);
+      }
+      final normalized = SubtitleTextNormalizer.toUtf8(builder.takeBytes());
+      return _proxy.urlForBytes(normalized, displayName: p.basename(path));
+    } catch (_) {
+      return _proxy.urlFor(path, displayName: p.basename(path));
+    }
+  }
+
+  Future<String> _normalizedWebDavSubtitleUrl(
+    WebDavService service,
+    String base,
+    String path,
+  ) async {
+    try {
+      final bytes = await service.readBytes(path);
+      if (bytes.isEmpty || bytes.length > 16 * 1024 * 1024) {
+        throw const FormatException('Unsupported subtitle size');
+      }
+      await _proxy.start();
+      return _proxy.urlForBytes(
+        SubtitleTextNormalizer.toUtf8(bytes),
+        displayName: p.basename(path),
+      );
+    } catch (_) {
+      return WebDavService.buildFileUrl(base, path);
     }
   }
 }

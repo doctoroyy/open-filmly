@@ -9,6 +9,18 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # Vendored third-party packages keep their upstream analyzer/dev setup and
+    # are compiled by platform builds. The app analyzer should focus on Filmly
+    # source rather than Pigeon generators and upstream lint packages.
+    - packages/flutter_vlc_player/**
+    - packages/flutter_vlc_player_platform_interface/**
+    - packages/smb_connect/**
+    # These two tests intentionally require a live NAS or a running app.
+    - test/integration_smb_real_test.dart
+    - test/ui_automation_test.dart
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

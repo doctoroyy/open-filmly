@@ -88,6 +88,8 @@ class WebDavService {
         .toList(growable: false);
   }
 
+  Future<List<int>> readBytes(String path) => _conn.read(path);
+
   /// Builds the absolute, encoded URL for a file [relativePath] on this server.
   String fileUrl(String relativePath) {
     final config = _config;

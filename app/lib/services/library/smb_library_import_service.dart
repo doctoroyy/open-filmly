@@ -48,6 +48,7 @@ class SmbLibraryImportService {
     var episodeCount = 0;
     final mediaIds = <String>[];
     final visited = <String>{};
+    final scannedShows = <String, Media>{};
 
     Future<void> walk(SmbFile folder) async {
       if (!visited.add(folder.path)) return;
@@ -65,7 +66,7 @@ class SmbLibraryImportService {
           config: config,
           file: entry,
         );
-        await _repo.upsert(libraryEntry.media);
+        await _repo.upsertScanned(libraryEntry.media);
         importedItems++;
         mediaIds.add(libraryEntry.media.id);
 
@@ -80,6 +81,7 @@ class SmbLibraryImportService {
             break;
           case MediaType.tv:
             tvCount++;
+            scannedShows[libraryEntry.media.id] = libraryEntry.media;
             break;
           case MediaType.unknown:
             break;
@@ -88,6 +90,9 @@ class SmbLibraryImportService {
     }
 
     await walk(root);
+    for (final show in scannedShows.values) {
+      await _repo.consolidateTvShow(show);
+    }
 
     return SmbLibraryImportResult(
       scannedFiles: scannedFiles,

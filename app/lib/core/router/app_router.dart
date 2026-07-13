@@ -1,3 +1,5 @@
+import 'package:cupertino_native_better/cupertino_native_better.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -53,10 +55,18 @@ CustomTransitionPage<void> _fadePage(GoRouterState state, Widget child) {
   );
 }
 
+Page<void> _tabPage(GoRouterState state, Widget child) {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+    return NoTransitionPage<void>(key: state.pageKey, child: child);
+  }
+  return _fadePage(state, child);
+}
+
 /// Builds the application router. The [initialLocation] override is kept
 /// injectable so widget tests can boot directly into a specific route.
 GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
   navigatorKey: _rootNavigatorKey,
+  observers: [CNTabBarRouteObserver()],
   initialLocation: initialLocation,
   routes: [
     GoRoute(
@@ -73,22 +83,22 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
       routes: [
         GoRoute(
           path: '/',
-          pageBuilder: (context, state) => _fadePage(state, const HomePage()),
+          pageBuilder: (context, state) => _tabPage(state, const HomePage()),
         ),
         GoRoute(
           path: '/recent',
           pageBuilder: (context, state) =>
-              _fadePage(state, const HomePage(initialTab: HomeTab.recent)),
+              _tabPage(state, const HomePage(initialTab: HomeTab.recent)),
         ),
         GoRoute(
           path: '/movies',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.movie)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.movie)),
         ),
         GoRoute(
           path: '/tv',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.tv)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.tv)),
         ),
         GoRoute(
           path: '/favorites',
@@ -98,21 +108,21 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         GoRoute(
           path: '/anime',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.anime)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.anime)),
         ),
         GoRoute(
           path: '/variety',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.variety)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.variety)),
         ),
         GoRoute(
           path: '/concert',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.concert)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.concert)),
         ),
         GoRoute(
           path: '/documentary',
-          pageBuilder: (context, state) => _fadePage(
+          pageBuilder: (context, state) => _tabPage(
             state,
             const LibraryPage(shelf: LibraryShelf.documentary),
           ),
@@ -120,7 +130,7 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         GoRoute(
           path: '/other',
           pageBuilder: (context, state) =>
-              _fadePage(state, const LibraryPage(shelf: LibraryShelf.other)),
+              _tabPage(state, const LibraryPage(shelf: LibraryShelf.other)),
         ),
         GoRoute(
           path: '/unmatched',

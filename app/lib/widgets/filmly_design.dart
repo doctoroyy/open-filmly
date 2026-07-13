@@ -1,4 +1,7 @@
+import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/material.dart';
+
+import '../core/platform/platform_capabilities.dart';
 
 /// Shared surfaces and controls, styled to match NetEase 爆米花 (Filmly) on
 /// macOS: a native light appearance — white content, a light translucent
@@ -113,6 +116,34 @@ class _FilmlyGlassButtonState extends State<FilmlyGlassButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onTap != null;
+    if (PlatformCapabilities.isIOS &&
+        widget.leading == null &&
+        widget.trailing == null) {
+      return SizedBox(
+        height: widget.height,
+        child: CNButton(
+          label: widget.label,
+          customIcon: widget.icon,
+          enabled: enabled,
+          onPressed: widget.onTap,
+          tint: widget.accent || widget.selected
+              ? const Color(0xFF007AFF)
+              : null,
+          config: CNButtonConfig(
+            style: widget.accent
+                ? CNButtonStyle.prominentGlass
+                : CNButtonStyle.glass,
+            minHeight: widget.height,
+            borderRadius: widget.radius,
+            shrinkWrap: true,
+            imagePadding: 8,
+            customIconSize: 18,
+            labelFontSize: 14,
+            labelFontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
     // Accent = black filled (NetEase primary). Plain = light gray.
     final Color background;
     final Color foreground;
@@ -214,6 +245,24 @@ class _FilmlyIconButtonState extends State<FilmlyIconButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onTap != null;
+    if (PlatformCapabilities.isIOS) {
+      return SizedBox.square(
+        dimension: widget.size,
+        child: CNButton.icon(
+          customIcon: widget.icon,
+          enabled: enabled,
+          onPressed: widget.onTap,
+          config: CNButtonConfig(
+            style: CNButtonStyle.glass,
+            width: widget.size,
+            minHeight: widget.size,
+            padding: EdgeInsets.zero,
+            borderRadius: widget.size / 2,
+            customIconSize: 19,
+          ),
+        ),
+      );
+    }
     return MouseRegion(
       cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),

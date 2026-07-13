@@ -189,6 +189,21 @@ void main() {
       await res.drain<void>();
     },
   );
+
+  test('serves normalized in-memory subtitles with Range support', () async {
+    final subtitle = Uint8List.fromList('Chinese subtitle'.codeUnits);
+    final subtitleUrl = proxy.urlForBytes(
+      subtitle,
+      displayName: 'movie.zh-CN.srt',
+    );
+    final res = await request(subtitleUrl, range: 'bytes=8-15');
+    expect(res.statusCode, 206);
+    expect(
+      res.headers.value(HttpHeaders.contentTypeHeader),
+      'application/x-subrip; charset=utf-8',
+    );
+    expect(await _collect(res), subtitle.sublist(8, 16));
+  });
 }
 
 Future<Uint8List> _collect(HttpClientResponse res) async {

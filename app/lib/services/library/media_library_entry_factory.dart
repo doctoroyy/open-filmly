@@ -163,7 +163,7 @@ class MediaLibraryEntryFactory {
     final year = _extractYear(logicalPath);
 
     if (type == MediaType.tv) {
-      final showId = _tvShowId(title, year);
+      final showId = _tvShowId(title);
       final media = Media(
         id: showId,
         title: title,
@@ -206,8 +206,11 @@ class MediaLibraryEntryFactory {
     final smbUri = 'smb://${config.host}${_ensureLeadingSlash(file.path)}';
 
     if (type == MediaType.tv) {
-      final showId =
-          'smb://${config.host}/${_tvShowDirectoryFromPath(logicalPath)}';
+      final showId = _sourceScopedTvShowId(
+        'smb',
+        '${config.host.toLowerCase()}|${file.share.toLowerCase()}',
+        title,
+      );
       final media = Media(
         id: showId,
         title: title,
@@ -353,7 +356,11 @@ class MediaLibraryEntryFactory {
 
     if (type == MediaType.tv) {
       final showDir = _tvShowDirectoryFromPath(logicalPath);
-      final showId = _webDavId(baseUrl, '/$showDir');
+      final showId = _sourceScopedTvShowId(
+        'webdav',
+        baseUrl.trim().toLowerCase(),
+        title,
+      );
       final media = Media(
         id: showId,
         title: title,
@@ -657,14 +664,26 @@ class MediaLibraryEntryFactory {
     return title;
   }
 
-  static String _tvShowId(String title, String year) {
-    // Keep CJK characters and alphanumeric, replace everything else with dashes
-    final slug = title
+  static String _tvShowId(String title) => 'tv:${_tvSlug(title)}';
+
+  static String _sourceScopedTvShowId(
+    String kind,
+    String sourceScope,
+    String title,
+  ) {
+    final encodedScope = base64Url
+        .encode(utf8.encode(sourceScope))
+        .replaceAll('=', '');
+    return 'tv:$kind:$encodedScope:${_tvSlug(title)}';
+  }
+
+  static String _tvSlug(String title) {
+    // Keep CJK characters and alphanumeric, replace everything else with dashes.
+    return title
         .toLowerCase()
         .replaceAll(RegExp(r'[^\u4e00-\u9fff\u3400-\u4dbfa-z0-9]+'), '-')
         .replaceAll(RegExp(r'-+'), '-')
         .replaceAll(RegExp(r'^-|-$'), '');
-    return year.isEmpty ? 'tv:$slug' : 'tv:$slug-$year';
   }
 
   static String _tvShowDirectory(String filePath) {

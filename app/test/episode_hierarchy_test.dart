@@ -10,6 +10,8 @@ import 'package:open_filmly/data/repositories/episode_repository.dart';
 import 'package:open_filmly/data/repositories/media_repository.dart';
 import 'package:open_filmly/providers/data_providers.dart';
 import 'package:open_filmly/services/library/media_library_entry_factory.dart';
+import 'package:open_filmly/services/smb/smb_service.dart';
+import 'package:smb_connect/smb_connect.dart';
 
 void main() {
   late AppDatabase db;
@@ -69,6 +71,65 @@ void main() {
 
       expect(entry1.media.id, entry2.media.id);
       expect(entry1.episode!.id, isNot(entry2.episode!.id));
+    });
+
+    test(
+      'separate season folders with different years still share show ID',
+      () {
+        final first = MediaLibraryEntryFactory.fromLocalPath(
+          '/library/The Expanse 第一季 (2015)/The.Expanse.S01E01.mkv',
+        );
+        final second = MediaLibraryEntryFactory.fromLocalPath(
+          '/archive/The Expanse 第二季 (2017)/The.Expanse.S02E01.mkv',
+        );
+
+        expect(first.media.title, 'The Expanse');
+        expect(second.media.title, 'The Expanse');
+        expect(first.media.id, second.media.id);
+      },
+    );
+
+    test('SMB and WebDAV group seasons by source and show title', () {
+      final smbFirst = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: 'nas'),
+        file: SmbFile(
+          '/TV/Dark 第一季/Dark.S01E01.mkv',
+          r'\\nas\TV\Dark 第一季\Dark.S01E01.mkv',
+          'TV',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+      final smbSecond = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: 'nas'),
+        file: SmbFile(
+          '/Archive/Dark 第二季/Dark.S02E01.mkv',
+          r'\\nas\Archive\Dark 第二季\Dark.S02E01.mkv',
+          'TV',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+      final davFirst = MediaLibraryEntryFactory.fromWebDavFile(
+        baseUrl: 'https://dav.example.com',
+        relativePath: '/TV/Dark 第一季/Dark.S01E01.mkv',
+      );
+      final davSecond = MediaLibraryEntryFactory.fromWebDavFile(
+        baseUrl: 'https://dav.example.com',
+        relativePath: '/Archive/Dark 第二季/Dark.S02E01.mkv',
+      );
+
+      expect(smbFirst.media.id, smbSecond.media.id);
+      expect(davFirst.media.id, davSecond.media.id);
+      expect(smbFirst.media.id, isNot(davFirst.media.id));
     });
   });
 

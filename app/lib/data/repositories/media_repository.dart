@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../database/database.dart';
@@ -105,6 +107,80 @@ class MediaRepository {
             lastUpdated: now,
           ),
         );
+  }
+
+  /// Upserts a filesystem/network scan result without erasing metadata that a
+  /// previous TMDB match already attached to the same logical item.
+  Future<void> upsertScanned(Media media) async {
+    final existing = await getById(media.id);
+    if (existing == null) {
+      await upsert(media);
+      return;
+    }
+    final hasCuratedMetadata = existing.tmdbId != null;
+    await upsert(
+      media.copyWith(
+        title: hasCuratedMetadata ? existing.title : media.title,
+        year: hasCuratedMetadata && existing.year.isNotEmpty
+            ? existing.year
+            : media.year,
+        posterPath: existing.posterPath,
+        rating: existing.rating,
+        detailsJson: existing.detailsJson ?? media.detailsJson,
+        fileHash: existing.fileHash,
+        dateAdded: existing.dateAdded,
+        isFavorite: existing.isFavorite,
+      ),
+    );
+  }
+
+  /// Merges legacy path-based TV rows into [canonical]. Episodes retain their
+  /// physical file paths but now point to one logical show across season
+  /// folders. Returns the number of obsolete show rows removed.
+  Future<int> consolidateTvShow(Media canonical) async {
+    if (canonical.type != MediaType.tv) return 0;
+    final allShows = await browse(type: MediaType.tv);
+    final canonicalScope = _sourceScope(canonical);
+    final canonicalTitle = _normalizedShowTitle(canonical.title);
+    final duplicates = allShows
+        .where(
+          (item) =>
+              item.id != canonical.id &&
+              _sourceScope(item) == canonicalScope &&
+              _normalizedShowTitle(item.title) == canonicalTitle,
+        )
+        .toList(growable: false);
+    if (duplicates.isEmpty) return 0;
+
+    final candidates = [canonical, ...duplicates]
+      ..sort((a, b) => _metadataQuality(b).compareTo(_metadataQuality(a)));
+    final donor = candidates.first;
+    final canonicalSourceDetails = canonical.detailsJson;
+    await upsert(
+      canonical.copyWith(
+        title: donor.title,
+        year: donor.year.isNotEmpty ? donor.year : canonical.year,
+        posterPath: donor.posterPath ?? canonical.posterPath,
+        rating: donor.rating ?? canonical.rating,
+        detailsJson: _mergeDetails(donor.detailsJson, canonicalSourceDetails),
+        fileHash: donor.fileHash ?? canonical.fileHash,
+        dateAdded: donor.dateAdded.isNotEmpty
+            ? donor.dateAdded
+            : canonical.dateAdded,
+        isFavorite:
+            canonical.isFavorite || duplicates.any((item) => item.isFavorite),
+      ),
+    );
+
+    for (final duplicate in duplicates) {
+      await (_db.update(_db.episodes)
+            ..where((row) => row.showId.equals(duplicate.id)))
+          .write(EpisodesCompanion(showId: Value(canonical.id)));
+      await (_db.delete(
+        _db.mediaItems,
+      )..where((row) => row.id.equals(duplicate.id))).go();
+    }
+    return duplicates.length;
   }
 
   Future<void> updatePoster(String id, String posterPath) async {
@@ -260,5 +336,63 @@ class MediaRepository {
     final leftRating = double.tryParse(left ?? '') ?? -1;
     final rightRating = double.tryParse(right ?? '') ?? -1;
     return rightRating.compareTo(leftRating);
+  }
+
+  String _normalizedShowTitle(String title) => title.toLowerCase().replaceAll(
+    RegExp(r'[^\u4e00-\u9fff\u3400-\u4dbfa-z0-9]+'),
+    '',
+  );
+
+  String _sourceScope(Media media) {
+    final raw = media.detailsJson;
+    if (raw == null || raw.isEmpty) return 'local';
+    try {
+      final decoded = jsonDecode(raw);
+      final source = decoded is Map<String, dynamic> ? decoded['source'] : null;
+      if (source is! Map) return 'local';
+      final kind = source['kind']?.toString() ?? 'local';
+      return switch (kind) {
+        'smb' =>
+          'smb|${source['host']?.toString().toLowerCase() ?? ''}|'
+              '${source['share']?.toString().toLowerCase() ?? ''}',
+        'webdav' =>
+          'webdav|${source['base']?.toString().trim().toLowerCase() ?? ''}',
+        'emby' =>
+          'emby|${source['base']?.toString().trim().toLowerCase() ?? ''}',
+        _ => kind,
+      };
+    } catch (_) {
+      return 'local';
+    }
+  }
+
+  int _metadataQuality(Media media) {
+    var score = 0;
+    if (media.tmdbId != null) score += 100;
+    if (media.posterPath?.isNotEmpty == true) score += 30;
+    if (media.rating?.isNotEmpty == true) score += 10;
+    if (media.detailsJson?.isNotEmpty == true) score += 5;
+    if (media.isFavorite) score += 2;
+    return score;
+  }
+
+  String? _mergeDetails(String? donor, String? canonicalSource) {
+    Map<String, dynamic>? donorMap;
+    Map<String, dynamic>? sourceMap;
+    try {
+      final decoded = donor == null ? null : jsonDecode(donor);
+      if (decoded is Map<String, dynamic>) donorMap = decoded;
+    } catch (_) {}
+    try {
+      final decoded = canonicalSource == null
+          ? null
+          : jsonDecode(canonicalSource);
+      if (decoded is Map<String, dynamic>) sourceMap = decoded;
+    } catch (_) {}
+    if (donorMap == null && sourceMap == null) return donor ?? canonicalSource;
+    return jsonEncode({
+      ...?donorMap,
+      if (sourceMap?['source'] != null) 'source': sourceMap!['source'],
+    });
   }
 }

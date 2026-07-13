@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_vlc_player/flutter_vlc_player.dart';
 
+import 'subtitle_text_normalizer.dart';
+
 class PlaybackAudioTrack {
   const PlaybackAudioTrack({required this.id, this.title, this.language});
 
@@ -85,6 +87,7 @@ class PlaybackService {
   int? _viewId;
   _PendingOpen? _pendingOpen;
   Timer? _pollTimer;
+  Timer? _mobileTrackRefreshTimer;
   bool _refreshing = false;
   bool _disposed = false;
 
@@ -100,6 +103,9 @@ class PlaybackService {
   PlaybackAudioTrack _currentAudioTrack = PlaybackAudioTrack.no();
   PlaybackSubtitleTrack _currentSubtitleTrack = PlaybackSubtitleTrack.no();
   VlcPlayerController? _mobileController;
+  final Map<String, File> _normalizedSubtitleFiles = {};
+  int _mobileAudioTrackCount = -1;
+  int _mobileSubtitleTrackCount = -1;
 
   PlaybackService() {
     _channel.setMethodCallHandler(_handleNativeEvent);
@@ -246,9 +252,9 @@ class PlaybackService {
         if (uri.startsWith('http://') || uri.startsWith('https://')) {
           await mobile.addSubtitleFromNetwork(uri);
         } else {
-          await mobile.addSubtitleFromFile(
-            File(Uri.tryParse(uri)?.toFilePath() ?? uri),
-          );
+          final source = File(Uri.tryParse(uri)?.toFilePath() ?? uri);
+          final normalized = await _normalizeLocalSubtitle(source);
+          await mobile.addSubtitleFromFile(normalized);
         }
       } else {
         await mobile.setSpuTrack(int.tryParse(track.id) ?? -1);
@@ -281,6 +287,7 @@ class PlaybackService {
   void dispose() {
     _disposed = true;
     _pollTimer?.cancel();
+    _mobileTrackRefreshTimer?.cancel();
     unawaited(_invoke('dispose'));
     _positionController.close();
     _durationController.close();
@@ -297,6 +304,27 @@ class PlaybackService {
     mobileController.value = null;
     mobileController.dispose();
     if (mobile != null) unawaited(mobile.dispose());
+    for (final file in _normalizedSubtitleFiles.values) {
+      unawaited(file.delete().catchError((_) => file));
+    }
+    _normalizedSubtitleFiles.clear();
+  }
+
+  Future<File> _normalizeLocalSubtitle(File source) async {
+    final cached = _normalizedSubtitleFiles[source.path];
+    if (cached != null && await cached.exists()) return cached;
+    final bytes = await source.readAsBytes();
+    final normalized = SubtitleTextNormalizer.toUtf8(bytes);
+    final safeName = source.uri.pathSegments.isEmpty
+        ? 'subtitle.srt'
+        : source.uri.pathSegments.last;
+    final target = File(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'open-filmly-${source.path.hashCode}-$safeName',
+    );
+    await target.writeAsBytes(normalized, flush: false);
+    _normalizedSubtitleFiles[source.path] = target;
+    return target;
   }
 
   bool get _isMobile =>
@@ -313,8 +341,9 @@ class PlaybackService {
 
     final options = VlcPlayerOptions(
       advanced: VlcAdvancedOptions([
-        VlcAdvancedOptions.networkCaching(8000),
+        VlcAdvancedOptions.networkCaching(12000),
         VlcAdvancedOptions.fileCaching(3000),
+        VlcAdvancedOptions.clockJitter(0),
       ]),
       http: VlcHttpOptions([
         VlcHttpOptions.httpReconnect(true),
@@ -322,6 +351,21 @@ class PlaybackService {
           VlcHttpOptions.httpUserAgent(userAgent),
       ]),
       extras: _mobileHeaderOptions(pending.httpHeaders),
+      video: VlcVideoOptions([
+        VlcVideoOptions.dropLateFrames(true),
+        VlcVideoOptions.skipFrames(true),
+      ]),
+      subtitle: VlcSubtitleOptions([
+        VlcSubtitleOptions.font(
+          defaultTargetPlatform == TargetPlatform.android
+              ? 'Noto Sans CJK SC'
+              : 'PingFang SC',
+        ),
+        VlcSubtitleOptions.relativeFontSize(18),
+        VlcSubtitleOptions.backgroundOpacity(72),
+        VlcSubtitleOptions.outlineOpacity(255),
+        VlcSubtitleOptions.outlineThickness(VlcSubtitleThickness.normal),
+      ]),
     );
     final uri = pending.uri;
     final controller = uri.startsWith('http://') || uri.startsWith('https://')
@@ -337,8 +381,10 @@ class PlaybackService {
       if (startAt != null && startAt > Duration.zero) {
         unawaited(controller.seekTo(startAt));
       }
-      unawaited(_refreshMobileTracks());
+      _scheduleMobileTrackRefresh(const Duration(milliseconds: 250));
     });
+    _mobileAudioTrackCount = -1;
+    _mobileSubtitleTrackCount = -1;
     _mobileController = controller;
     mobileController.value = controller;
   }
@@ -364,7 +410,9 @@ class PlaybackService {
     _duration = value.duration;
     _playing = value.isPlaying;
     _completed = value.isEnded;
-    _buffering = value.isBuffering;
+    // VLC can keep the buffering flag set while decoded frames are already
+    // playing. Do not leave a loading spinner over healthy playback.
+    _buffering = value.isBuffering && !value.isPlaying;
     _volume = value.volume.toDouble();
     _rate = value.playbackSpeed;
     _positionController.add(_position);
@@ -379,6 +427,20 @@ class PlaybackService {
     if (value.hasError && value.errorDescription.isNotEmpty) {
       _errorController.add(value.errorDescription);
     }
+
+    if (value.audioTracksCount != _mobileAudioTrackCount ||
+        value.spuTracksCount != _mobileSubtitleTrackCount) {
+      _mobileAudioTrackCount = value.audioTracksCount;
+      _mobileSubtitleTrackCount = value.spuTracksCount;
+      _scheduleMobileTrackRefresh(const Duration(milliseconds: 180));
+    }
+  }
+
+  void _scheduleMobileTrackRefresh(Duration delay) {
+    _mobileTrackRefreshTimer?.cancel();
+    _mobileTrackRefreshTimer = Timer(delay, () {
+      if (!_disposed) unawaited(_refreshMobileTracks());
+    });
   }
 
   Future<void> _refreshMobileTracks() async {

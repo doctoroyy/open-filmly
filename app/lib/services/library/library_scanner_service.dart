@@ -49,6 +49,7 @@ class LibraryScannerService {
     var episodeCount = 0;
     var missingFolders = 0;
     final mediaIds = <String>[];
+    final scannedShows = <String, Media>{};
 
     for (final root in roots) {
       final dir = Directory(root);
@@ -68,7 +69,7 @@ class LibraryScannerService {
 
         scannedFiles++;
         final entry = MediaLibraryEntryFactory.fromLocalPath(entity.path);
-        await _repo.upsert(entry.media);
+        await _repo.upsertScanned(entry.media);
         importedItems++;
         mediaIds.add(entry.media.id);
 
@@ -83,11 +84,16 @@ class LibraryScannerService {
             break;
           case MediaType.tv:
             tvCount++;
+            scannedShows[entry.media.id] = entry.media;
             break;
           case MediaType.unknown:
             break;
         }
       }
+    }
+
+    for (final show in scannedShows.values) {
+      await _repo.consolidateTvShow(show);
     }
 
     return LibraryScanResult(

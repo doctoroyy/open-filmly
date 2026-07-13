@@ -14,6 +14,7 @@ dependencies:
   flutter_riverpod: ^3.3.1
   go_router: ^17.2.3
   http: ^1.6.0
+  charset: ^2.0.1
   path: ^1.9.1
   path_provider: ^2.1.5
   smb_connect:
@@ -31,6 +32,7 @@ dependencies:
   flutter_vlc_player:
     path: packages/flutter_vlc_player
   native_glass_navbar: ^1.0.2
+  cupertino_native_better: ^1.5.2
 dev_dependencies:
   flutter_test:
     sdk: flutter

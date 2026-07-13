@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:charset/charset.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/data/models/media.dart';
 import 'package:open_filmly/services/library/media_library_entry_factory.dart';
@@ -16,7 +18,7 @@ void main() {
   late SmbProxyServer proxy;
   late PlaybackSourceResolver resolver;
   final bytes = Uint8List.fromList(List<int>.generate(256, (i) => i));
-  final subtitleBytes = Uint8List.fromList('subtitle'.codeUnits);
+  final subtitleBytes = Uint8List.fromList(gbk.encode('中文字幕'));
 
   setUp(() async {
     smb = FakeSmbService(
@@ -74,7 +76,7 @@ void main() {
     await for (final chunk in subtitleResponse) {
       subtitleBody.add(chunk);
     }
-    expect(subtitleBody.takeBytes(), subtitleBytes);
+    expect(utf8.decode(subtitleBody.takeBytes()), '中文字幕');
     client.close(force: true);
   });
 
@@ -107,13 +109,16 @@ void main() {
   });
 
   test('resolves WebDAV media into an authed HTTP URL', () async {
-    final dav = _FakeWebDavService(const [
-      WebDavEntry(
-        name: 'Dune 2021.zh-CN.srt',
-        path: '/Movies/Dune 2021.zh-CN.srt',
-        isDir: false,
-      ),
-    ]);
+    final dav = _FakeWebDavService(
+      const [
+        WebDavEntry(
+          name: 'Dune 2021.zh-CN.srt',
+          path: '/Movies/Dune 2021.zh-CN.srt',
+          isDir: false,
+        ),
+      ],
+      fileData: {'/Movies/Dune 2021.zh-CN.srt': gbk.encode('WebDAV 中文字幕')},
+    );
     final resolverWithDav = PlaybackSourceResolver(
       smb,
       proxy,
@@ -135,17 +140,26 @@ void main() {
     expect(source.httpHeaders, isNotNull);
     expect(source.httpHeaders!['Authorization'], startsWith('Basic '));
     expect(source.subtitles, hasLength(1));
-    expect(
-      source.subtitles.single.uri,
-      'https://dav.example.com/dav/Movies/Dune%202021.zh-CN.srt',
+    expect(source.subtitles.single.uri, startsWith('http://127.0.0.1:'));
+    final client = HttpClient();
+    final subtitleRequest = await client.getUrl(
+      Uri.parse(source.subtitles.single.uri),
     );
+    final subtitleResponse = await subtitleRequest.close();
+    final subtitleBody = BytesBuilder();
+    await for (final chunk in subtitleResponse) {
+      subtitleBody.add(chunk);
+    }
+    expect(utf8.decode(subtitleBody.takeBytes()), 'WebDAV 中文字幕');
+    client.close(force: true);
   });
 }
 
 class _FakeWebDavService extends WebDavService {
-  _FakeWebDavService(this.entries);
+  _FakeWebDavService(this.entries, {this.fileData = const {}});
 
   final List<WebDavEntry> entries;
+  final Map<String, List<int>> fileData;
   WebDavConfig? _activeConfig;
 
   @override
@@ -161,4 +175,7 @@ class _FakeWebDavService extends WebDavService {
 
   @override
   Future<List<WebDavEntry>> listDir([String dirPath = '/']) async => entries;
+
+  @override
+  Future<List<int>> readBytes(String path) async => fileData[path] ?? const [];
 }

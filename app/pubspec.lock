@@ -138,7 +138,7 @@ packages:
     source: hosted
     version: "1.4.0"
   charset:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: charset
       sha256: "27802032a581e01ac565904ece8c8962564b1070690794f0072f6865958ce8b9"
@@ -241,6 +241,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.9"
+  cupertino_native_better:
+    dependency: "direct main"
+    description:
+      name: cupertino_native_better
+      sha256: "1bfecf668ced3962951d65b516a744093c4cc9663ed2aeea96d27764b41b52bd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.5.2"
   dart_style:
     dependency: transitive
     description:

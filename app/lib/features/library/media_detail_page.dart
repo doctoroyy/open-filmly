@@ -1,9 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/formatters/rating_formatter.dart';
+import '../../core/platform/platform_capabilities.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/media.dart';
 import '../../data/models/playback_progress.dart';
@@ -804,21 +806,23 @@ class _Hero extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           _background(),
-          // Scrim: fade bottom into light gray content background.
+          // Keep both navigation controls and metadata readable regardless of
+          // whether the artwork itself is bright or dark. The final stop still
+          // dissolves into the light content background below the hero.
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(
-                    0x1F000000,
-                  ), // Very subtle top darkening for status/buttons visibility
+                  Color(0x66000000),
                   Color(0x00000000),
-                  Color(0x66F3F3F6),
-                  Color(0xFFF3F3F6), // Fully dissolves into scaffold background
+                  Color(0x66000000),
+                  Color(0xD9000000),
+                  Color(0xD9000000),
+                  Color(0xFFF3F3F6),
                 ],
-                stops: [0, 0.35, 0.72, 1],
+                stops: [0, 0.28, 0.5, 0.74, 0.94, 1],
               ),
             ),
           ),
@@ -862,11 +866,18 @@ class _Hero extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: FilmlyPalette.textPrimary,
+                    color: Colors.white,
                     fontSize: 34,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.6,
                     height: 1.1,
+                    shadows: [
+                      Shadow(
+                        color: Color(0x99000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
                   ),
                 ),
                 if (meta.isNotEmpty) ...[
@@ -874,9 +885,10 @@ class _Hero extends StatelessWidget {
                   Text(
                     meta,
                     style: const TextStyle(
-                      color: FilmlyPalette.textSecondary,
+                      color: Colors.white70,
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
+                      shadows: [Shadow(color: Colors.black, blurRadius: 8)],
                     ),
                   ),
                 ],
@@ -902,10 +914,7 @@ class _Hero extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     '上次播放到 $progressLabel',
-                    style: const TextStyle(
-                      color: FilmlyPalette.textMuted,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Colors.white60, fontSize: 12),
                   ),
                 ],
                 if (media.overview != null && media.overview!.isNotEmpty) ...[
@@ -917,9 +926,10 @@ class _Hero extends StatelessWidget {
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: FilmlyPalette.textSecondary,
+                        color: Colors.white70,
                         fontSize: 13.5,
                         height: 1.55,
+                        shadows: [Shadow(color: Colors.black, blurRadius: 8)],
                       ),
                     ),
                   ),
@@ -975,10 +985,10 @@ class _Hero extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(
           color: filled
-              ? FilmlyPalette.primary.withValues(alpha: enabled ? 1 : 0.4)
-              : Colors.black.withValues(alpha: 0.05),
+              ? Colors.white.withValues(alpha: enabled ? 0.96 : 0.45)
+              : Colors.black.withValues(alpha: 0.34),
           borderRadius: BorderRadius.circular(12),
-          border: filled ? null : Border.all(color: FilmlyPalette.divider),
+          border: filled ? null : Border.all(color: Colors.white38),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -986,13 +996,13 @@ class _Hero extends StatelessWidget {
             Icon(
               filled ? Icons.play_arrow_rounded : Icons.restart_alt_rounded,
               size: 20,
-              color: filled ? Colors.white : FilmlyPalette.textPrimary,
+              color: filled ? FilmlyPalette.textPrimary : Colors.white,
             ),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: filled ? Colors.white : FilmlyPalette.textPrimary,
+                color: filled ? FilmlyPalette.textPrimary : Colors.white,
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
@@ -1018,16 +1028,36 @@ class _HeroIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (PlatformCapabilities.isIOS) {
+      return SizedBox.square(
+        dimension: 40,
+        child: CNButton.icon(
+          customIcon: icon,
+          tint: tint ?? Colors.white,
+          onPressed: onTap,
+          config: const CNButtonConfig(
+            style: CNButtonStyle.glass,
+            width: 40,
+            minHeight: 40,
+            padding: EdgeInsets.zero,
+            borderRadius: 20,
+            customIconSize: 20,
+            glassEffectUnionId: 'detail-hero-actions',
+          ),
+        ),
+      );
+    }
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: 38,
         height: 38,
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.05),
+          color: Colors.black.withValues(alpha: 0.32),
           shape: BoxShape.circle,
+          border: Border.all(color: Colors.white24),
         ),
-        child: Icon(icon, color: tint ?? FilmlyPalette.textPrimary, size: 22),
+        child: Icon(icon, color: tint ?? Colors.white, size: 22),
       ),
     );
   }

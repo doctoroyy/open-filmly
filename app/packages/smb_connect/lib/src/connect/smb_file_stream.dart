@@ -17,12 +17,19 @@ import 'package:smb_connect/src/smb_constants.dart';
 
 int openReadNextNum = 0;
 
+// Video playback regularly requests multi-megabyte HTTP ranges. The upstream
+// package used a 0xFFF (4 KiB) output buffer, which forced every range through
+// thousands of sequential SMB round trips. Keep the stream incremental, but
+// read enough data per iteration to let SMB2 and a LAN connection reach their
+// actual throughput.
+const int _streamReadBufferSize = 1024 * 1024;
+
 Stream<Uint8List> smbOpenRead(
     SmbFile file, SmbTree tree, Uint8List? fileId, int fid, int start,
     [int? length]) async* {
   // int openReadNum = openReadNextNum++;
   length = length ?? (file.size - start);
-  var buffSize = min(length, 0xFFF);
+  var buffSize = min(length, _streamReadBufferSize);
   var position = 0;
   Uint8List buff = Uint8List(buffSize);
   try {
@@ -31,11 +38,8 @@ Stream<Uint8List> smbOpenRead(
       var readLen = min(buff.length, remain);
       var res = await smbReadFromFile(
           file, tree, fileId, fid, buff, position + start, 0, readLen);
-      if (readLen == buff.length) {
-        yield buff;
-      } else {
-        yield Uint8List.view(buff.buffer, 0, readLen);
-      }
+      if (res <= 0) break;
+      yield Uint8List.fromList(Uint8List.sublistView(buff, 0, res));
       position += res;
     } while (position < length);
   } finally {
@@ -46,7 +50,7 @@ Stream<Uint8List> smbOpenRead(
 void readAsync(SmbFile file, SmbTree tree, Uint8List? fileId, int fid,
     int start, int? length, StreamController<Uint8List> controller) async {
   length ??= (file.size - start);
-  var buffSize = min(length, 0xFFF);
+  var buffSize = min(length, _streamReadBufferSize);
   // int index = 0;
   var position = 0;
   Uint8List buff = Uint8List(buffSize);
@@ -56,12 +60,8 @@ void readAsync(SmbFile file, SmbTree tree, Uint8List? fileId, int fid,
       var readLen = min(buff.length, remain);
       var res = await smbReadFromFile(
           file, tree, fileId, fid, buff, start + position, 0, readLen);
-      if (readLen == buff.length) {
-        controller.add(buff);
-      } else {
-        var lastBuff = Uint8List.view(buff.buffer, 0, readLen);
-        controller.add(lastBuff);
-      }
+      if (res <= 0) break;
+      controller.add(Uint8List.fromList(Uint8List.sublistView(buff, 0, res)));
       position += res;
     } while (position < length);
   } finally {

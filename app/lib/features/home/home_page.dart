@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -279,26 +279,25 @@ class _TopBar extends StatelessWidget {
     if (Platform.isIOS) {
       return Tooltip(
         message: tooltip,
-        child: ClipOval(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-            child: CupertinoButton(
-              key: key,
-              minimumSize: const Size(36, 36),
-              padding: EdgeInsets.zero,
-              color: CupertinoColors.systemBackground
-                  .resolveFrom(context)
-                  .withValues(alpha: 0.58),
-              onPressed: onTap,
-              child: spinning
-                  ? const CupertinoActivityIndicator(radius: 9)
-                  : Icon(
-                      icon,
-                      color: CupertinoColors.label.resolveFrom(context),
-                      size: 18,
-                    ),
-            ),
-          ),
+        child: SizedBox.square(
+          dimension: 38,
+          child: spinning
+              ? const Center(child: CupertinoActivityIndicator(radius: 9))
+              : CNButton.icon(
+                  key: key,
+                  customIcon: icon,
+                  onPressed: onTap,
+                  enabled: onTap != null,
+                  config: const CNButtonConfig(
+                    style: CNButtonStyle.glass,
+                    width: 38,
+                    minHeight: 38,
+                    padding: EdgeInsets.zero,
+                    borderRadius: 19,
+                    customIconSize: 18,
+                    glassEffectUnionId: 'home-toolbar',
+                  ),
+                ),
         ),
       );
     }

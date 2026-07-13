@@ -1,6 +1,6 @@
 # Open Filmly App
 
-This directory contains the Flutter desktop client for Open Filmly.
+This directory contains the cross-platform Flutter client for Open Filmly.
 
 ## Directory map
 
@@ -13,6 +13,7 @@ This directory contains the Flutter desktop client for Open Filmly.
 - `lib/services/smb`: SMB client wrapper plus local HTTP Range proxy.
 - `macos/Runner/AppDelegate.swift`: native VLCKit bridge and window channel.
 - `windows/runner/vlc_player_win.cpp`: native Windows libVLC bridge and window channel.
+- `ios/` and `android/`: mobile runners backed by MobileVLCKit / libVLC.
 - `packages/smb_connect`: bundled SMB client package.
 - `test/`: widget, repository, metadata, source, and playback resolver tests.
 
@@ -20,23 +21,28 @@ This directory contains the Flutter desktop client for Open Filmly.
 
 ```bash
 flutter pub get
-cd macos && pod install && cd ..
 flutter run -d macos
+# flutter run -d <ios-device-id>
+# flutter run -d <android-device-id>
 ```
 
 ## Verification
 
 ```bash
-flutter analyze --no-fatal-infos --no-fatal-warnings
-flutter test
-flutter build macos --debug
+flutter analyze
+flutter test $(ls test/*.dart | grep -v integration_smb_real | grep -v ui_automation)
+flutter build ios --simulator
+flutter build apk --debug
+flutter build macos --release
 ```
 
 ## Playback
 
-Playback uses native `VLCKit` on macOS and `libVLC` on Windows. The player
-supports embedded subtitle and audio tracks, preloads with VLC network/file
-cache options, and maps double-click on the video surface to native fullscreen.
+Playback uses native `VLCKit` / `libVLC` on macOS, Windows, iOS, and Android.
+The player supports embedded audio and subtitle tracks, UTF-8-normalized local
+and network sidecar subtitles, hardware decoding, and VLC network/file cache
+options. SMB video ranges are streamed through the local proxy in large chunks
+so playback is not limited by tiny sequential reads.
 
 On Windows, install VLC from VideoLAN or bundle the VLC runtime beside
 `open_filmly.exe` under `vlc/`.

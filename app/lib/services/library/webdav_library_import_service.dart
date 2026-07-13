@@ -48,6 +48,7 @@ class WebDavLibraryImportService {
     var episodeCount = 0;
     final mediaIds = <String>[];
     final visited = <String>{};
+    final scannedShows = <String, Media>{};
 
     Future<void> walk(String dirPath) async {
       if (!visited.add(dirPath)) return;
@@ -65,7 +66,7 @@ class WebDavLibraryImportService {
           baseUrl: baseUrl,
           relativePath: entry.path,
         );
-        await _repo.upsert(libraryEntry.media);
+        await _repo.upsertScanned(libraryEntry.media);
         importedItems++;
         mediaIds.add(libraryEntry.media.id);
 
@@ -80,6 +81,7 @@ class WebDavLibraryImportService {
             break;
           case MediaType.tv:
             tvCount++;
+            scannedShows[libraryEntry.media.id] = libraryEntry.media;
             break;
           case MediaType.unknown:
             break;
@@ -88,6 +90,9 @@ class WebDavLibraryImportService {
     }
 
     await walk(rootPath);
+    for (final show in scannedShows.values) {
+      await _repo.consolidateTvShow(show);
+    }
 
     return WebDavLibraryImportResult(
       scannedFiles: scannedFiles,
