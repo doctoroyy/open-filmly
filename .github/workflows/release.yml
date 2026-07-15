@@ -121,12 +121,87 @@ jobs:
           path: app/build/Open-Filmly-${{ github.ref_name }}-windows-x64.zip
           if-no-files-found: error
 
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    needs: analyze-and-test
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Package Android APKs
+        run: |
+          cd build/app/outputs/flutter-apk
+          zip -j ../../../Open-Filmly-${{ github.ref_name }}-android-apks.zip *-release.apk
+
+      - name: Upload Android release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-filmly-android-release-asset
+          path: app/build/Open-Filmly-${{ github.ref_name }}-android-apks.zip
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    needs: analyze-and-test
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        run: cd ios && pod install
+
+      - name: Build iOS (release, no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned iOS app
+        run: ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app build/Open-Filmly-${{ github.ref_name }}-ios-unsigned.zip
+
+      - name: Upload iOS release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-filmly-ios-release-asset
+          path: app/build/Open-Filmly-${{ github.ref_name }}-ios-unsigned.zip
+          if-no-files-found: error
+
   publish-release:
     name: Publish Release
     runs-on: ubuntu-latest
     needs:
       - build-macos
       - build-windows
+      - build-android
+      - build-ios
     steps:
       - name: Download macOS asset
         uses: actions/download-artifact@v4
@@ -140,6 +215,18 @@ jobs:
           name: open-filmly-windows-release-asset
           path: build/release-assets
 
+      - name: Download Android asset
+        uses: actions/download-artifact@v4
+        with:
+          name: open-filmly-android-release-asset
+          path: build/release-assets
+
+      - name: Download iOS asset
+        uses: actions/download-artifact@v4
+        with:
+          name: open-filmly-ios-release-asset
+          path: build/release-assets
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,13 +234,15 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           macos_asset="build/release-assets/Open-Filmly-${tag}-macos.dmg"
           windows_asset="build/release-assets/Open-Filmly-${tag}-windows-x64.zip"
+          android_asset="build/release-assets/Open-Filmly-${tag}-android-apks.zip"
+          ios_asset="build/release-assets/Open-Filmly-${tag}-ios-unsigned.zip"
 
           if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${tag}" "${macos_asset}" "${windows_asset}" \
+            gh release upload "${tag}" "${macos_asset}" "${windows_asset}" "${android_asset}" "${ios_asset}" \
               --clobber \
               --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${tag}" "${macos_asset}" "${windows_asset}" \
+            gh release create "${tag}" "${macos_asset}" "${windows_asset}" "${android_asset}" "${ios_asset}" \
               --generate-notes \
               --title "${tag}" \
               --repo "${GITHUB_REPOSITORY}"

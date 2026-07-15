@@ -116,3 +116,71 @@ jobs:
           name: open-filmly-windows-release
           path: app/build/windows/x64/runner/Release/**
           if-no-files-found: error
+
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    needs: analyze-and-test
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload Android APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-filmly-android-apks
+          path: app/build/app/outputs/flutter-apk/*-release.apk
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    needs: analyze-and-test
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        run: cd ios && pod install
+
+      - name: Build iOS (release, no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned iOS app
+        run: ditto -c -k --sequesterRsrc --keepParent build/ios/iphoneos/Runner.app build/Open-Filmly-iOS-unsigned.zip
+
+      - name: Upload unsigned iOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-filmly-ios-unsigned
+          path: app/build/Open-Filmly-iOS-unsigned.zip
+          if-no-files-found: error
