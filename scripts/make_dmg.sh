@@ -10,7 +10,7 @@
 # Produces (default): build/Open-Filmly.dmg
 set -euo pipefail
 
-# Resolve the Flutter app dir (this script lives in app/scripts/).
+# Resolve the Flutter app dir (this script lives in scripts/).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$APP_DIR"

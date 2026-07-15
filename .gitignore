@@ -13,24 +13,36 @@
 *.iml
 
 # Flutter / Dart
-app/.dart_tool/
-app/.flutter-plugins-dependencies
-app/.flutter_skill_uri
-app/.pub-cache/
-app/.pub/
-app/build/
-app/coverage/
-app/**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+.flutter_skill_uri
+.pub-cache/
+.pub/
+build/
+coverage/
+**/doc/api/
+.swiftpm/
+**/ios/Flutter/.last_build_id
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
+
+# Android Studio build outputs
+/android/app/debug
+/android/app/profile
+/android/app/release
 
 # macOS Flutter build output
-app/macos/Flutter/ephemeral/
-app/macos/Pods/
-app/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/
-app/macos/Runner.xcworkspace/xcshareddata/
-app/macos/Runner.xcworkspace/xcuserdata/
-app/macos/Runner.xcodeproj/xcuserdata/
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/
+macos/Runner.xcworkspace/xcshareddata/
+macos/Runner.xcworkspace/xcuserdata/
+macos/Runner.xcodeproj/xcuserdata/
 
 # Generated release artifacts
-app/build/*.dmg
+build/*.dmg
 release/
 dist/
+.codegraph/

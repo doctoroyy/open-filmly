@@ -1,8 +1,8 @@
 # Open Filmly → Codex 交接文档
 
-> 生成时间：2026-07-11  
-> 交接方：Grok（方案 + 执行）  
-> 审阅协作：Claude Code `claude-fable-5`（方案审阅，不写代码）  
+> 生成时间：2026-07-11
+> 交接方：Grok（方案 + 执行）
+> 审阅协作：Claude Code `claude-fable-5`（方案审阅，不写代码）
 > 目标产品：对标 **网易爆米花** 的全平台媒体库（当前主攻 macOS Flutter）
 
 请先读本文，再动代码。仓库里还有大量 **未提交** 工作区改动，不要 `git reset --hard`。
@@ -43,10 +43,10 @@ HEAD: fca4808  feat: implement manual metadata re-match and auto-compensation of
 
 | 文件 | 作用 |
 |------|------|
-| `app/lib/data/models/library_shelf.dart` | 互斥媒体分类（电影/剧/动漫/综艺/演唱会/纪录/其他） |
-| `app/lib/services/playback/external_subtitle_finder.dart` | 同目录外挂字幕扫描 |
-| `app/test/library_shelf_test.dart` | 分类单测（zh-CN genre） |
-| `app/test/external_subtitle_finder_test.dart` | 外挂字幕单测 |
+| `lib/data/models/library_shelf.dart` | 互斥媒体分类（电影/剧/动漫/综艺/演唱会/纪录/其他） |
+| `lib/services/playback/external_subtitle_finder.dart` | 同目录外挂字幕扫描 |
+| `test/library_shelf_test.dart` | 分类单测（zh-CN genre） |
+| `test/external_subtitle_finder_test.dart` | 外挂字幕单测 |
 | `docs/plan-category-nav-and-wip.md` | 分类导航方案 + 审阅结论 |
 | `docs/HANDOFF_CODEX.md` | 本文 |
 
@@ -54,21 +54,21 @@ HEAD: fca4808  feat: implement manual metadata re-match and auto-compensation of
 
 | 文件 | 改了什么 |
 |------|----------|
-| `app/lib/features/player/player_page.dart` | **播放体验大改**（见 §4） |
-| `app/lib/features/shell/app_shell.dart` | 爆米花侧栏：分类导航、搜索占位、底栏收藏/来源/设置 |
-| `app/lib/core/router/app_router.dart` | 分类路由绑 `LibraryShelf` |
-| `app/lib/features/library/library_page.dart` | shelf / type 双模式浏览 |
-| `app/lib/data/repositories/media_repository.dart` | `browse(shelf:)` 内存分类过滤 |
-| `app/lib/features/library/media_detail_page.dart` | 剧集传 `showId`、单集续播 |
-| `app/lib/features/config/smb_browser_page.dart` | 预填/size>0；去掉 debug print |
+| `lib/features/player/player_page.dart` | **播放体验大改**（见 §4） |
+| `lib/features/shell/app_shell.dart` | 爆米花侧栏：分类导航、搜索占位、底栏收藏/来源/设置 |
+| `lib/core/router/app_router.dart` | 分类路由绑 `LibraryShelf` |
+| `lib/features/library/library_page.dart` | shelf / type 双模式浏览 |
+| `lib/data/repositories/media_repository.dart` | `browse(shelf:)` 内存分类过滤 |
+| `lib/features/library/media_detail_page.dart` | 剧集传 `showId`、单集续播 |
+| `lib/features/config/smb_browser_page.dart` | 预填/size>0；去掉 debug print |
 | 若干 test | 适配侧栏文案、多搜索图标、deep browse 补 DB override |
 
 **建议提交策略（给 Codex）：**
 
-1. 先 `git status` / `git diff` 确认无意外丢失  
-2. 可拆成两个 commit：  
-   - `feat(flutter): exclusive library shelves + popcorn sidebar`  
-   - `feat(flutter): player UX — buffering, external subs, episode chain`  
+1. 先 `git status` / `git diff` 确认无意外丢失
+2. 可拆成两个 commit：
+   - `feat(flutter): exclusive library shelves + popcorn sidebar`
+   - `feat(flutter): player UX — buffering, external subs, episode chain`
 3. **不要** force push；未要求则不要改 `main`
 
 ---
@@ -76,7 +76,7 @@ HEAD: fca4808  feat: implement manual metadata re-match and auto-compensation of
 ## 3. 架构速览
 
 ```text
-app/lib/
+lib/
 ├── main.dart / app.dart
 ├── core/router/app_router.dart      # go_router + ShellRoute
 ├── core/platform/window_channel.dart # macOS 全屏/最大化 MethodChannel
@@ -101,18 +101,18 @@ app/lib/
 
 **关键不变量：**
 
-1. **`MediaType`** = 文件结构语义（`movie | tv | unknown`），扫描/分集用。  
-2. **`LibraryShelf`** = 侧栏互斥分区，**纯函数**从 path + zh-CN genres 计算，**无 DB 迁移**。  
-3. **媒体 id** 经常是真实路径（含 `/`、空格、中文）→ 详情路由必须是 `/media?id=<encode>`，禁止 path segment。  
-4. 剧集播放必须用 `MediaLibraryEntryFactory.episodePlayableMedia(episode, show)` 再走 `PlaybackSourceResolver`，否则 SMB/WebDAV 打不开。  
+1. **`MediaType`** = 文件结构语义（`movie | tv | unknown`），扫描/分集用。
+2. **`LibraryShelf`** = 侧栏互斥分区，**纯函数**从 path + zh-CN genres 计算，**无 DB 迁移**。
+3. **媒体 id** 经常是真实路径（含 `/`、空格、中文）→ 详情路由必须是 `/media?id=<encode>`，禁止 path segment。
+4. 剧集播放必须用 `MediaLibraryEntryFactory.episodePlayableMedia(episode, show)` 再走 `PlaybackSourceResolver`，否则 SMB/WebDAV 打不开。
 5. 删除媒体前先删 `episodes`（外键）。
 
 ---
 
 ## 4. 播放器现状（刚做完，用户仍可能觉得「差一点」）
 
-文件：`app/lib/features/player/player_page.dart`  
-封装：`app/lib/services/playback/playback_service.dart`（media_kit）
+文件：`lib/features/player/player_page.dart`
+封装：`lib/services/playback/playback_service.dart`（media_kit）
 
 ### 4.1 已具备
 
@@ -160,12 +160,12 @@ PlayerArgs({
 
 ## 5. 分类导航（已落地，注意互斥）
 
-- 分类器：`LibraryShelfClassifier.classify(Media)`  
-- 规则优先级：路径关键字 → zh-CN genre（动画/纪录/真人秀/…）→ `MediaType`  
-- Claude 审阅强制要求：  
-  1. **不要**把「最近观看」放进 shelf enum（走 playback progress）  
-  2. **不要**依赖 `original_language`（scraper 未存）  
-  3. genre 关键字必须是 **zh-CN 实际值**  
+- 分类器：`LibraryShelfClassifier.classify(Media)`
+- 规则优先级：路径关键字 → zh-CN genre（动画/纪录/真人秀/…）→ `MediaType`
+- Claude 审阅强制要求：
+  1. **不要**把「最近观看」放进 shelf enum（走 playback progress）
+  2. **不要**依赖 `original_language`（scraper 未存）
+  3. genre 关键字必须是 **zh-CN 实际值**
   4. 一条 media **只属于一个 shelf**
 
 侧栏 IA：
@@ -202,8 +202,8 @@ flutter build macos --release
 
 **环境依赖测试（可失败，勿为修 CI 乱改业务）：**
 
-- `test/integration_smb_real_test.dart` — 需要局域网 NAS  
-- `test/ui_automation_test.dart` — 需要已运行的 app + flutter_skill VM Service  
+- `test/integration_smb_real_test.dart` — 需要局域网 NAS
+- `test/ui_automation_test.dart` — 需要已运行的 app + flutter_skill VM Service
 
 用户真实库 DB 沙箱路径示例：
 
@@ -215,10 +215,10 @@ flutter build macos --release
 
 ## 7. 协作约定（若继续双 AI）
 
-- **Grok / 执行方**：出方案、改代码、跑测试  
-- **Claude fable-5**：只审方案（`claude -p ... --permission-mode plan`），默认 model 在 `~/.claude/settings.json`  
-- 用户语言：中文  
-- 包管理：Flutter 项目用 `flutter pub`；旧 Electron 树才是 pnpm  
+- **Grok / 执行方**：出方案、改代码、跑测试
+- **Claude fable-5**：只审方案（`claude -p ... --permission-mode plan`），默认 model 在 `~/.claude/settings.json`
+- 用户语言：中文
+- 包管理：Flutter 项目用 `flutter pub`；旧 Electron 树才是 pnpm
 
 方案模板可参考：`docs/plan-category-nav-and-wip.md`。
 
@@ -228,26 +228,26 @@ flutter build macos --release
 
 ### 立即（今天）
 
-1. **阅读并保留工作区 diff**，不要覆盖未提交的 player / shelf。  
-2. `flutter test`（排除两个环境测）确认绿。  
-3. `flutter run -d macos` 人工验：  
-   - 本地电影 + 同目录 `.chs.srt`  
-   - 剧集 N/P + 播完连播  
-   - SMB 流是否缓冲/报错可读  
-4. 按用户反馈修 **播放手感** 的小问题（比开新功能重要）。  
+1. **阅读并保留工作区 diff**，不要覆盖未提交的 player / shelf。
+2. `flutter test`（排除两个环境测）确认绿。
+3. `flutter run -d macos` 人工验：
+   - 本地电影 + 同目录 `.chs.srt`
+   - 剧集 N/P + 播完连播
+   - SMB 流是否缓冲/报错可读
+4. 按用户反馈修 **播放手感** 的小问题（比开新功能重要）。
 5. 用户同意后 **commit** 工作区（建议两 commit，见 §2.2）。
 
 ### 下一里程碑（播放体验 P0/P1）
 
-1. SMB/HTTP 源外挂字幕策略  
-2. 内嵌字幕中文优先  
-3. 播放器内剧集列表面板（不必退出全屏）  
-4. 进度条章节/预览（可选）  
+1. SMB/HTTP 源外挂字幕策略
+2. 内嵌字幕中文优先
+3. 播放器内剧集列表面板（不必退出全屏）
+4. 进度条章节/预览（可选）
 
 ### 再往后（产品完整度）
 
-- l10n、自动更新（Sparkle / GitHub Releases）、Win/Linux 打包  
-- PiP  
+- l10n、自动更新（Sparkle / GitHub Releases）、Win/Linux 打包
+- PiP
 
 ---
 

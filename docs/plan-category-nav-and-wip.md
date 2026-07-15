@@ -1,9 +1,9 @@
 # Open Filmly 下一里程碑方案：爆米花式分类导航 + 收尾 WIP
 
-> 作者：Grok（方案 + 执行）  
-> 审阅方：Claude Code `claude-fable-5`  
-> 日期：2026-07-11  
-> 仓库：`/Users/xiaoyu/code/open-filmly-flutter` · 分支 `feat/flutter-refactor`  
+> 作者：Grok（方案 + 执行）
+> 审阅方：Claude Code `claude-fable-5`
+> 日期：2026-07-11
+> 仓库：`/Users/xiaoyu/code/open-filmly-flutter` · 分支 `feat/flutter-refactor`
 > 目标产品对标：网易爆米花（Mac）全功能媒体库
 
 ---
@@ -58,25 +58,25 @@ enum LibraryShelf {
 
 优先级从高到低：
 
-1. **路径启发**（导入未刮削也能分）  
-   路径/文件夹名含：`动漫|Anime|动画` → anime；`综艺|Variety` → variety；  
+1. **路径启发**（导入未刮削也能分）
+   路径/文件夹名含：`动漫|Anime|动画` → anime；`综艺|Variety` → variety；
    `演唱会|Concert|Live` → concert；`纪录片|Documentary|纪录` → documentary
 
-2. **TMDB genres + 语言启发**（`Media.genres` + details 里 original_language 若有）  
-   - genres 含 Animation/动画 **且**（日语/韩语 或 路径/标题含 anime/番）→ anime  
-   - genres 含 Documentary/纪录 → documentary  
-   - genres 含 Reality / Talk Show / 真人秀 / 脱口秀 → variety  
-   - genres 含 Music/音乐 **且** 标题/路径含 concert/live/演唱会 → concert  
+2. **TMDB genres + 语言启发**（`Media.genres` + details 里 original_language 若有）
+   - genres 含 Animation/动画 **且**（日语/韩语 或 路径/标题含 anime/番）→ anime
+   - genres 含 Documentary/纪录 → documentary
+   - genres 含 Reality / Talk Show / 真人秀 / 脱口秀 → variety
+   - genres 含 Music/音乐 **且** 标题/路径含 concert/live/演唱会 → concert
 
-3. **回落**  
-   - `MediaType.tv` → tv  
-   - `MediaType.movie` → movie  
-   - else → other  
+3. **回落**
+   - `MediaType.tv` → tv
+   - `MediaType.movie` → movie
+   - else → other
 
-**电影/电视剧页策略（推荐）**：  
-- `/movies`：`type==movie` 且 **不是** anime/documentary/concert  
-- `/tv`：`type==tv` 且 **不是** anime/variety  
-- 细分页：按 shelf 匹配  
+**电影/电视剧页策略（推荐）**：
+- `/movies`：`type==movie` 且 **不是** anime/documentary/concert
+- `/tv`：`type==tv` 且 **不是** anime/variety
+- 细分页：按 shelf 匹配
 - `/other`：未进 movie/tv/细分的 residual，或 `type==unknown`
 
 这样不会出现「动画电影既在电影又在动漫」的双挂（爆米花通常是互斥分区）。
@@ -100,7 +100,7 @@ enum LibraryShelf {
 [头像/名]  [设置⚙]
 ```
 
-- **收藏**：保留 `/favorites`；首页「我的收藏」货架 + 全局搜索可进；本轮不把收藏塞回主列表（与爆米花一致：收藏常在账号/二级）。  
+- **收藏**：保留 `/favorites`；首页「我的收藏」货架 + 全局搜索可进；本轮不把收藏塞回主列表（与爆米花一致：收藏常在账号/二级）。
 - **来源**：保留 `/sources`；首页空态与设置内入口；本轮不占侧栏主位。
 
 若审阅方认为必须侧栏可见「收藏/来源」，备选：底部账号区增加「收藏」「媒体库来源」两个小入口图标。
@@ -144,11 +144,11 @@ G. 更新 ~/Documents/open-filmly-flutter-progress.md
 ```
 
 ### 验收标准
-1. 侧栏点「动漫」等不再是空的 unknown 列表；有 genre/路径命中的条目正确出现  
-2. 电影/电视剧与细分互斥（同一部动画不会同时占满电影+动漫）  
-3. `flutter analyze` 无 error；`flutter test` 全绿  
-4. 无生产 `print` 调试日志  
-5. 收藏页、来源页仍可从首页/设置到达  
+1. 侧栏点「动漫」等不再是空的 unknown 列表；有 genre/路径命中的条目正确出现
+2. 电影/电视剧与细分互斥（同一部动画不会同时占满电影+动漫）
+3. `flutter analyze` 无 error；`flutter test` 全绿
+4. 无生产 `print` 调试日志
+5. 收藏页、来源页仍可从首页/设置到达
 
 ---
 
@@ -167,10 +167,10 @@ G. 更新 ~/Documents/open-filmly-flutter-progress.md
 
 ## 4. 请审阅方重点反馈
 
-1. **互斥分区** vs **可重叠**（动画同时出现在电影+动漫）——方案默认互斥，是否同意？  
-2. **收藏/来源**是否必须回侧栏？还是首页+设置足够？  
-3. **零迁移纯函数分类** vs **落库 category 列**——方案默认零迁移，量大时是否要落库？  
-4. 本轮范围是否过大/过小？是否应先只做 anime+documentary 两个最常见细分？  
+1. **互斥分区** vs **可重叠**（动画同时出现在电影+动漫）——方案默认互斥，是否同意？
+2. **收藏/来源**是否必须回侧栏？还是首页+设置足够？
+3. **零迁移纯函数分类** vs **落库 category 列**——方案默认零迁移，量大时是否要落库？
+4. 本轮范围是否过大/过小？是否应先只做 anime+documentary 两个最常见细分？
 5. 有无遗漏的爆米花核心体验（本轮必须做的）？
 
 ---
@@ -183,13 +183,13 @@ G. 更新 ~/Documents/open-filmly-flutter-progress.md
   2. 不依赖 `original_language`（scraper 未存该字段）；anime 靠 genres+路径/标题
   3. genre 关键字用 zh-CN 实际值
   4. 分类器单值化：每条 media 只归一个 shelf
-- 建议项：底部账号行加收藏/来源小图标；清理 print；路径表加 app/ 前缀
+- 建议项：底部账号行加收藏/来源小图标；清理 print；路径表使用仓库根目录相对路径
 - 签字：claude-fable-5 · 2026-07-11
 
 ## 6. 执行记录（Grok · 2026-07-11）
 
 已按审阅必改落地：
-- 新增 `app/lib/data/models/library_shelf.dart` + `test/library_shelf_test.dart`
+- 新增 `lib/data/models/library_shelf.dart` + `test/library_shelf_test.dart`
 - Query/Repo/Provider/LibraryPage/Router 接 shelf
 - 侧栏分类路由绑定真实 shelf；底部账号行收藏/来源/设置图标
 - 去掉 SMB debug print；首页 featured 电影/剧集改 exclusive shelf
