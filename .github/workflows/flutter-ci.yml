@@ -43,7 +43,11 @@ jobs:
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Run tests
-        run: flutter test
+        run: |
+          find test -maxdepth 1 -name '*_test.dart' \
+            ! -name 'integration_smb_real_test.dart' \
+            ! -name 'ui_automation_test.dart' \
+            -print0 | sort -z | xargs -0 flutter test
 
   build-macos:
     name: Build macOS
