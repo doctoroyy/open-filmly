@@ -279,4 +279,7 @@ void invalidateLibraryViews(WidgetRef ref) {
   ref.invalidate(recentlyWatchedMediaProvider);
   ref.invalidate(favoritesProvider);
   ref.invalidate(mediaLibraryProvider);
+  ref.invalidate(mediaBrowseProvider);
+  ref.invalidate(mediaSearchProvider);
+  ref.invalidate(episodeCountProvider);
 }

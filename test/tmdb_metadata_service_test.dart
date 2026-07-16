@@ -118,6 +118,61 @@ void main() {
     expect(details['genres'], ['Sci-Fi', 'Adventure']);
   });
 
+  test(
+    'falls back from an English recognized title to the Chinese title',
+    () async {
+      final searchedTitles = <String>[];
+      handler = (request) async {
+        if (request.uri.path == '/search/movie') {
+          final title = request.uri.queryParameters['query'] ?? '';
+          searchedTitles.add(title);
+          request.response
+            ..statusCode = 200
+            ..write(
+              jsonEncode({
+                'results': title == '狂飙'
+                    ? [
+                        {'id': 88, 'title': '狂飙', 'release_date': '2023-01-14'},
+                      ]
+                    : const [],
+              }),
+            );
+        } else if (request.uri.path == '/movie/88') {
+          request.response
+            ..statusCode = 200
+            ..write(
+              jsonEncode({
+                'id': 88,
+                'title': '狂飙',
+                'release_date': '2023-01-14',
+                'vote_average': 8.5,
+              }),
+            );
+        } else {
+          request.response.statusCode = 404;
+        }
+        await request.response.close();
+      };
+
+      const media = Media(
+        id: '/tv/狂飙',
+        title: '狂飙',
+        year: '2023',
+        type: MediaType.movie,
+        path: '/tv/狂飙',
+      );
+
+      final payload = await tmdb.fetchMetadata(
+        media,
+        'demo-key',
+        searchTitle: 'The Knockout',
+      );
+
+      expect(payload?.title, '狂飙');
+      expect(searchedTitles, containsAllInOrder(['The Knockout', '狂飙']));
+    },
+  );
+
   test('sync service updates repository items from TMDB responses', () async {
     handler = (request) async {
       if (request.uri.path == '/search/movie') {

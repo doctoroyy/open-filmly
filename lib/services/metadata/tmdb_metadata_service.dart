@@ -98,26 +98,37 @@ class TmdbMetadataService {
       MediaType.tv => [MediaType.tv],
       MediaType.unknown => [MediaType.movie, MediaType.tv],
     };
+    final searchTitles = <String>[];
+    for (final title in [searchTitle, media.title]) {
+      final normalized = title?.trim() ?? '';
+      if (normalized.isEmpty) continue;
+      final alreadyAdded = searchTitles.any(
+        (candidate) => candidate.toLowerCase() == normalized.toLowerCase(),
+      );
+      if (!alreadyAdded) searchTitles.add(normalized);
+    }
 
     for (final type in searchTypes) {
-      final searchResult = await _search(
-        type,
-        media,
-        apiKey,
-        titleOverride: searchTitle,
-        yearOverride: searchYear,
-      );
-      if (searchResult == null) continue;
+      for (final title in searchTitles) {
+        final searchResult = await _search(
+          type,
+          media,
+          apiKey,
+          titleOverride: title,
+          yearOverride: searchYear,
+        );
+        if (searchResult == null) continue;
 
-      final details = await _details(type, searchResult['id'], apiKey);
-      if (details == null) continue;
+        final details = await _details(type, searchResult['id'], apiKey);
+        if (details == null) continue;
 
-      return _mapPayload(
-        media,
-        type,
-        searchResult: searchResult,
-        details: details,
-      );
+        return _mapPayload(
+          media,
+          type,
+          searchResult: searchResult,
+          details: details,
+        );
+      }
     }
 
     return null;

@@ -6,11 +6,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/core/router/app_router.dart';
 import 'package:open_filmly/data/database/database.dart';
 import 'package:open_filmly/data/models/media.dart';
+import 'package:open_filmly/data/models/library_shelf.dart';
 import 'package:open_filmly/data/models/playback_progress.dart';
 import 'package:open_filmly/data/repositories/media_repository.dart';
 import 'package:open_filmly/data/repositories/playback_progress_repository.dart';
+import 'package:open_filmly/features/library/library_page.dart';
 import 'package:open_filmly/providers/data_providers.dart';
 import 'package:open_filmly/widgets/media_poster_card.dart';
+
+class _LibraryInvalidationHarness extends ConsumerWidget {
+  const _LibraryInvalidationHarness();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return MaterialApp(
+      home: Column(
+        children: [
+          TextButton(
+            key: const Key('invalidate_library_views'),
+            onPressed: () => invalidateLibraryViews(ref),
+            child: const Text('刷新媒体库'),
+          ),
+          const Expanded(child: LibraryPage(shelf: LibraryShelf.movie)),
+        ],
+      ),
+    );
+  }
+}
 
 void main() {
   late AppDatabase db;
@@ -202,6 +224,44 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.byType(MediaPosterCard), findsOneWidget);
+  });
+
+  testWidgets('metadata refresh updates an already-mounted library page', (
+    tester,
+  ) async {
+    await repo.upsert(
+      const Media(
+        id: 'movie-1',
+        title: '旧标题',
+        year: '2026',
+        type: MediaType.movie,
+        path: '/movies/movie-1.mkv',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: const _LibraryInvalidationHarness(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('旧标题'), findsWidgets);
+
+    await repo.upsert(
+      const Media(
+        id: 'movie-1',
+        title: '校正后的标题',
+        year: '2026',
+        type: MediaType.movie,
+        path: '/movies/movie-1.mkv',
+      ),
+    );
+    await tester.tap(find.byKey(const Key('invalidate_library_views')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('校正后的标题'), findsWidgets);
+    expect(find.text('旧标题'), findsNothing);
   });
 
   testWidgets('detail page shows resume action when progress exists', (
