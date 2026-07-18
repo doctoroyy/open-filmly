@@ -342,8 +342,14 @@ class MediaLibraryEntryFactory {
 
       final host = source['host']?.toString() ?? '';
       final sourcePath = source['path']?.toString() ?? '';
+      // Share may be empty on older rows; path alone is enough to stream when
+      // it already includes the share segment (e.g. `/wd-downloads/...`).
       final share = source['share']?.toString() ?? '';
-      if (host.isEmpty || sourcePath.isEmpty || share.isEmpty) return null;
+      if (host.isEmpty || sourcePath.isEmpty) return null;
+      // Reject non-file placeholders left by legacy fake episodes.
+      if (sourcePath.startsWith('tv:') || sourcePath.startsWith('webdav:')) {
+        return null;
+      }
 
       return SmbMediaSource(
         host: host,
@@ -355,6 +361,29 @@ class MediaLibraryEntryFactory {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Picks the most playable SMB path for an episode (real file URI/path over
+  /// show-id placeholders like `tv:smb:…:s09` left by older default episodes).
+  static String _episodeSmbFilePath(Episode episode) {
+    final candidates = <String>[
+      episode.path,
+      if (episode.fullPath != null) episode.fullPath!,
+    ];
+    for (final candidate in candidates) {
+      final value = candidate.trim();
+      if (value.isEmpty) continue;
+      if (value.startsWith('tv:') || value.startsWith('webdav:')) continue;
+      if (value.startsWith('smb://')) return value;
+      if (isVideoPath(value)) return value;
+    }
+    for (final candidate in candidates) {
+      final value = candidate.trim();
+      if (value.isEmpty) continue;
+      if (value.startsWith('tv:') || value.startsWith('webdav:')) continue;
+      return value;
+    }
+    return episode.fullPath ?? episode.path;
   }
 
   /// Builds a library entry from a WebDAV file. [relativePath] is the file's
@@ -512,6 +541,7 @@ class MediaLibraryEntryFactory {
   static Media episodePlayableMedia(Episode episode, Media show) {
     final smb = smbSourceFor(show);
     if (smb != null) {
+      final filePath = _episodeSmbFilePath(episode);
       return Media(
         id: episode.id,
         title: episode.title,
@@ -523,7 +553,7 @@ class MediaLibraryEntryFactory {
           'source': {
             'kind': 'smb',
             'host': smb.host,
-            'path': episode.fullPath ?? episode.path,
+            'path': filePath,
             'share': smb.share,
             'domain': smb.domain,
             'username': smb.username,

@@ -95,17 +95,43 @@ void main() {
     expect(source.httpHeaders, isNull);
   });
 
-  test('throws when SMB media is not connected', () async {
+  test('throws when SMB media is not connected and no credentials saved', () async {
     final entry = MediaLibraryEntryFactory.fromSmbFile(
       config: const SmbConfig(host: 'nas', username: 'guest'),
       file: smbFile('/Media/Movies/Dune.2021.1080p.mkv', size: bytes.length),
     );
     await smb.disconnect();
 
+    // No smbConfig callback — cannot recover the session.
     await expectLater(
       resolver.resolve(entry.media),
-      throwsA(isA<StateError>()),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('SMB source is not connected'),
+        ),
+      ),
     );
+  });
+
+  test('auto-reconnects SMB from saved credentials after disconnect', () async {
+    final entry = MediaLibraryEntryFactory.fromSmbFile(
+      config: const SmbConfig(host: 'nas', username: 'guest'),
+      file: smbFile('/Media/Movies/Dune.2021.1080p.mkv', size: bytes.length),
+    );
+    await smb.disconnect();
+
+    final reconnecting = PlaybackSourceResolver(
+      smb,
+      proxy,
+      smbConfig: () =>
+          const SmbConfig(host: 'nas', username: 'guest', password: 'secret'),
+    );
+
+    final source = await reconnecting.resolve(entry.media);
+    expect(smb.isConnected, isTrue);
+    expect(source.uri, startsWith('http://127.0.0.1:'));
   });
 
   test('resolves WebDAV media into an authed HTTP URL', () async {

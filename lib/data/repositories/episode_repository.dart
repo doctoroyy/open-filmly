@@ -112,6 +112,11 @@ class EpisodeRepository {
     )..where((t) => t.showId.equals(showId))).go();
   }
 
+  /// Deletes a single episode row by id.
+  Future<void> deleteById(String id) async {
+    await (_db.delete(_db.episodes)..where((t) => t.id.equals(id))).go();
+  }
+
   Episode _toDomain(EpisodeRow row) => Episode(
     id: row.id,
     showId: row.showId,

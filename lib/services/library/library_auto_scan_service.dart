@@ -61,6 +61,7 @@ class LibraryAutoScanService {
     // re-derive dirty titles. Runs even when no local folders are set, so it
     // also cleans SMB/WebDAV imports.
     final purged = await _purgeJunk();
+    final fakeEps = await _purgeFakeEpisodes();
     final retitled = await _retitleDirtyTitles();
     // Reunite TV seasons that older parsers split into one-show-per-season
     // (e.g. `S01.第一季` → title "S01"). Safe / idempotent.
@@ -68,7 +69,7 @@ class LibraryAutoScanService {
 
     if (!config.autoScanOnStartup || config.selectedFolders.isEmpty) {
       return AutoScanResult.skipped(
-        retitledItems: retitled + purged + repaired,
+        retitledItems: retitled + purged + fakeEps + repaired,
       );
     }
 
@@ -94,7 +95,7 @@ class LibraryAutoScanService {
       scannedFiles: scanResult.scannedFiles,
       importedItems: scanResult.importedItems,
       enrichedItems: enriched,
-      retitledItems: retitled + purged + repaired,
+      retitledItems: retitled + purged + fakeEps + repaired,
       skipped: false,
     );
   }
@@ -112,6 +113,36 @@ class LibraryAutoScanService {
       }
     }
     return purged;
+  }
+
+  /// Drops placeholder episodes whose path is a media id (`tv:smb:…`) rather
+  /// than a real video file — leftovers from older default-episode injection
+  /// and show consolidation.
+  Future<int> _purgeFakeEpisodes() async {
+    final episodeRepo = _episodeRepo;
+    if (episodeRepo == null) return 0;
+    final shows = await _repo.browse(type: MediaType.tv);
+    var removed = 0;
+    for (final show in shows) {
+      final episodes = await episodeRepo.getByShow(show.id);
+      for (final episode in episodes) {
+        final path = (episode.path).trim();
+        final full = (episode.fullPath ?? '').trim();
+        final looksFake =
+            path.startsWith('tv:') ||
+            full.startsWith('tv:') ||
+            (!MediaLibraryEntryFactory.isVideoPath(path) &&
+                !path.startsWith('smb://') &&
+                !path.startsWith('/') &&
+                !MediaLibraryEntryFactory.isVideoPath(full) &&
+                !full.startsWith('smb://') &&
+                !full.startsWith('/'));
+        if (!looksFake) continue;
+        await episodeRepo.deleteById(episode.id);
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /// Re-derives titles from filenames for entries without TMDB metadata, so

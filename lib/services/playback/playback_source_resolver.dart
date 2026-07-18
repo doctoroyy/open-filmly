@@ -38,6 +38,7 @@ class PlaybackSourceResolver {
   PlaybackSourceResolver(
     this._smb,
     this._proxy, {
+    this.smbConfig,
     this.webDavConfig,
     this.webDav,
     this.emby,
@@ -46,6 +47,10 @@ class PlaybackSourceResolver {
 
   final SmbService _smb;
   final SmbProxyServer _proxy;
+
+  /// Looks up stored SMB credentials at playback time so a cold start can
+  /// re-establish the session without forcing the user through the browser UI.
+  final SmbConfig? Function()? smbConfig;
 
   /// Looks up the current WebDAV credentials at playback time (may be null).
   final WebDavConfig? Function()? webDavConfig;
@@ -61,19 +66,12 @@ class PlaybackSourceResolver {
   Future<PlaybackSource> resolve(Media media) async {
     final smbSource = MediaLibraryEntryFactory.smbSourceFor(media);
     if (smbSource != null) {
-      final config = _smb.config;
-      if (!_smb.isConnected || config == null) {
-        throw StateError('SMB source is not connected');
-      }
-      if (config.host.toLowerCase() != smbSource.host.toLowerCase()) {
-        throw StateError(
-          'SMB source requires ${smbSource.host}, but the current connection is ${config.host}',
-        );
-      }
+      await _ensureSmbConnected(smbSource);
       await _proxy.start();
-      final subtitles = await _findSmbSubtitles(smbSource.path);
+      final playPath = _normalizeSmbPlayPath(smbSource.path);
+      final subtitles = await _findSmbSubtitles(playPath);
       return PlaybackSource(
-        _proxy.urlFor(smbSource.path, displayName: p.basename(smbSource.path)),
+        _proxy.urlFor(playPath, displayName: p.basename(playPath)),
         subtitles: subtitles,
       );
     }
@@ -126,6 +124,71 @@ class PlaybackSourceResolver {
       return PlaybackSource(media.path);
     }
     throw StateError('No playable source available for this media item');
+  }
+
+  /// Reconnects to the SMB host required by [source], using stored credentials
+  /// after an app restart (mirrors Emby lazy connect).
+  Future<void> _ensureSmbConnected(SmbMediaSource source) async {
+    final active = _smb.config;
+    if (_smb.isConnected &&
+        active != null &&
+        active.host.toLowerCase() == source.host.toLowerCase()) {
+      return;
+    }
+
+    final stored = smbConfig?.call();
+    if (stored == null || stored.host.trim().isEmpty) {
+      throw StateError('SMB source is not connected');
+    }
+
+    final host = source.host.isNotEmpty ? source.host : stored.host;
+    if (host.isEmpty) {
+      throw StateError('SMB source is not connected');
+    }
+    if (stored.host.toLowerCase() != host.toLowerCase()) {
+      // Stored credentials belong to a different NAS — don't silently use them.
+      throw StateError(
+        'SMB source requires $host, but saved credentials are for ${stored.host}',
+      );
+    }
+
+    final username = stored.username.isNotEmpty
+        ? stored.username
+        : (source.username.isNotEmpty ? source.username : 'guest');
+    final domain = stored.domain.isNotEmpty ? stored.domain : source.domain;
+
+    try {
+      await _smb.connect(
+        SmbConfig(
+          host: host,
+          username: username,
+          password: stored.password,
+          domain: domain,
+        ),
+      );
+    } catch (error) {
+      throw StateError('SMB source is not connected: $error');
+    }
+  }
+
+  /// Accepts either a share-relative path (`/Movies/x.mkv`) or a full
+  /// `smb://host/share/x.mkv` URI and returns the path the proxy/session use.
+  static String _normalizeSmbPlayPath(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('smb://')) {
+      try {
+        final uri = Uri.parse(trimmed);
+        final path = uri.path;
+        return path.startsWith('/') ? path : '/$path';
+      } catch (_) {
+        final stripped = trimmed.replaceFirst(RegExp(r'^smb://[^/]+'), '');
+        return stripped.isEmpty
+            ? '/'
+            : (stripped.startsWith('/') ? stripped : '/$stripped');
+      }
+    }
+    return trimmed.startsWith('/') ? trimmed : '/$trimmed';
   }
 
   Future<List<PlaybackSubtitleSource>> _findSmbSubtitles(
