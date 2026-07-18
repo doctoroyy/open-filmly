@@ -93,6 +93,10 @@ class LibraryMetadataSyncService {
       updated++;
     }
 
+    // After metadata is attached, reunite seasons that share a TMDB id but
+    // were split at scan time (e.g. each `S0x.第x季` folder became its own show).
+    await _repo.consolidateAllTvShows();
+
     return LibraryMetadataSyncResult(
       requestedItems: ids.length,
       updatedItems: updated,
@@ -126,6 +130,11 @@ class LibraryMetadataSyncService {
 
     // 更新主媒体数据
     await _repo.upsert(updatedMedia);
+
+    // 手动匹配同一 TMDB 后，把同库拆散的季合并到一条 show 上。
+    if (payload.type == MediaType.tv) {
+      await _repo.consolidateTvShow(updatedMedia);
+    }
 
     // 剧集处理
     if (payload.type == MediaType.tv && _episodeRepo != null) {

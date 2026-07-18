@@ -89,7 +89,7 @@ void main() {
         TmdbMetadataService(dummyClient),
         IntelligentNameRecognizer(dummyClient),
       );
-      return LibraryAutoScanService(scanner, metadataSync, repo);
+      return LibraryAutoScanService(scanner, metadataSync, repo, episodeRepo);
     }
 
     test('skips when autoScanOnStartup is disabled', () async {

@@ -131,6 +131,140 @@ void main() {
       expect(davFirst.media.id, davSecond.media.id);
       expect(smbFirst.media.id, isNot(davFirst.media.id));
     });
+
+    test(
+      'Chinese pack layout S01.第一季 under 生活大爆炸 1-10 季 groups as one show',
+      () {
+        // Real-world NAS layout that previously produced one show per season
+        // because "S01.第一季" was not recognized as a season folder and the
+        // title collapsed to bare "S01" / "S02" / …
+        final s01 = MediaLibraryEntryFactory.fromSmbFile(
+          config: const SmbConfig(host: '192.168.31.252'),
+          file: SmbFile(
+            '/btsync-data/生活大爆炸 1-10 季/S01.第一季/S01E01.Pilot.mkv',
+            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S01.第一季\S01E01.Pilot.mkv',
+            'wd-downloads',
+            0,
+            0,
+            0,
+            0x20,
+            1,
+            true,
+          ),
+        );
+        final s02 = MediaLibraryEntryFactory.fromSmbFile(
+          config: const SmbConfig(host: '192.168.31.252'),
+          file: SmbFile(
+            '/btsync-data/生活大爆炸 1-10 季/S02.第二季/S02E01.The.Bad.Fish.Paradigm.mkv',
+            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S02.第二季\S02E01.The.Bad.Fish.Paradigm.mkv',
+            'wd-downloads',
+            0,
+            0,
+            0,
+            0x20,
+            1,
+            true,
+          ),
+        );
+        final s12 = MediaLibraryEntryFactory.fromSmbFile(
+          config: const SmbConfig(host: '192.168.31.252'),
+          file: SmbFile(
+            '/btsync-data/生活大爆炸 1-10 季/S12.第十二季/S12E24.mkv',
+            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S12.第十二季\S12E24.mkv',
+            'wd-downloads',
+            0,
+            0,
+            0,
+            0x20,
+            1,
+            true,
+          ),
+        );
+
+        expect(s01.media.type, MediaType.tv);
+        expect(s01.media.title, '生活大爆炸');
+        expect(s02.media.title, '生活大爆炸');
+        expect(s12.media.title, '生活大爆炸');
+        expect(s01.media.id, s02.media.id);
+        expect(s01.media.id, s12.media.id);
+        expect(s01.media.id, isNot(contains(':s01')));
+        expect(s01.hasEpisode, isTrue);
+        expect(s01.episode!.seasonNumber, 1);
+        expect(s01.episode!.episodeNumber, 1);
+        expect(s02.episode!.seasonNumber, 2);
+        expect(s12.episode!.seasonNumber, 12);
+      },
+    );
+
+    test('local S01.第一季 pack also shares one show id', () {
+      final a = MediaLibraryEntryFactory.fromLocalPath(
+        '/Volumes/media/生活大爆炸 1-10 季/S01.第一季/S01E01.Pilot.mkv',
+      );
+      final b = MediaLibraryEntryFactory.fromLocalPath(
+        '/Volumes/media/生活大爆炸 1-10 季/S05.第五季/S05E01.mkv',
+      );
+      expect(a.media.title, '生活大爆炸');
+      expect(b.media.title, '生活大爆炸');
+      expect(a.media.id, b.media.id);
+    });
+  });
+
+  group('MediaRepository consolidate by tmdbId', () {
+    test('merges seasons that share TMDB id across weak titles', () async {
+      await mediaRepo.upsert(
+        const Media(
+          id: 'tv:smb:scope:s02',
+          title: '生活大爆炸',
+          year: '2007',
+          type: MediaType.tv,
+          path: 's02',
+          detailsJson:
+              '{"tmdbId":1418,"source":{"kind":"smb","host":"nas","share":"tv"}}',
+        ),
+      );
+      await mediaRepo.upsert(
+        const Media(
+          id: 'tv:smb:scope:s05',
+          title: 'S05',
+          year: '',
+          type: MediaType.tv,
+          path: 's05',
+          detailsJson:
+              '{"tmdbId":1418,"source":{"kind":"smb","host":"nas","share":"tv"}}',
+        ),
+      );
+      await episodeRepo.upsertAll([
+        const Episode(
+          id: 'ep-s02e01',
+          showId: 'tv:smb:scope:s02',
+          seasonNumber: 2,
+          episodeNumber: 1,
+          path: '/s02e01.mkv',
+        ),
+        const Episode(
+          id: 'ep-s05e01',
+          showId: 'tv:smb:scope:s05',
+          seasonNumber: 5,
+          episodeNumber: 1,
+          path: '/s05e01.mkv',
+        ),
+      ]);
+
+      final removed = await mediaRepo.consolidateAllTvShows();
+      expect(removed, 1);
+
+      final remaining = await mediaRepo.browse(type: MediaType.tv);
+      expect(remaining, hasLength(1));
+      expect(remaining.single.title, '生活大爆炸');
+      expect(remaining.single.tmdbId, 1418);
+
+      final episodes = await episodeRepo.getByShow(remaining.single.id);
+      expect(episodes, hasLength(2));
+      expect(
+        episodes.map((e) => e.seasonNumber).toSet(),
+        containsAll(<int>[2, 5]),
+      );
+    });
   });
 
   group('EpisodeRepository', () {

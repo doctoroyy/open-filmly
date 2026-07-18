@@ -80,6 +80,7 @@ final libraryAutoScanProvider = Provider<LibraryAutoScanService>((ref) {
     ref.watch(libraryScannerProvider),
     ref.watch(libraryMetadataSyncProvider),
     ref.watch(mediaRepositoryProvider),
+    ref.watch(episodeRepositoryProvider),
   );
 });
 

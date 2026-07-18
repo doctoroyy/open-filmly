@@ -137,28 +137,49 @@ class MediaRepository {
   /// Merges legacy path-based TV rows into [canonical]. Episodes retain their
   /// physical file paths but now point to one logical show across season
   /// folders. Returns the number of obsolete show rows removed.
+  ///
+  /// Duplicates are detected by:
+  /// 1. Same source scope + normalized title (scan-time grouping)
+  /// 2. Same source scope + same TMDB id (post-metadata grouping) — this is
+  ///    what re-unites seasons that were wrongly split as `S01`/`S02`/…
   Future<int> consolidateTvShow(Media canonical) async {
     if (canonical.type != MediaType.tv) return 0;
     final allShows = await browse(type: MediaType.tv);
     final canonicalScope = _sourceScope(canonical);
     final canonicalTitle = _normalizedShowTitle(canonical.title);
+    final canonicalTmdb = canonical.tmdbId;
     final duplicates = allShows
-        .where(
-          (item) =>
-              item.id != canonical.id &&
-              _sourceScope(item) == canonicalScope &&
-              _normalizedShowTitle(item.title) == canonicalTitle,
-        )
+        .where((item) {
+          if (item.id == canonical.id) return false;
+          if (_sourceScope(item) != canonicalScope) return false;
+          if (canonicalTitle.isNotEmpty &&
+              _normalizedShowTitle(item.title) == canonicalTitle) {
+            return true;
+          }
+          if (canonicalTmdb != null && item.tmdbId == canonicalTmdb) {
+            return true;
+          }
+          return false;
+        })
         .toList(growable: false);
     if (duplicates.isEmpty) return 0;
 
+    // Keep [canonical].id as the surviving identity (callers hold that id).
+    // Metadata is donated from the highest-quality row in the group.
     final candidates = [canonical, ...duplicates]
-      ..sort((a, b) => _metadataQuality(b).compareTo(_metadataQuality(a)));
+      ..sort((a, b) {
+        final quality = _metadataQuality(b).compareTo(_metadataQuality(a));
+        if (quality != 0) return quality;
+        final aWeak = _isWeakShowTitle(a.title);
+        final bWeak = _isWeakShowTitle(b.title);
+        if (aWeak != bWeak) return aWeak ? 1 : -1;
+        return a.id.compareTo(b.id);
+      });
     final donor = candidates.first;
     final canonicalSourceDetails = canonical.detailsJson;
     await upsert(
       canonical.copyWith(
-        title: donor.title,
+        title: _isWeakShowTitle(donor.title) ? canonical.title : donor.title,
         year: donor.year.isNotEmpty ? donor.year : canonical.year,
         posterPath: donor.posterPath ?? canonical.posterPath,
         rating: donor.rating ?? canonical.rating,
@@ -181,6 +202,43 @@ class MediaRepository {
       )..where((row) => row.id.equals(duplicate.id))).go();
     }
     return duplicates.length;
+  }
+
+  /// Merges every TV show that shares a TMDB id (or identical normalized
+  /// title) within the same source. Safe to call after metadata enrichment.
+  Future<int> consolidateAllTvShows() async {
+    final shows = await browse(type: MediaType.tv);
+    final seen = <String>{};
+    var removed = 0;
+    // Stronger rows first so weak season-token ids get absorbed into them.
+    final ordered = [...shows]
+      ..sort((a, b) {
+        final quality = _metadataQuality(b).compareTo(_metadataQuality(a));
+        if (quality != 0) return quality;
+        final aWeak = _isWeakShowTitle(a.title);
+        final bWeak = _isWeakShowTitle(b.title);
+        if (aWeak != bWeak) return aWeak ? 1 : -1;
+        return a.id.compareTo(b.id);
+      });
+    for (final show in ordered) {
+      if (seen.contains(show.id)) continue;
+      // Re-read: previous consolidations may have deleted this row.
+      final current = await getById(show.id);
+      if (current == null || current.type != MediaType.tv) continue;
+      final n = await consolidateTvShow(current);
+      removed += n;
+      seen.add(current.id);
+    }
+    return removed;
+  }
+
+  bool _isWeakShowTitle(String title) {
+    final t = title.trim();
+    if (t.isEmpty) return true;
+    return RegExp(
+      r'^(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(t);
   }
 
   Future<void> updatePoster(String id, String posterPath) async {

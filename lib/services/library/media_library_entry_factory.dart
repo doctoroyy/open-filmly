@@ -82,14 +82,30 @@ class MediaLibraryEntryFactory {
     r'\bS(\d{1,2})E(\d{1,2})\b',
     caseSensitive: false,
   );
+
+  /// Matches a directory segment that is purely a season container, including
+  /// common Chinese pack layouts like `S01.第一季`, `S02 第二季`, `第一季`,
+  /// `Season 1`, and bare `S01`.
   static final _seasonPattern = RegExp(
-    r'^(season\s*\d+|第[一二三四五六七八九十\d]+季|s\d{1,2}$)',
+    r'^(?:'
+    r'season\s*\d+'
+    r'|s\d{1,2}(?:\s*[.\-_\s]\s*第[一二三四五六七八九十百\d]+季)?'
+    r'|第[一二三四五六七八九十百\d]+季'
+    r')$',
+    caseSensitive: false,
+  );
+
+  /// True when a cleaned title is just a season token (S01 / 第一季 / Season 2)
+  /// and therefore cannot be the show name.
+  static final _seasonOnlyTitlePattern = RegExp(
+    r'^(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
     caseSensitive: false,
   );
 
   /// Pattern to extract the show title from a filename before the S01E01 tag.
+  /// Requires a non-empty title prefix so bare `S01E01.Pilot` does not match.
   static final _showTitleFromFilenamePattern = RegExp(
-    r'^(.+?)\s*[.\s]S\d{1,2}E\d{1,2}',
+    r'^(.+?)\s*[.\s_\-]S\d{1,2}E\d{1,2}',
     caseSensitive: false,
   );
   static final _yearPattern = RegExp(r'(19|20)\d{2}');
@@ -612,21 +628,26 @@ class MediaLibraryEntryFactory {
 
   static int? _inferSeasonFromPath(String logicalPath) {
     final segments = logicalPath.split('/');
+    // Prefer explicit Sxx / Season N tokens, including "S01.第一季".
     final numericSeason = RegExp(
-      r'season\s*(\d+)|第(\d+)季|^s(\d{1,2})$',
+      r'(?:^|[^a-z0-9])s(\d{1,2})(?:$|[^a-z0-9e])|season\s*(\d+)|第(\d+)季',
       caseSensitive: false,
     );
-    final chineseSeason = RegExp(r'第([一二三四五六七八九十]+)季');
+    final chineseSeason = RegExp(r'第([一二三四五六七八九十百]+)季');
 
     for (final segment in segments) {
       final match = numericSeason.firstMatch(segment);
       if (match != null) {
         final n = match.group(1) ?? match.group(2) ?? match.group(3);
-        if (n != null) return int.tryParse(n);
+        if (n != null) {
+          final parsed = int.tryParse(n);
+          if (parsed != null) return parsed;
+        }
       }
       final cMatch = chineseSeason.firstMatch(segment);
       if (cMatch != null) {
-        return _chineseNumeral(cMatch.group(1)!);
+        final parsed = _chineseNumeral(cMatch.group(1)!);
+        if (parsed != null) return parsed;
       }
     }
     return null;
@@ -691,13 +712,13 @@ class MediaLibraryEntryFactory {
     // or parent of the file if no season folder exists).
     final dir = path.dirname(filePath);
     final dirName = path.basename(dir);
-    if (_seasonPattern.hasMatch(dirName)) {
+    if (_isSeasonFolderName(dirName)) {
       return path.dirname(dir);
     }
     // Handle folders like "怪奇物语 第一季" — the show dir is the same folder
     // but with the season suffix stripped.
     final stripped = _stripSeasonSuffix(dirName);
-    if (stripped != dirName) {
+    if (stripped != dirName && stripped.isNotEmpty) {
       return dir; // This folder IS the show (just named with season)
     }
     return dir;
@@ -709,7 +730,7 @@ class MediaLibraryEntryFactory {
         .where((s) => s.isNotEmpty)
         .toList(growable: false);
     for (var i = 0; i < segments.length; i++) {
-      if (_seasonPattern.hasMatch(segments[i]) && i > 0) {
+      if (_isSeasonFolderName(segments[i]) && i > 0) {
         return segments.sublist(0, i).join('/');
       }
     }
@@ -718,6 +739,16 @@ class MediaLibraryEntryFactory {
       return segments.sublist(0, segments.length - 1).join('/');
     }
     return logicalPath;
+  }
+
+  /// Whether [name] is a pure season container directory.
+  static bool _isSeasonFolderName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return false;
+    if (_seasonPattern.hasMatch(trimmed)) return true;
+    // After stripping season markers nothing meaningful remains → season only.
+    final stripped = _stripSeasonSuffix(trimmed);
+    return stripped.isEmpty || _seasonOnlyTitlePattern.hasMatch(stripped);
   }
 
   static String _logicalPath(String rawPath) {
@@ -734,13 +765,31 @@ class MediaLibraryEntryFactory {
         lower.contains('/tv/') ||
         lower.contains('/shows/') ||
         lower.contains('/series/') ||
-        lower.contains('/season ')) {
+        lower.contains('/season ') ||
+        lower.contains('/season') ||
+        _pathHasSeasonFolder(logicalPath) ||
+        _looksLikeSeasonPackFolder(logicalPath)) {
       return MediaType.tv;
     }
     if (lower.contains('/movie/') || lower.contains('/movies/')) {
       return MediaType.movie;
     }
     return MediaType.movie;
+  }
+
+  static bool _pathHasSeasonFolder(String logicalPath) {
+    return logicalPath
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .any(_isSeasonFolderName);
+  }
+
+  /// Paths like `…/生活大爆炸 1-10 季/…` or `…/Show 全4季/…`.
+  static bool _looksLikeSeasonPackFolder(String logicalPath) {
+    return RegExp(
+      r'(?:\d+\s*[-~到至]\s*\d+\s*季|全[一二三四五六七八九十百\d]+\s*季|第[一二三四五六七八九十百\d]+季)',
+      caseSensitive: false,
+    ).hasMatch(logicalPath);
   }
 
   static String _titleFor(
@@ -755,66 +804,105 @@ class MediaLibraryEntryFactory {
   }
 
   static String _extractTvTitle(String logicalPath, String fallback) {
-    final segments = logicalPath
+    final segmentList = logicalPath
         .split('/')
-        .where((segment) => segment.isNotEmpty);
-    final segmentList = segments.toList(growable: false);
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
 
-    // Strategy 1: Find a "Season N" or "第X季" folder — the parent is the show
+    // Strategy 1: Find a pure season folder (S01.第一季 / Season 1 / 第一季) —
+    // the parent of that folder is the show root.
     for (var i = 0; i < segmentList.length; i++) {
-      if (_seasonPattern.hasMatch(segmentList[i])) {
-        if (i > 0) {
-          final parentName = _stripSeasonSuffix(segmentList[i - 1]);
-          return _cleanTitle(parentName);
-        }
-        break;
-      }
+      if (!_isSeasonFolderName(segmentList[i]) || i == 0) continue;
+      final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[i - 1]));
+      if (_isUsableShowTitle(candidate)) return candidate;
     }
 
-    // Strategy 2: If the folder name itself contains season info (e.g.
-    // "怪奇物语 第一季"), strip the season part to get the base show name.
+    // Strategy 2: Parent folder carries a season suffix
+    // ("怪奇物语 第一季") — strip it. If that empties the name, walk higher.
     if (segmentList.length >= 2) {
-      final parentDir = segmentList[segmentList.length - 2];
-      final stripped = _stripSeasonSuffix(parentDir);
-      if (stripped != parentDir) {
-        return _cleanTitle(stripped);
+      for (var offset = 2; offset <= segmentList.length; offset++) {
+        final dir = segmentList[segmentList.length - offset];
+        if (_isSeasonFolderName(dir)) continue;
+        final stripped = _stripSeasonSuffix(dir);
+        final candidate = _cleanTitle(stripped);
+        if (_isUsableShowTitle(candidate)) return candidate;
       }
     }
 
-    // Strategy 3: Extract show title from the filename before S01E01 pattern
+    // Strategy 3: Show title embedded in the filename before SxxExx.
     final match = _showTitleFromFilenamePattern.firstMatch(fallback);
     if (match != null) {
-      final raw = match.group(1)!;
-      return _cleanTitle(raw);
+      final candidate = _cleanTitle(match.group(1)!);
+      if (_isUsableShowTitle(candidate)) return candidate;
     }
 
-    // Fallback: parent folder name
-    if (segmentList.length >= 2) {
-      return _cleanTitle(segmentList[segmentList.length - 2]);
+    // Fallback: nearest non-season parent folder.
+    for (var i = segmentList.length - 2; i >= 0; i--) {
+      final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[i]));
+      if (_isUsableShowTitle(candidate)) return candidate;
     }
-    return _cleanTitle(fallback);
+    final fallbackTitle = _cleanTitle(fallback);
+    return _isUsableShowTitle(fallbackTitle) ? fallbackTitle : fallbackTitle;
   }
 
-  /// Strips trailing season markers like "第一季", "Season 1", " S01" from a
-  /// folder name to recover the base show title.
-  /// Strips trailing season markers from a folder name to recover the base
-  /// show title. Handles:
-  /// - "第一季", "第2季" (single season)
-  /// - "1-4季", "全4季" (collection markers)
-  /// - "Season 1", "S01"
+  static bool _isUsableShowTitle(String title) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return false;
+    if (_seasonOnlyTitlePattern.hasMatch(trimmed)) return false;
+    // Reject titles that are only punctuation / digits left after cleanup.
+    if (RegExp(r'^[\d\s.\-_]+$').hasMatch(trimmed)) return false;
+    return true;
+  }
+
+  /// Strips trailing / embedded season markers from a folder name to recover
+  /// the base show title. Handles:
+  /// - "第一季", "第2季", "S01", "Season 1"
+  /// - "S01.第一季" style pure season folders (becomes empty)
+  /// - "1-4季", "1-10 季", "全4季" collection markers
+  /// - "Show 第一季 (2015)" (year parentheses do not block stripping)
   static String _stripSeasonSuffix(String name) {
-    var result = name;
-    // Remove collection markers like "1-4季", "全4季", "全四季"
-    result = result.replaceAll(RegExp(r'\s*[\d\-~]+季$'), '');
-    result = result.replaceAll(RegExp(r'\s*全[一二三四五六七八九十\d]+季$'), '');
-    // Remove single season markers
+    var result = name.trim();
+
+    // Pure season containers collapse to empty so callers walk up a level.
+    if (_seasonPattern.hasMatch(result)) return '';
+
+    // Drop trailing year tokens first so season markers become terminal.
+    // "The Expanse 第一季 (2015)" → "The Expanse 第一季"
+    result = result.replaceAll(
+      RegExp(r'[\s._\-]*[\(\[]?\s*(?:19|20)\d{2}\s*[\)\]]?\s*$'),
+      '',
+    );
+
+    // Collection markers: "1-4季", "1-10 季", "1~12季", "1到10季"
+    result = result.replaceAll(
+      RegExp(r'\s*\d+\s*[-~到至]\s*\d+\s*季\s*$'),
+      '',
+    );
+    result = result.replaceAll(RegExp(r'\s*[\d\-~]+季\s*$'), '');
+    result = result.replaceAll(
+      RegExp(r'\s*全[一二三四五六七八九十百\d]+\s*季\s*$'),
+      '',
+    );
+
+    // Trailing single-season markers, with optional leading separators.
     result = result.replaceAll(
       RegExp(
-        r'\s*(第[一二三四五六七八九十\d]+季|season\s*\d+|s\d{1,2})$',
+        r'[\s._\-]*('
+        r'第[一二三四五六七八九十百\d]+季'
+        r'|season\s*\d+'
+        r'|s\d{1,2}'
+        r')\s*$',
         caseSensitive: false,
       ),
       '',
     );
+
+    // Leading season tokens left over from "S01.Show Name" (rare).
+    result = result.replaceAll(
+      RegExp(r'^s\d{1,2}[\s._\-]+', caseSensitive: false),
+      '',
+    );
+
     return result.trim();
   }
 
