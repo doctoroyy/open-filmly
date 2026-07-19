@@ -75,6 +75,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const _maxRate = 4.0;
   static const _rateStep = 0.1;
   static const _accent = Color(0xFF2F6BFF);
+  /// Baomihua-like muted control grey.
+  static const _chromeFg = Color(0xFFE8E8E8);
+  static const _chromeDim = Color(0xFFB0B0B0);
 
   late final PlaybackService _playback;
   final FocusNode _focusNode = FocusNode();
@@ -113,9 +116,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   double _volumeBeforeMute = 100;
   bool _muted = false;
   double _rate = 1.0;
+  bool _alwaysOnTop = false;
+  /// Displayed like Baomihua top-right transfer rate (KB/s or MB/s).
+  double _transferBytesPerSec = 0;
+  DateTime? _speedSampleAt;
+  Duration _speedSampleBuffer = Duration.zero;
   Timer? _hideTimer;
   Timer? _toastTimer;
   Timer? _autoNextTimer;
+  Timer? _speedSampleTimer;
   String? _toast;
   int _autoNextSeconds = 0;
 
@@ -148,6 +157,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     unawaited(_openCurrent(startAt: widget.args.startAt));
     unawaited(_loadEpisodePlaylist());
     _scheduleHideControls();
+    _speedSampleTimer = Timer.periodic(
+      const Duration(milliseconds: 800),
+      (_) => _sampleTransferRate(),
+    );
   }
 
   @override
@@ -156,6 +169,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _hideTimer?.cancel();
     _toastTimer?.cancel();
     _autoNextTimer?.cancel();
+    _speedSampleTimer?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
     _bufferSub?.cancel();
@@ -172,7 +186,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   void _configurePlatformPlayback() {
-    if (!PlatformCapabilities.isMobile) return;
+    if (PlatformCapabilities.isDesktop) {
+      // Desktop player is a full-window chrome (Baomihua-style), not a
+      // navigated page with a back stack affordance.
+      unawaited(DesktopWindow.setTitle(_title));
+      return;
+    }
     unawaited(
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky),
     );
@@ -185,7 +204,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   void _restorePlatformAfterPlayback() {
-    if (!PlatformCapabilities.isMobile) return;
+    if (PlatformCapabilities.isDesktop) {
+      unawaited(DesktopWindow.setAlwaysOnTop(false));
+      unawaited(DesktopWindow.setTitle('Open Filmly'));
+      return;
+    }
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     unawaited(
       SystemChrome.setPreferredOrientations(const [
@@ -195,6 +218,62 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         DeviceOrientation.landscapeRight,
       ]),
     );
+  }
+
+  void _sampleTransferRate() {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final prevAt = _speedSampleAt;
+    final prevBuf = _speedSampleBuffer;
+    _speedSampleAt = now;
+    _speedSampleBuffer = _buffer;
+    if (prevAt == null) return;
+    final dt = now.difference(prevAt).inMilliseconds;
+    if (dt <= 0) return;
+    // Rough estimate from buffered media advance (network streams). Local
+    // files stay at 0 so the UI can hide or show idle.
+    final isNetwork = _uri.startsWith('http://') || _uri.startsWith('https://');
+    if (!isNetwork) {
+      if (_transferBytesPerSec != 0) {
+        setState(() => _transferBytesPerSec = 0);
+      }
+      return;
+    }
+    final dBufMs = (_buffer - prevBuf).inMilliseconds;
+    if (dBufMs <= 0) {
+      if (_buffering || _opening) {
+        setState(() => _transferBytesPerSec = 0);
+      }
+      return;
+    }
+    // Assume ~8 Mbps equivalent media bitrate for display purposes when we
+    // only know buffered duration growth.
+    const assumedBitsPerSecond = 8 * 1000 * 1000;
+    final bytes = (dBufMs / 1000.0) * (assumedBitsPerSecond / 8.0);
+    final bps = bytes / (dt / 1000.0);
+    setState(() => _transferBytesPerSec = bps.clamp(0, 200 * 1024 * 1024));
+  }
+
+  String _formatTransferRate() {
+    if (_buffering || _opening) return '0 KB/s';
+    final bps = _transferBytesPerSec;
+    if (bps <= 0) {
+      final isNetwork =
+          _uri.startsWith('http://') || _uri.startsWith('https://');
+      return isNetwork ? '0 KB/s' : '';
+    }
+    if (bps >= 1024 * 1024) {
+      return '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+    }
+    return '${(bps / 1024).toStringAsFixed(0)} KB/s';
+  }
+
+  Future<void> _toggleAlwaysOnTop() async {
+    final next = !_alwaysOnTop;
+    await DesktopWindow.setAlwaysOnTop(next);
+    if (!mounted) return;
+    setState(() => _alwaysOnTop = next);
+    _showToast(next ? '窗口置顶' : '取消置顶');
   }
 
   Future<void> _openCurrent({Duration? startAt}) async {
@@ -755,11 +834,33 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _bufferingOverlay() {
-    return const Center(
-      child: SizedBox(
-        width: 48,
-        height: 48,
-        child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white70),
+    // Baomihua: centered ring + transfer rate under it.
+    final rate = _formatTransferRate();
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 44,
+            height: 44,
+            child: CircularProgressIndicator(
+              strokeWidth: 3,
+              color: Colors.white,
+              backgroundColor: Colors.white24,
+            ),
+          ),
+          if (rate.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              rate,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -901,6 +1002,293 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _controlsOverlay(BuildContext context) {
+    if (PlatformCapabilities.isDesktop) {
+      return _baomihuaChrome(context);
+    }
+    return _mobileChrome(context);
+  }
+
+  /// NetEase Baomihua desktop chrome clone: no back button, centered title,
+  /// top-right rate + pin, bottom progress + vol/speed/quality + play + tools.
+  Widget _baomihuaChrome(BuildContext context) {
+    final rateLabel = _formatTransferRate();
+    return AnimatedOpacity(
+      opacity: _controlsVisible ? 1 : 0,
+      duration: const Duration(milliseconds: 180),
+      child: IgnorePointer(
+        ignoring: !_controlsVisible,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.55),
+                Colors.transparent,
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.72),
+              ],
+              stops: const [0, 0.22, 0.68, 1],
+            ),
+          ),
+          child: Column(
+            children: [
+              SizedBox(height: WindowChromeMetrics.macOSTitlebarHeight),
+              // Top: [drag]  Title  rate  pin
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 120), // balance traffic lights / pin
+                    Expanded(
+                      child: Text(
+                        _title,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _chromeFg,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                    if (rateLabel.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: Text(
+                          rateLabel,
+                          style: const TextStyle(
+                            color: _chromeDim,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      tooltip: _alwaysOnTop ? '取消置顶' : '窗口置顶',
+                      onPressed: () => unawaited(_toggleAlwaysOnTop()),
+                      icon: Icon(
+                        _alwaysOnTop
+                            ? Icons.push_pin_rounded
+                            : Icons.push_pin_outlined,
+                        color: _alwaysOnTop ? Colors.white : _chromeDim,
+                        size: 18,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              _baomihuaBottomBar(context),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _baomihuaBottomBar(BuildContext context) {
+    final total = _duration.inMilliseconds;
+    final current = _position.inMilliseconds.clamp(0, total == 0 ? 1 : total);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Progress row: time — slider — time
+          Row(
+            children: [
+              SizedBox(
+                width: 64,
+                child: Text(
+                  _formatDuration(_position),
+                  style: const TextStyle(color: _chromeDim, fontSize: 12),
+                ),
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2.5,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 5,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 12,
+                    ),
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    overlayColor: Colors.white24,
+                  ),
+                  child: Slider(
+                    value: total == 0 ? 0 : current.toDouble(),
+                    max: total == 0 ? 1 : total.toDouble(),
+                    onChangeStart: (_) {
+                      _dragging = true;
+                      _cancelAutoNext();
+                      _hideTimer?.cancel();
+                    },
+                    onChanged: (value) {
+                      setState(
+                        () =>
+                            _position = Duration(milliseconds: value.round()),
+                      );
+                    },
+                    onChangeEnd: (value) async {
+                      _dragging = false;
+                      await _playback.seek(
+                        Duration(milliseconds: value.round()),
+                      );
+                      _scheduleHideControls();
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 64,
+                child: Text(
+                  _formatDuration(_duration),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(color: _chromeDim, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          // Controls: vol | 1.0x | 原画 |     ▶     | fullscreen audio sub
+          Row(
+            children: [
+              IconButton(
+                tooltip: _muted ? '取消静音' : '静音',
+                onPressed: () => unawaited(_toggleMute()),
+                icon: Icon(
+                  _muted || _volume == 0
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  color: _chromeDim,
+                  size: 20,
+                ),
+              ),
+              SizedBox(
+                width: 88,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 4,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 8,
+                    ),
+                    activeTrackColor: Colors.white70,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                  ),
+                  child: Slider(
+                    value: _volume,
+                    max: 100,
+                    onChanged: _setVolume,
+                  ),
+                ),
+              ),
+              Builder(
+                builder: (ctx) => TextButton(
+                  onPressed: () => _showSpeedControl(ctx),
+                  style: TextButton.styleFrom(
+                    foregroundColor: _chromeFg,
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    _formatRate(_rate),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => _showToast('当前为原画'),
+                style: TextButton.styleFrom(
+                  foregroundColor: _chromeDim,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('原画', style: TextStyle(fontSize: 13)),
+              ),
+              const Spacer(),
+              IconButton(
+                key: const Key('player_play_pause'),
+                tooltip: _playing ? '暂停' : '播放',
+                onPressed: _togglePlay,
+                icon: Icon(
+                  _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 32,
+                ),
+              ),
+              const Spacer(),
+              if (_hasPrevEpisode)
+                IconButton(
+                  key: const Key('player_prev_episode'),
+                  tooltip: '上一集 (P)',
+                  icon: const Icon(Icons.skip_previous_rounded, size: 22),
+                  color: _chromeDim,
+                  onPressed: () => unawaited(_playAdjacentEpisode(-1)),
+                ),
+              if (_hasNextEpisode)
+                IconButton(
+                  key: const Key('player_next_episode'),
+                  tooltip: '下一集 (N)',
+                  icon: const Icon(Icons.skip_next_rounded, size: 22),
+                  color: _chromeDim,
+                  onPressed: () => unawaited(_playAdjacentEpisode(1)),
+                ),
+              IconButton(
+                tooltip: '全屏 (F)',
+                onPressed: () => unawaited(DesktopWindow.toggleFullScreen()),
+                icon: const Icon(
+                  Icons.fullscreen_rounded,
+                  color: _chromeDim,
+                  size: 22,
+                ),
+              ),
+              Builder(
+                builder: (ctx) => IconButton(
+                  tooltip: '音轨',
+                  onPressed: () => _showAudioTracks(ctx),
+                  icon: const Icon(
+                    Icons.graphic_eq_rounded,
+                    color: _chromeDim,
+                    size: 20,
+                  ),
+                ),
+              ),
+              Builder(
+                builder: (ctx) => IconButton(
+                  tooltip: '字幕',
+                  onPressed: () => _showSubtitleTracks(ctx),
+                  icon: const Icon(
+                    Icons.subtitles_outlined,
+                    color: _chromeDim,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileChrome(BuildContext context) {
     return AnimatedOpacity(
       opacity: _controlsVisible ? 1 : 0,
       duration: const Duration(milliseconds: 220),
@@ -921,21 +1309,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
           child: SafeArea(
-            // SafeArea alone does not reserve macOS traffic-light space when
-            // the title bar is hidden — pad the top bar explicitly.
-            child: Padding(
-              padding: EdgeInsets.only(
-                top: PlatformCapabilities.isMacOS
-                    ? WindowChromeMetrics.macOSTitlebarHeight - 10
-                    : 0,
-              ),
-              child: Column(
-                children: [
-                  _topBar(context),
-                  const Spacer(),
-                  _bottomBar(context),
-                ],
-              ),
+            child: Column(
+              children: [
+                _mobileTopBar(context),
+                const Spacer(),
+                _mobileBottomBar(context),
+              ],
             ),
           ),
         ),
@@ -943,12 +1322,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _topBar(BuildContext context) {
-    final leadingInset = PlatformCapabilities.isMacOS
-        ? WindowChromeMetrics.macOSTrafficLightReservedWidth
-        : 12.0;
+  Widget _mobileTopBar(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(leadingInset, 4, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           IconButton(
@@ -962,101 +1338,41 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                if (_episodes.isNotEmpty && _episodeIndex >= 0)
-                  Text(
-                    '第 ${_episodeIndex + 1} / ${_episodes.length} 集',
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-              ],
+            child: Text(
+              _title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           if (_hasPrevEpisode)
             IconButton(
               key: const Key('player_prev_episode'),
-              tooltip: '上一集 (P)',
-              icon: const Icon(
-                Icons.skip_previous_rounded,
-                color: Colors.white,
-              ),
+              tooltip: '上一集',
+              icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
               onPressed: () => unawaited(_playAdjacentEpisode(-1)),
             ),
           if (_hasNextEpisode)
             IconButton(
               key: const Key('player_next_episode'),
-              tooltip: '下一集 (N)',
+              tooltip: '下一集',
               icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
               onPressed: () => unawaited(_playAdjacentEpisode(1)),
             ),
-          IconButton(
-            tooltip: '全屏 (F)',
-            icon: const Icon(Icons.fullscreen_rounded, color: Colors.white70),
-            onPressed: () => unawaited(DesktopWindow.toggleFullScreen()),
-          ),
         ],
       ),
     );
   }
 
-  Widget _centerCluster() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: const Icon(
-            Icons.replay_10_rounded,
-            color: Colors.white,
-            size: 26,
-          ),
-          tooltip: '后退 10 秒',
-          onPressed: () => _skip(-_skipStep),
-        ),
-        const SizedBox(width: 6),
-        IconButton(
-          icon: Icon(
-            _playing
-                ? Icons.pause_circle_filled_rounded
-                : Icons.play_circle_filled_rounded,
-            color: Colors.white,
-            size: 44,
-          ),
-          tooltip: _playing ? '暂停' : '播放',
-          onPressed: _togglePlay,
-        ),
-        const SizedBox(width: 6),
-        IconButton(
-          icon: const Icon(
-            Icons.forward_10_rounded,
-            color: Colors.white,
-            size: 26,
-          ),
-          tooltip: '前进 10 秒',
-          onPressed: () => _skip(_skipStep),
-        ),
-      ],
-    );
-  }
-
-  Widget _bottomBar(BuildContext context) {
+  Widget _mobileBottomBar(BuildContext context) {
     final total = _duration.inMilliseconds;
     final current = _position.inMilliseconds.clamp(0, total == 0 ? 1 : total);
-    final buffered = _buffer.inMilliseconds.clamp(0, total == 0 ? 1 : total);
-
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1067,72 +1383,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final maxW = constraints.maxWidth;
-                    final bufferRatio = total == 0 ? 0.0 : buffered / total;
-                    return Stack(
-                      alignment: Alignment.centerLeft,
-                      children: [
-                        // Buffered range behind the active slider track.
-                        if (total > 0)
-                          Positioned(
-                            left: 12,
-                            right: 12,
-                            child: FractionallySizedBox(
-                              widthFactor: bufferRatio.clamp(0.0, 1.0),
-                              alignment: Alignment.centerLeft,
-                              child: Container(
-                                height: 3,
-                                decoration: BoxDecoration(
-                                  color: Colors.white38,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                            ),
-                          ),
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 6,
-                            ),
-                            overlayShape: const RoundSliderOverlayShape(
-                              overlayRadius: 14,
-                            ),
-                            activeTrackColor: _accent,
-                            inactiveTrackColor: Colors.white24,
-                            thumbColor: _accent,
-                            overlayColor: _accent.withValues(alpha: 0.24),
-                          ),
-                          child: Slider(
-                            value: total == 0 ? 0 : current.toDouble(),
-                            max: total == 0 ? 1 : total.toDouble(),
-                            onChangeStart: (_) {
-                              _dragging = true;
-                              _cancelAutoNext();
-                              _hideTimer?.cancel();
-                            },
-                            onChanged: (value) {
-                              setState(
-                                () => _position = Duration(
-                                  milliseconds: value.round(),
-                                ),
-                              );
-                            },
-                            onChangeEnd: (value) async {
-                              _dragging = false;
-                              await _playback.seek(
-                                Duration(milliseconds: value.round()),
-                              );
-                              _scheduleHideControls();
-                            },
-                          ),
-                        ),
-                        // Keep analyzer happy — width used for layout only.
-                        SizedBox(width: maxW, height: 0),
-                      ],
-                    );
+                child: Slider(
+                  value: total == 0 ? 0 : current.toDouble(),
+                  max: total == 0 ? 1 : total.toDouble(),
+                  onChangeStart: (_) {
+                    _dragging = true;
+                    _hideTimer?.cancel();
+                  },
+                  onChanged: (v) => setState(
+                    () => _position = Duration(milliseconds: v.round()),
+                  ),
+                  onChangeEnd: (v) async {
+                    _dragging = false;
+                    await _playback.seek(Duration(milliseconds: v.round()));
+                    _scheduleHideControls();
                   },
                 ),
               ),
@@ -1147,30 +1411,57 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               Expanded(
                 child: Row(
                   children: [
-                    _volumeControl(),
+                    IconButton(
+                      onPressed: () => unawaited(_toggleMute()),
+                      icon: Icon(
+                        _muted || _volume == 0
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white70,
+                      ),
+                    ),
                     Builder(
-                      builder: (buttonContext) => _speedButton(buttonContext),
+                      builder: (ctx) => TextButton(
+                        onPressed: () => _showSpeedControl(ctx),
+                        child: Text(
+                          _formatRate(_rate),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-              _centerCluster(),
+              IconButton(
+                icon: Icon(
+                  _playing
+                      ? Icons.pause_circle_filled_rounded
+                      : Icons.play_circle_filled_rounded,
+                  color: Colors.white,
+                  size: 44,
+                ),
+                onPressed: _togglePlay,
+              ),
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Builder(
-                      builder: (buttonContext) => _trackButton(
-                        icon: Icons.graphic_eq_rounded,
-                        tooltip: '音轨',
-                        onTap: () => _showAudioTracks(buttonContext),
+                      builder: (ctx) => IconButton(
+                        icon: const Icon(
+                          Icons.graphic_eq_rounded,
+                          color: Colors.white70,
+                        ),
+                        onPressed: () => _showAudioTracks(ctx),
                       ),
                     ),
                     Builder(
-                      builder: (buttonContext) => _trackButton(
-                        icon: Icons.subtitles_rounded,
-                        tooltip: '字幕',
-                        onTap: () => _showSubtitleTracks(buttonContext),
+                      builder: (ctx) => IconButton(
+                        icon: const Icon(
+                          Icons.subtitles_rounded,
+                          color: Colors.white70,
+                        ),
+                        onPressed: () => _showSubtitleTracks(ctx),
                       ),
                     ),
                   ],
@@ -1180,71 +1471,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _volumeControl() {
-    return SizedBox(
-      width: PlatformCapabilities.isDesktop ? 180 : 160,
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => unawaited(_toggleMute()),
-            child: Icon(
-              _muted || _volume == 0
-                  ? Icons.volume_off_rounded
-                  : (_volume < 50
-                        ? Icons.volume_down_rounded
-                        : Icons.volume_up_rounded),
-              color: Colors.white70,
-              size: 20,
-            ),
-          ),
-          Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                activeTrackColor: _accent,
-                inactiveTrackColor: Colors.white24,
-                thumbColor: Colors.white,
-              ),
-              child: Slider(value: _volume, max: 100, onChanged: _setVolume),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _speedButton(BuildContext buttonContext) {
-    return TextButton(
-      onPressed: () => _showSpeedControl(buttonContext),
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      ),
-      child: Text(
-        _formatRate(_rate),
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  Widget _trackButton({
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    return IconButton(
-      icon: Icon(icon, color: Colors.white70, size: 22),
-      tooltip: tooltip,
-      onPressed: onTap,
     );
   }
 

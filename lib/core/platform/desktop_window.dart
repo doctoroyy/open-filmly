@@ -57,4 +57,14 @@ abstract final class DesktopWindow {
   static Future<void> minimize() async {
     if (PlatformCapabilities.isDesktop) await windowManager.minimize();
   }
+
+  static Future<void> setAlwaysOnTop(bool value) async {
+    if (!PlatformCapabilities.isDesktop) return;
+    await windowManager.setAlwaysOnTop(value);
+  }
+
+  static Future<void> setTitle(String title) async {
+    if (!PlatformCapabilities.isDesktop) return;
+    await windowManager.setTitle(title);
+  }
 }
