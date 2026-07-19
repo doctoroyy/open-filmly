@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/models/library_shelf.dart';
 import '../../data/models/media.dart';
+import '../../data/models/resource_source.dart';
 import '../../features/config/config_page.dart';
 import '../../features/config/emby_browser_page.dart';
 import '../../features/config/smb_browser_page.dart';
@@ -18,6 +19,7 @@ import '../../features/library/media_detail_page.dart';
 import '../../features/player/player_page.dart';
 import '../../features/shell/app_shell.dart';
 import '../../features/sources/local_folders_page.dart';
+import '../../features/sources/resource_source_pages.dart';
 import '../../features/sources/sources_page.dart';
 
 /// Global navigator key so routes outside the shell (e.g. player) can push
@@ -168,19 +170,47 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
               _fadePage(state, const LocalFoldersPage()),
         ),
         GoRoute(
-          path: '/smb',
+          path: '/sources/add',
           pageBuilder: (context, state) =>
-              _fadePage(state, const SmbBrowserPage()),
+              _fadePage(state, const AddResourceSourcePage()),
+        ),
+        GoRoute(
+          path: '/sources/edit',
+          pageBuilder: (context, state) {
+            final typeName = state.uri.queryParameters['type'] ?? 'webdav';
+            final type = ResourceSourceType.values.firstWhere(
+              (value) => value.name == typeName,
+              orElse: () => ResourceSourceType.webdav,
+            );
+            return _fadePage(
+              state,
+              ResourceSourceEditorPage(
+                type: type,
+                sourceId: state.uri.queryParameters['sourceId'],
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          path: '/smb',
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            SmbBrowserPage(sourceId: state.uri.queryParameters['sourceId']),
+          ),
         ),
         GoRoute(
           path: '/webdav',
-          pageBuilder: (context, state) =>
-              _fadePage(state, const WebDavBrowserPage()),
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            WebDavBrowserPage(sourceId: state.uri.queryParameters['sourceId']),
+          ),
         ),
         GoRoute(
           path: '/emby',
-          pageBuilder: (context, state) =>
-              _fadePage(state, const EmbyBrowserPage()),
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            EmbyBrowserPage(sourceId: state.uri.queryParameters['sourceId']),
+          ),
         ),
         GoRoute(
           path: '/config',

@@ -89,7 +89,7 @@ void main() {
     await tester.tap(find.byKey(const Key('sidebar_/sources')));
     await tester.pumpAndSettle();
 
-    expect(find.text('来源管理'), findsOneWidget);
+    expect(find.text('资源库'), findsOneWidget);
   });
 
   testWidgets('sidebar persists across navigation', (tester) async {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/models/app_config.dart';
+import '../../data/models/resource_source.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/emby/emby_service.dart';
@@ -11,7 +13,9 @@ import '../../widgets/filmly_design.dart';
 /// Emby content is already organised, so there is no folder browsing — just
 /// authenticate and import.
 class EmbyBrowserPage extends ConsumerStatefulWidget {
-  const EmbyBrowserPage({super.key});
+  const EmbyBrowserPage({super.key, this.sourceId});
+
+  final String? sourceId;
 
   @override
   ConsumerState<EmbyBrowserPage> createState() => _EmbyBrowserPageState();
@@ -31,6 +35,58 @@ class _EmbyBrowserPageState extends ConsumerState<EmbyBrowserPage> {
 
   EmbyService get _emby => ref.read(embyServiceProvider);
 
+  ResourceSource? _sourceFromConfig(AppConfig config) {
+    final sourceId = widget.sourceId;
+    if (sourceId != null) {
+      for (final source in config.resourceSources) {
+        if (source.id == sourceId) return source;
+      }
+    }
+    for (final source in config.resourceSources) {
+      if (source.type == ResourceSourceType.emby ||
+          source.type == ResourceSourceType.jellyfin) {
+        return source;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _saveSource() async {
+    final config = ref.read(configProvider).asData?.value;
+    if (config == null) return;
+    final existing = _sourceFromConfig(config);
+    final source = ResourceSource(
+      id:
+          existing?.id ??
+          widget.sourceId ??
+          ResourceSource.newId(ResourceSourceType.emby),
+      name:
+          existing?.name ?? '我的 ${widget.sourceId == null ? 'Emby' : '媒体服务器'}',
+      type: existing?.type ?? ResourceSourceType.emby,
+      endpoint: _urlCtrl.text.trim(),
+      username: _userCtrl.text.trim(),
+      password: _passCtrl.text,
+      importedPaths: existing?.importedPaths ?? const [],
+    );
+    final sources = [...config.resourceSources];
+    final index = sources.indexWhere((item) => item.id == source.id);
+    if (index >= 0) {
+      sources[index] = source;
+    } else {
+      sources.add(source);
+    }
+    await ref
+        .read(configProvider.notifier)
+        .save(
+          config.copyWith(
+            embyUrl: source.endpoint,
+            embyUsername: source.username,
+            embyPassword: source.password,
+            resourceSources: sources,
+          ),
+        );
+  }
+
   @override
   void dispose() {
     _urlCtrl.dispose();
@@ -44,6 +100,13 @@ class _EmbyBrowserPageState extends ConsumerState<EmbyBrowserPage> {
     final config = ref.read(configProvider).asData?.value;
     if (config == null) return;
     _prefilled = true;
+    final source = _sourceFromConfig(config);
+    if (source != null) {
+      if (_urlCtrl.text.isEmpty) _urlCtrl.text = source.endpoint;
+      if (_userCtrl.text.isEmpty) _userCtrl.text = source.username;
+      if (_passCtrl.text.isEmpty) _passCtrl.text = source.password;
+      return;
+    }
     if (_urlCtrl.text.isEmpty) _urlCtrl.text = config.embyUrl;
     if (_userCtrl.text.isEmpty) _userCtrl.text = config.embyUsername;
     if (_passCtrl.text.isEmpty) _passCtrl.text = config.embyPassword;
@@ -68,18 +131,7 @@ class _EmbyBrowserPageState extends ConsumerState<EmbyBrowserPage> {
         ),
       );
 
-      final config = ref.read(configProvider).asData?.value;
-      if (config != null) {
-        await ref
-            .read(configProvider.notifier)
-            .save(
-              config.copyWith(
-                embyUrl: url,
-                embyUsername: _userCtrl.text.trim(),
-                embyPassword: _passCtrl.text,
-              ),
-            );
-      }
+      await _saveSource();
 
       if (!mounted) return;
       setState(() {

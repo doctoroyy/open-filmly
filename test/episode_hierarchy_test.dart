@@ -204,9 +204,97 @@ void main() {
       expect(b.media.title, '生活大爆炸');
       expect(a.media.id, b.media.id);
     });
+
+    test('numeric filenames in a show folder become their episode numbers', () {
+      final e09 = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: 'nas'),
+        file: SmbFile(
+          '/wd-downloads/aria2-downloads/唐朝诡事录.4K.内封/09.mkv',
+          r'\\nas\wd-downloads\aria2-downloads\唐朝诡事录.4K.内封\09.mkv',
+          'wd-downloads',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+      final e22 = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: 'nas'),
+        file: SmbFile(
+          '/wd-downloads/aria2-downloads/唐朝诡事录.4K.内封/22.mkv',
+          r'\\nas\wd-downloads\aria2-downloads\唐朝诡事录.4K.内封\22.mkv',
+          'wd-downloads',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+
+      expect(e09.media.type, MediaType.tv);
+      expect(e09.media.title, '唐朝诡事录');
+      expect(e09.episode!.seasonNumber, 1);
+      expect(e09.episode!.episodeNumber, 9);
+      expect(e22.episode!.episodeNumber, 22);
+      expect(e09.media.id, e22.media.id);
+    });
   });
 
   group('MediaRepository consolidate by tmdbId', () {
+    test('library browsing hides cross-source duplicate TV cards', () async {
+      await mediaRepo.upsert(
+        const Media(
+          id: 'local-stranger-things',
+          title: '怪奇物语',
+          year: '2016',
+          type: MediaType.tv,
+          path: '/Volumes/wd-downloads/怪奇物语 1-4季',
+          detailsJson: '{"tmdbId":66732}',
+        ),
+      );
+      await mediaRepo.upsert(
+        const Media(
+          id: 'smb-stranger-things',
+          title: '怪奇物语',
+          year: '2016',
+          type: MediaType.tv,
+          path: 'tv:smb:怪奇物语',
+          detailsJson: '{"tmdbId":66732}',
+        ),
+      );
+      await episodeRepo.upsertAll([
+        const Episode(
+          id: 'local-ep-1',
+          showId: 'local-stranger-things',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          path: '/Volumes/wd-downloads/怪奇物语 1-4季/S01E01.mkv',
+        ),
+        const Episode(
+          id: 'smb-ep-1',
+          showId: 'smb-stranger-things',
+          seasonNumber: 1,
+          episodeNumber: 1,
+          path: 'smb://nas/tv/怪奇物语/S01E01.mkv',
+        ),
+        const Episode(
+          id: 'smb-ep-2',
+          showId: 'smb-stranger-things',
+          seasonNumber: 1,
+          episodeNumber: 2,
+          path: 'smb://nas/tv/怪奇物语/S01E02.mkv',
+        ),
+      ]);
+
+      final visible = await mediaRepo.getByType(MediaType.tv);
+      expect(visible, hasLength(1));
+      expect(visible.single.id, 'smb-stranger-things');
+    });
+
     test('merges seasons that share TMDB id across weak titles', () async {
       await mediaRepo.upsert(
         const Media(

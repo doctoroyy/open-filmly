@@ -1,6 +1,9 @@
+import 'resource_source.dart';
+
 /// Persisted application configuration, serialized as JSON under the
 /// `app_config` config key. [fromJson] accepts both the new field names and the
 /// Electron-era aliases so an exported old config can be imported as-is.
+
 class AppConfig {
   const AppConfig({
     this.smbHost = '',
@@ -18,6 +21,7 @@ class AppConfig {
     this.embyUrl = '',
     this.embyUsername = '',
     this.embyPassword = '',
+    this.resourceSources = const [],
   });
 
   final String smbHost;
@@ -35,6 +39,7 @@ class AppConfig {
   final String embyUrl;
   final String embyUsername;
   final String embyPassword;
+  final List<ResourceSource> resourceSources;
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     String pick(List<String> keys) {
@@ -47,6 +52,48 @@ class AppConfig {
 
     final folders = json['selectedFolders'];
     final autoScan = json['autoScanOnStartup'];
+    final rawSources = json['resourceSources'];
+    final sources = rawSources is List
+        ? rawSources
+              .whereType<Map>()
+              .map(
+                (value) =>
+                    ResourceSource.fromJson(Map<String, dynamic>.from(value)),
+              )
+              .toList(growable: false)
+        : <ResourceSource>[];
+    final migratedSources = [...sources];
+    if (migratedSources.isEmpty) {
+      final webdav = pick(['webdavUrl', 'webdavHost']);
+      if (webdav.isNotEmpty) {
+        migratedSources.add(
+          ResourceSource(
+            id: 'legacy-webdav',
+            name: '我的 WebDAV',
+            type: ResourceSourceType.webdav,
+            endpoint: webdav,
+            username: pick(['webdavUsername']),
+            password: pick(['webdavPassword']),
+          ),
+        );
+      }
+      final smb = pick(['smbHost', 'host', 'ip']);
+      if (smb.isNotEmpty) {
+        migratedSources.add(
+          ResourceSource(
+            id: 'legacy-smb',
+            name: '我的 SMB',
+            type: ResourceSourceType.smb,
+            endpoint: smb,
+            port: '445',
+            username: pick(['smbUsername', 'username']),
+            password: pick(['smbPassword', 'password']),
+            domain: pick(['smbDomain', 'domain']),
+            path: pick(['smbShare', 'sharePath', 'share']),
+          ),
+        );
+      }
+    }
     return AppConfig(
       smbHost: pick(['smbHost', 'host', 'ip']),
       smbUsername: pick(['smbUsername', 'username']).isEmpty
@@ -67,6 +114,7 @@ class AppConfig {
       embyUrl: pick(['embyUrl', 'embyHost']),
       embyUsername: pick(['embyUsername']),
       embyPassword: pick(['embyPassword']),
+      resourceSources: migratedSources,
     );
   }
 
@@ -86,6 +134,9 @@ class AppConfig {
     'embyUrl': embyUrl,
     'embyUsername': embyUsername,
     'embyPassword': embyPassword,
+    'resourceSources': resourceSources
+        .map((source) => source.toJson())
+        .toList(),
   };
 
   AppConfig copyWith({
@@ -104,6 +155,7 @@ class AppConfig {
     String? embyUrl,
     String? embyUsername,
     String? embyPassword,
+    List<ResourceSource>? resourceSources,
   }) {
     return AppConfig(
       smbHost: smbHost ?? this.smbHost,
@@ -121,6 +173,7 @@ class AppConfig {
       embyUrl: embyUrl ?? this.embyUrl,
       embyUsername: embyUsername ?? this.embyUsername,
       embyPassword: embyPassword ?? this.embyPassword,
+      resourceSources: resourceSources ?? this.resourceSources,
     );
   }
 }

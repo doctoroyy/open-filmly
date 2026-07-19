@@ -83,6 +83,14 @@ class MediaLibraryEntryFactory {
     caseSensitive: false,
   );
 
+  /// Numeric episode filenames used by some Chinese TV packs, for example
+  /// `09.mkv` or `01-长安红茶.mkv`. These are only treated as episodes when
+  /// the containing folder looks like a real show folder.
+  static final _numericEpisodePattern = RegExp(
+    r'^(?:ep(?:isode)?[ ._-]*)?(\d{1,3})(?:[ ._-].*)?$',
+    caseSensitive: false,
+  );
+
   /// Matches a directory segment that is purely a season container, including
   /// common Chinese pack layouts like `S01.第一季`, `S02 第二季`, `第一季`,
   /// `Season 1`, and bare `S01`.
@@ -669,6 +677,18 @@ class MediaLibraryEntryFactory {
         _episodePattern.firstMatch(basename) ??
         _episodePattern.firstMatch(logicalPath);
     if (match == null) {
+      final numericEpisode = _numericEpisodeNumber(basename);
+      if (numericEpisode != null) {
+        return Episode(
+          id: id,
+          showId: showId,
+          seasonNumber: _inferSeasonFromPath(logicalPath) ?? 1,
+          episodeNumber: numericEpisode,
+          title: _episodeTitleFromBasename(basename),
+          path: filePath,
+          fullPath: fullPath,
+        );
+      }
       // Check if we can infer season from folder structure
       final seasonNum = _inferSeasonFromPath(logicalPath);
       if (seasonNum != null) {
@@ -750,6 +770,7 @@ class MediaLibraryEntryFactory {
   }
 
   static String _episodeTitleFromBasename(String basename) {
+    if (_numericEpisodeNumber(basename) != null) return '';
     // Remove the S01E02 pattern and clean what remains
     var title = basename.replaceAll(_episodePattern, '');
     title = title.replaceAll(_yearPattern, '');
@@ -882,11 +903,13 @@ class MediaLibraryEntryFactory {
 
   static MediaType _detectType(String logicalPath, String basename) {
     final lower = logicalPath.toLowerCase();
+    final numericEpisode = _looksLikeNumericEpisodePath(logicalPath, basename);
     // Non-entertainment / system dumps should not default into 电影.
-    if (_looksLikeNonEntertainment(logicalPath, basename)) {
+    if (!numericEpisode && _looksLikeNonEntertainment(logicalPath, basename)) {
       return MediaType.unknown;
     }
     if (_episodePattern.hasMatch(basename) ||
+        numericEpisode ||
         lower.contains('/tv/') ||
         lower.contains('/shows/') ||
         lower.contains('/series/') ||
@@ -919,9 +942,44 @@ class MediaLibraryEntryFactory {
     ).hasMatch(blob)) {
       return true;
     }
-    // Bare numeric lesson files: "01.mp4", "18.mkv".
-    if (RegExp(r'^\d{1,3}$').hasMatch(basename.trim())) return true;
+    // Bare numeric lesson files: "01.mp4", "18.mkv". A numeric file inside
+    // a recognizable show folder is handled by the TV parser instead.
+    if (_numericEpisodeNumber(basename) != null &&
+        !_looksLikeNumericEpisodePath(logicalPath, basename)) {
+      return true;
+    }
     return false;
+  }
+
+  static int? _numericEpisodeNumber(String basename) {
+    final match = _numericEpisodePattern.firstMatch(basename.trim());
+    final value = int.tryParse(match?.group(1) ?? '');
+    return value == null || value <= 0 ? null : value;
+  }
+
+  static bool _looksLikeNumericEpisodePath(
+    String logicalPath,
+    String basename,
+  ) {
+    if (_numericEpisodeNumber(basename) == null) return false;
+    final segments = logicalPath
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (segments.length < 2) return false;
+
+    final parent = segments[segments.length - 2].trim();
+    if (parent.isEmpty ||
+        _isSeasonFolderName(parent) ||
+        _isEpisodeFolderName(parent) ||
+        isDumpOrInboxFolderName(parent) ||
+        _libraryRootNamePattern.hasMatch(parent)) {
+      return false;
+    }
+
+    final candidate = _cleanTitle(_stripSeasonSuffix(parent));
+    return _isUsableShowTitle(candidate) &&
+        RegExp(r'[A-Za-z\u4e00-\u9fff]').hasMatch(candidate);
   }
 
   static bool _pathHasSeasonFolder(String logicalPath) {

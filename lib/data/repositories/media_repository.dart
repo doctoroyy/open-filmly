@@ -36,6 +36,7 @@ class MediaRepository {
     MediaSort sort = MediaSort.title,
     int? limit,
     List<String> genreTerms = const [],
+    bool deduplicateShows = true,
   }) async {
     final query = _db.select(_db.mediaItems);
     // When filtering by exclusive shelf, load all rows then classify in memory
@@ -63,11 +64,15 @@ class MediaRepository {
         .map((term) => term.trim().toLowerCase())
         .where((term) => term.isNotEmpty)
         .toList(growable: false);
-    final filtered = normalizedGenreTerms.isEmpty
+    var filtered = normalizedGenreTerms.isEmpty
         ? searchFiltered
         : searchFiltered
               .where((media) => _matchesGenreTerms(media, normalizedGenreTerms))
               .toList();
+
+    if (deduplicateShows) {
+      filtered = await _deduplicateShows(filtered);
+    }
 
     filtered.sort((a, b) => _compareMedia(a, b, sort));
 
@@ -144,7 +149,7 @@ class MediaRepository {
   ///    what re-unites seasons that were wrongly split as `S01`/`S02`/…
   Future<int> consolidateTvShow(Media canonical) async {
     if (canonical.type != MediaType.tv) return 0;
-    final allShows = await browse(type: MediaType.tv);
+    final allShows = await browse(type: MediaType.tv, deduplicateShows: false);
     final canonicalScope = _sourceScope(canonical);
     final canonicalTitle = _normalizedShowTitle(canonical.title);
     final canonicalTmdb = canonical.tmdbId;
@@ -207,7 +212,7 @@ class MediaRepository {
   /// Merges every TV show that shares a TMDB id (or identical normalized
   /// title) within the same source. Safe to call after metadata enrichment.
   Future<int> consolidateAllTvShows() async {
-    final shows = await browse(type: MediaType.tv);
+    final shows = await browse(type: MediaType.tv, deduplicateShows: false);
     final seen = <String>{};
     var removed = 0;
     // Stronger rows first so weak season-token ids get absorbed into them.
@@ -262,14 +267,7 @@ class MediaRepository {
   Future<Map<MediaType, int>> countByType() async {
     final counts = <MediaType, int>{};
     for (final type in MediaType.values) {
-      final countExp = _db.mediaItems.id.count();
-      final value =
-          await (_db.selectOnly(_db.mediaItems)
-                ..addColumns([countExp])
-                ..where(_db.mediaItems.type.equals(type.value)))
-              .map((row) => row.read(countExp) ?? 0)
-              .getSingle();
-      counts[type] = value;
+      counts[type] = (await browse(type: type)).length;
     }
     return counts;
   }
@@ -277,15 +275,80 @@ class MediaRepository {
   /// Count of items per exclusive [LibraryShelf] (same rules as sidebar /
   /// poster walls: TMDB match required for 电影/电视剧, etc.).
   Future<Map<LibraryShelf, int>> countByShelf() async {
-    final items = (await (_db.select(
-      _db.mediaItems,
-    )).get()).map(_toDomain).toList(growable: false);
+    final items = await browse();
     final counts = {for (final shelf in LibraryShelf.values) shelf: 0};
     for (final media in items) {
       final shelf = LibraryShelfClassifier.classify(media);
       counts[shelf] = (counts[shelf] ?? 0) + 1;
     }
     return counts;
+  }
+
+  /// Hides duplicate TV cards that point at the same TMDB series through
+  /// different source adapters (for example a mounted SMB share and the same
+  /// NAS folder scanned locally). We keep both database rows because their
+  /// playback credentials/paths differ; the card uses the row with the most
+  /// distinct playable episodes.
+  Future<List<Media>> _deduplicateShows(List<Media> items) async {
+    final grouped = <String, List<Media>>{};
+    final standalone = <Media>[];
+    for (final media in items) {
+      final tmdbId = media.type == MediaType.tv
+          ? media.tmdbId?.toString().trim()
+          : null;
+      if (tmdbId == null || tmdbId.isEmpty) {
+        standalone.add(media);
+        continue;
+      }
+      grouped.putIfAbsent('tv:$tmdbId', () => []).add(media);
+    }
+
+    final selected = <Media>[...standalone];
+    for (final group in grouped.values) {
+      var best = group.first;
+      var bestEpisodeCount = await _distinctEpisodeCount(best.id);
+      for (final candidate in group.skip(1)) {
+        final candidateEpisodeCount = await _distinctEpisodeCount(candidate.id);
+        if (_isPreferredDuplicate(
+          candidate,
+          candidateEpisodeCount,
+          best,
+          bestEpisodeCount,
+        )) {
+          best = candidate;
+          bestEpisodeCount = candidateEpisodeCount;
+        }
+      }
+      selected.add(best);
+    }
+    return selected;
+  }
+
+  bool _isPreferredDuplicate(
+    Media candidate,
+    int candidateEpisodeCount,
+    Media current,
+    int currentEpisodeCount,
+  ) {
+    if (candidateEpisodeCount != currentEpisodeCount) {
+      return candidateEpisodeCount > currentEpisodeCount;
+    }
+    final quality = _metadataQuality(
+      candidate,
+    ).compareTo(_metadataQuality(current));
+    if (quality != 0) return quality > 0;
+    if (candidate.isFavorite != current.isFavorite) return candidate.isFavorite;
+    return candidate.id.compareTo(current.id) < 0;
+  }
+
+  Future<int> _distinctEpisodeCount(String showId) async {
+    final rows = await (_db.select(
+      _db.episodes,
+    )..where((row) => row.showId.equals(showId))).get();
+    return rows
+        .map((row) => '${row.seasonNumber}:${row.episodeNumber}')
+        .toSet()
+        .length;
   }
 
   /// Returns IDs of items that have no poster (i.e. need metadata enrichment).

@@ -62,6 +62,8 @@ class LibraryAutoScanService {
     // also cleans SMB/WebDAV imports.
     final purged = await _purgeJunk();
     final fakeEps = await _purgeFakeEpisodes();
+    final repairedEpisodes = await _repairEpisodeNumbers();
+    final duplicateEpisodes = await _removeExactEpisodeDuplicates();
     final retitled = await _retitleDirtyTitles();
     // Reunite TV seasons that older parsers split into one-show-per-season
     // (e.g. `S01.第一季` → title "S01"). Safe / idempotent.
@@ -99,7 +101,14 @@ class LibraryAutoScanService {
       await _repo.consolidateAllTvShows();
     }
 
-    final hygiene = retitled + purged + fakeEps + repaired + dumpFixed;
+    final hygiene =
+        retitled +
+        purged +
+        fakeEps +
+        repairedEpisodes +
+        duplicateEpisodes +
+        repaired +
+        dumpFixed;
 
     return AutoScanResult(
       scannedFiles: scannedFiles,
@@ -114,7 +123,7 @@ class LibraryAutoScanService {
   /// Removes rows whose source path is OS junk (e.g. macOS `._` AppleDouble
   /// sidecars) that earlier scans imported as phantom duplicates.
   Future<int> _purgeJunk() async {
-    final items = await _repo.browse();
+    final items = await _repo.browse(deduplicateShows: false);
     var purged = 0;
     for (final media in items) {
       final path = media.fullPath ?? media.path;
@@ -132,14 +141,19 @@ class LibraryAutoScanService {
   Future<int> _purgeFakeEpisodes() async {
     final episodeRepo = _episodeRepo;
     if (episodeRepo == null) return 0;
-    final shows = await _repo.browse(type: MediaType.tv);
+    final shows = await _repo.browse(
+      type: MediaType.tv,
+      deduplicateShows: false,
+    );
     var removed = 0;
     for (final show in shows) {
-      final episodes = await episodeRepo.getByShow(show.id);
+      final episodes = await episodeRepo.getRawByShow(show.id);
       for (final episode in episodes) {
         final path = (episode.path).trim();
         final full = (episode.fullPath ?? '').trim();
         final looksFake =
+            MediaLibraryEntryFactory.isJunkPath(path) ||
+            (full.isNotEmpty && MediaLibraryEntryFactory.isJunkPath(full)) ||
             path.startsWith('tv:') ||
             full.startsWith('tv:') ||
             (!MediaLibraryEntryFactory.isVideoPath(path) &&
@@ -154,6 +168,58 @@ class LibraryAutoScanService {
       }
     }
     return removed;
+  }
+
+  /// Re-parses older episode rows after the filename parser learns a new
+  /// layout. In particular, Chinese packs often use `09.mkv` / `22.mkv`
+  /// instead of S01E09 / S01E22; older versions stored both as S01E01 and the
+  /// episode repository hid one of them as a duplicate.
+  Future<int> _repairEpisodeNumbers() async {
+    final episodeRepo = _episodeRepo;
+    if (episodeRepo == null) return 0;
+
+    final shows = await _repo.browse(
+      type: MediaType.tv,
+      deduplicateShows: false,
+    );
+    var repaired = 0;
+    for (final show in shows) {
+      final episodes = await episodeRepo.getRawByShow(show.id);
+      for (final episode in episodes) {
+        final candidatePath = _logicalMediaPath(
+          episode.fullPath ?? episode.path,
+        );
+        if (candidatePath.isEmpty) continue;
+        final parsed = MediaLibraryEntryFactory.fromLocalPath(candidatePath);
+        final parsedEpisode = parsed.episode;
+        if (parsed.media.type != MediaType.tv || parsedEpisode == null) {
+          continue;
+        }
+        if (parsedEpisode.seasonNumber == episode.seasonNumber &&
+            parsedEpisode.episodeNumber == episode.episodeNumber) {
+          continue;
+        }
+
+        await episodeRepo.upsert(
+          parsedEpisode.copyWith(
+            id: episode.id,
+            showId: show.id,
+            path: episode.path,
+            fullPath: episode.fullPath,
+            title: episode.title.isNotEmpty
+                ? episode.title
+                : parsedEpisode.title,
+            dateAdded: episode.dateAdded,
+          ),
+        );
+        repaired++;
+      }
+    }
+    return repaired;
+  }
+
+  Future<int> _removeExactEpisodeDuplicates() {
+    return _episodeRepo?.removeExactDuplicates() ?? Future.value(0);
   }
 
   /// Re-derives titles from filenames for entries without TMDB metadata, so
@@ -195,7 +261,10 @@ class LibraryAutoScanService {
       return _repo.consolidateAllTvShows();
     }
 
-    final shows = await _repo.browse(type: MediaType.tv);
+    final shows = await _repo.browse(
+      type: MediaType.tv,
+      deduplicateShows: false,
+    );
     var retitled = 0;
     for (final show in shows) {
       final episodes = await episodeRepo.getByShow(show.id);
@@ -288,7 +357,10 @@ class LibraryAutoScanService {
     final episodeRepo = _episodeRepo;
     if (episodeRepo == null) return 0;
 
-    final shows = await _repo.browse(type: MediaType.tv);
+    final shows = await _repo.browse(
+      type: MediaType.tv,
+      deduplicateShows: false,
+    );
     var fixed = 0;
     for (final show in shows) {
       final pathLeaf =

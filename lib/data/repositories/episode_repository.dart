@@ -11,14 +11,7 @@ class EpisodeRepository {
   final AppDatabase _db;
 
   Future<List<Episode>> getByShow(String showId) async {
-    final rows =
-        await (_db.select(_db.episodes)
-              ..where((t) => t.showId.equals(showId))
-              ..orderBy([
-                (t) => OrderingTerm.asc(t.seasonNumber),
-                (t) => OrderingTerm.asc(t.episodeNumber),
-              ]))
-            .get();
+    final rows = await _rawRowsByShow(showId);
     final unique = <(int, int), Episode>{};
     for (final row in rows) {
       final episode = _toDomain(row);
@@ -35,6 +28,49 @@ class EpisodeRepository {
       return season != 0 ? season : a.episodeNumber.compareTo(b.episodeNumber);
     });
     return episodes;
+  }
+
+  /// Returns every stored row without collapsing duplicate season/episode
+  /// numbers. Startup repair uses this to recover older rows that were all
+  /// written as S01E01, and to remove AppleDouble sidecars individually.
+  Future<List<Episode>> getRawByShow(String showId) async {
+    final rows = await _rawRowsByShow(showId);
+    return rows.map(_toDomain).toList(growable: false);
+  }
+
+  /// Removes rows that point at the exact same physical episode file. A show
+  /// may still legitimately have two different files for one episode (for
+  /// example local and SMB alternatives), so the path is part of the key.
+  Future<int> removeExactDuplicates() async {
+    final rows = await (_db.select(
+      _db.episodes,
+    )..orderBy([(t) => OrderingTerm.asc(t.dateAdded)])).get();
+    final kept = <String, Episode>{};
+    var removed = 0;
+    for (final row in rows) {
+      final episode = _toDomain(row);
+      final key = [
+        episode.showId,
+        episode.seasonNumber,
+        episode.episodeNumber,
+        episode.path,
+        episode.fullPath ?? '',
+      ].join('\u0000');
+      final previous = kept[key];
+      if (previous == null) {
+        kept[key] = episode;
+        continue;
+      }
+
+      final preferred = _quality(episode) > _quality(previous)
+          ? episode
+          : previous;
+      final duplicate = preferred.id == episode.id ? previous : episode;
+      await deleteById(duplicate.id);
+      kept[key] = preferred;
+      removed++;
+    }
+    return removed;
   }
 
   /// Returns episodes grouped into [Season] objects, sorted ascending.
@@ -127,6 +163,16 @@ class EpisodeRepository {
     fullPath: row.fullPath,
     dateAdded: row.dateAdded,
   );
+
+  Future<List<EpisodeRow>> _rawRowsByShow(String showId) {
+    return (_db.select(_db.episodes)
+          ..where((t) => t.showId.equals(showId))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.seasonNumber),
+            (t) => OrderingTerm.asc(t.episodeNumber),
+          ]))
+        .get();
+  }
 
   static const _videoExtensions = {
     '.mp4',

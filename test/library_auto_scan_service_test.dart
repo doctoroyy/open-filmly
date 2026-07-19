@@ -152,6 +152,107 @@ void main() {
       expect(result.skipped, isTrue);
     });
 
+    test(
+      'repairs numeric episode rows and purges AppleDouble sidecars',
+      () async {
+        const showId = 'smb://nas/tv/唐朝诡事录.4K.内封/22.mkv';
+        await repo.upsert(
+          const Media(
+            id: showId,
+            title: '唐朝诡事录',
+            year: '2022',
+            type: MediaType.tv,
+            path: showId,
+            fullPath: '/tv/唐朝诡事录.4K.内封',
+            detailsJson: '{"tmdbId":211089}',
+          ),
+        );
+        await episodeRepo.upsertAll([
+          const Episode(
+            id: 'ep-09',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            path: 'smb://nas/tv/唐朝诡事录.4K.内封/09.mkv',
+            fullPath: '/tv/唐朝诡事录.4K.内封/09.mkv',
+          ),
+          const Episode(
+            id: 'ep-22',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            path: 'smb://nas/tv/唐朝诡事录.4K.内封/22.mkv',
+            fullPath: '/tv/唐朝诡事录.4K.内封/22.mkv',
+          ),
+          const Episode(
+            id: 'sidecar',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 9,
+            path: '/tv/唐朝诡事录.4K.内封/._09.mkv',
+            fullPath: '/tv/唐朝诡事录.4K.内封/._09.mkv',
+          ),
+        ]);
+
+        final result = await buildService().run(const AppConfig());
+        final episodes = await episodeRepo.getByShow(showId);
+
+        expect(result.hasChanges, isTrue);
+        expect(episodes.map((episode) => episode.episodeNumber), [9, 22]);
+        expect(
+          episodes.every((episode) => !episode.path.contains('._')),
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      'removes exact duplicate episode rows without removing alternatives',
+      () async {
+        const showId = 'tv:duplicate-episode-paths';
+        await repo.upsert(
+          const Media(
+            id: showId,
+            title: '测试剧集',
+            year: '2022',
+            type: MediaType.tv,
+            path: '/tv/test',
+          ),
+        );
+        await episodeRepo.upsertAll([
+          const Episode(
+            id: 'same-file-old',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            path: '/tv/test/S01E01.mkv',
+            fullPath: '/tv/test/S01E01.mkv',
+          ),
+          const Episode(
+            id: 'same-file-new',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            path: '/tv/test/S01E01.mkv',
+            fullPath: '/tv/test/S01E01.mkv',
+          ),
+          const Episode(
+            id: 'alternative-file',
+            showId: showId,
+            seasonNumber: 1,
+            episodeNumber: 1,
+            path: 'smb://nas/tv/test/S01E01.mkv',
+            fullPath: '/tv/test/S01E01.mkv',
+          ),
+        ]);
+
+        await buildService().run(const AppConfig());
+        final raw = await episodeRepo.getRawByShow(showId);
+        expect(raw, hasLength(2));
+        expect(raw.map((episode) => episode.id), contains('alternative-file'));
+      },
+    );
+
     test('imports new files without clearing the existing library', () async {
       // Pre-existing item that the incremental scan must preserve.
       await repo.upsert(

@@ -7,6 +7,7 @@ import 'package:smb_connect/smb_connect.dart';
 
 import '../../core/platform/open_player.dart';
 import '../../data/models/app_config.dart';
+import '../../data/models/resource_source.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/playback/external_subtitle_finder.dart';
@@ -23,7 +24,9 @@ import '../player/player_page.dart';
 /// SMB random-read → HTTP Range proxy → libmpv seekable playback. It is
 /// replaced by the proper config + library flow in M3.
 class SmbBrowserPage extends ConsumerStatefulWidget {
-  const SmbBrowserPage({super.key});
+  const SmbBrowserPage({super.key, this.sourceId});
+
+  final String? sourceId;
 
   @override
   ConsumerState<SmbBrowserPage> createState() => _SmbBrowserPageState();
@@ -65,10 +68,85 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
   /// Current directory path as a stack of folders; empty means the share list.
   final List<SmbFile> _stack = [];
   List<SmbFile> _entries = [];
+  final Set<String> _selectedPaths = {};
 
   SmbService get _smb => ref.read(smbServiceProvider);
   SmbProxyServer get _proxy => ref.read(smbProxyProvider);
   SmbFile? get _currentFolder => _stack.isEmpty ? null : _stack.last;
+
+  ResourceSource? _sourceFromConfig(AppConfig config) {
+    final sourceId = widget.sourceId;
+    if (sourceId != null) {
+      for (final source in config.resourceSources) {
+        if (source.id == sourceId) return source;
+      }
+    }
+    for (final source in config.resourceSources) {
+      if (source.type == ResourceSourceType.smb) return source;
+    }
+    return null;
+  }
+
+  void _applyConfig(AppConfig config) {
+    final source = _sourceFromConfig(config);
+    if (source != null) {
+      _hostCtrl.text = source.endpoint;
+      _userCtrl.text = source.username.isEmpty ? 'guest' : source.username;
+      _passCtrl.text = source.password;
+      _domainCtrl.text = source.domain;
+      if (source.path != '/') _shareCtrl.text = source.path;
+      return;
+    }
+    _hostCtrl.text = config.smbHost;
+    if (config.smbUsername.isNotEmpty) _userCtrl.text = config.smbUsername;
+    _passCtrl.text = config.smbPassword;
+    _domainCtrl.text = config.smbDomain;
+    if (config.smbShare.isNotEmpty) _shareCtrl.text = config.smbShare;
+  }
+
+  Future<void> _saveSource({String? importedPath}) async {
+    final config = ref.read(configProvider).asData?.value;
+    if (config == null) return;
+    final existing = _sourceFromConfig(config);
+    final paths = {...?existing?.importedPaths};
+    if (importedPath != null && importedPath.isNotEmpty) {
+      paths.add(importedPath);
+    }
+    final source = ResourceSource(
+      id:
+          existing?.id ??
+          widget.sourceId ??
+          ResourceSource.newId(ResourceSourceType.smb),
+      name: existing?.name ?? '我的 SMB',
+      type: ResourceSourceType.smb,
+      endpoint: _hostCtrl.text.trim(),
+      port: '445',
+      username: _userCtrl.text.trim().isEmpty ? 'guest' : _userCtrl.text.trim(),
+      password: _passCtrl.text,
+      domain: _domainCtrl.text.trim(),
+      path: _shareCtrl.text.trim().isEmpty ? '/' : _shareCtrl.text.trim(),
+      importedPaths: paths.toList(growable: false),
+    );
+    final sources = [...config.resourceSources];
+    final index = sources.indexWhere((item) => item.id == source.id);
+    if (index >= 0) {
+      sources[index] = source;
+    } else {
+      sources.add(source);
+    }
+    await ref
+        .read(configProvider.notifier)
+        .save(
+          config.copyWith(
+            smbHost: source.endpoint,
+            smbUsername: source.username,
+            smbPassword: source.password,
+            smbDomain: source.domain,
+            smbShare: source.path == '/' ? '' : source.path,
+            resourceSources: sources,
+          ),
+        );
+  }
 
   @override
   void dispose() {
@@ -104,18 +182,10 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       if (!mounted) return;
       setState(() => _connected = true);
 
-      // Auto-persist connection details to local database configuration
-      final currentConfig = ref.read(configProvider).value ?? const AppConfig();
-      final newConfig = currentConfig.copyWith(
-        smbHost: host,
-        smbUsername: user.isEmpty ? 'guest' : user,
-        smbPassword: _passCtrl.text,
-        smbDomain: _domainCtrl.text.trim(),
-        smbShare: _shareCtrl.text.trim(),
-      );
+      // Persist both the legacy resolver fields and the selected source.
       // Persist credentials best-effort; connection already succeeded.
       try {
-        await ref.read(configProvider.notifier).save(newConfig);
+        await _saveSource();
       } catch (_) {
         // ignore persistence failures
       }
@@ -141,6 +211,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       _connected = false;
       _entries = [];
       _stack.clear();
+      _selectedPaths.clear();
       _error = null;
     });
   }
@@ -148,19 +219,42 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
   Future<void> _importCurrentFolder() async {
     final folder = _currentFolder;
     if (folder == null) return;
+    await _importFolders([folder]);
+  }
+
+  Future<void> _importSelected() {
+    final selected = _entries
+        .where((entry) => _selectedPaths.contains(entry.path))
+        .toList(growable: false);
+    return _importFolders(selected);
+  }
+
+  Future<void> _importFolders(List<SmbFile> folders) async {
+    if (folders.isEmpty) return;
 
     setState(() => _importing = true);
     try {
-      final result = await ref
-          .read(smbLibraryImportProvider)
-          .importFolder(folder);
+      var importedItems = 0;
+      var movieCount = 0;
+      var tvCount = 0;
+      final mediaIds = <String>[];
+      for (final folder in folders) {
+        final result = await ref
+            .read(smbLibraryImportProvider)
+            .importFolder(folder);
+        importedItems += result.importedItems;
+        movieCount += result.movieCount;
+        tvCount += result.tvCount;
+        mediaIds.addAll(result.mediaIds);
+        await _saveSource(importedPath: folder.path);
+      }
       final config = await ref.read(configProvider.future);
       var metadataMessage = '';
-      if (config.tmdbApiKey.isNotEmpty && result.mediaIds.isNotEmpty) {
+      if (config.tmdbApiKey.isNotEmpty && mediaIds.isNotEmpty) {
         final metadataResult = await ref
             .read(libraryMetadataSyncProvider)
             .enrichByIds(
-              mediaIds: result.mediaIds,
+              mediaIds: mediaIds,
               apiKey: config.tmdbApiKey,
               geminiApiKey: config.geminiApiKey,
             );
@@ -168,12 +262,13 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
             '，元数据更新 ${metadataResult.updatedItems}/${metadataResult.requestedItems}';
       }
       invalidateLibraryViews(ref);
+      _selectedPaths.clear();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '已导入 ${result.importedItems} 个媒体（电影 ${result.movieCount} / 剧集 ${result.tvCount}）$metadataMessage',
+            '已导入 $importedItems 个媒体（电影 $movieCount / 剧集 $tvCount）$metadataMessage',
           ),
         ),
       );
@@ -207,6 +302,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       if (!mounted) return;
       setState(() {
         _stack.clear();
+        _selectedPaths.clear();
         _entries = _sorted(shares);
       });
     } catch (e) {
@@ -225,6 +321,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     setState(() {
       _loading = true;
       _error = null;
+      _selectedPaths.clear();
     });
     try {
       final folder = await _smb.openFolder('/$name');
@@ -243,12 +340,16 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     }
   }
 
-  Future<void> _enter(SmbFile folder) =>
-      _load(() => _smb.listChildrenByPath(folder.path), push: folder);
+  Future<void> _enter(SmbFile folder) => _load(
+    () => _smb.listChildrenByPath(folder.path),
+    push: folder,
+    clearSelection: true,
+  );
 
   Future<void> _up() {
     if (_stack.isEmpty) return Future.value();
     _stack.removeLast();
+    _selectedPaths.clear();
     return _stack.isEmpty
         ? _loadShares()
         : _load(() => _smb.listChildrenByPath(_stack.last.path));
@@ -259,6 +360,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     Future<List<SmbFile>> Function() fetch, {
     SmbFile? push,
     bool resetStack = false,
+    bool clearSelection = false,
   }) async {
     setState(() {
       _loading = true;
@@ -269,6 +371,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       if (!mounted) return;
       setState(() {
         if (resetStack) _stack.clear();
+        if (clearSelection) _selectedPaths.clear();
         if (push != null) _stack.add(push);
         _entries = _sorted(entries);
       });
@@ -277,6 +380,39 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  bool _isDirectoryEntry(SmbFile entry) {
+    return _stack.isEmpty || entry.isDirectory();
+  }
+
+  void _toggleSelection(SmbFile entry, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedPaths.add(entry.path);
+      } else {
+        _selectedPaths.remove(entry.path);
+      }
+    });
+  }
+
+  bool get _allDirectoriesSelected {
+    final directories = _entries.where(_isDirectoryEntry).toList();
+    return directories.isNotEmpty &&
+        directories.every((entry) => _selectedPaths.contains(entry.path));
+  }
+
+  void _toggleSelectAll() {
+    final directories = _entries.where(_isDirectoryEntry).toList();
+    setState(() {
+      if (_allDirectoriesSelected) {
+        _selectedPaths.clear();
+      } else {
+        _selectedPaths
+          ..clear()
+          ..addAll(directories.map((entry) => entry.path));
+      }
+    });
   }
 
   Future<void> _onTap(SmbFile entry) async {
@@ -352,13 +488,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       if (next.hasValue && !_prefilled && !_connected) {
         final config = next.value!;
         setState(() {
-          _hostCtrl.text = config.smbHost;
-          if (config.smbUsername.isNotEmpty) {
-            _userCtrl.text = config.smbUsername;
-          }
-          _passCtrl.text = config.smbPassword;
-          _domainCtrl.text = config.smbDomain;
-          if (config.smbShare.isNotEmpty) _shareCtrl.text = config.smbShare;
+          _applyConfig(config);
           _prefilled = true;
         });
       }
@@ -369,11 +499,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
       final configAsync = ref.watch(configProvider);
       if (configAsync.hasValue) {
         final config = configAsync.value!;
-        _hostCtrl.text = config.smbHost;
-        if (config.smbUsername.isNotEmpty) _userCtrl.text = config.smbUsername;
-        _passCtrl.text = config.smbPassword;
-        _domainCtrl.text = config.smbDomain;
-        if (config.smbShare.isNotEmpty) _shareCtrl.text = config.smbShare;
+        _applyConfig(config);
         _prefilled = true;
       }
     }
@@ -508,8 +634,23 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
                 leading: _importing ? _spinner() : null,
                 onTap: _loading || _importing ? null : _importCurrentFolder,
               ),
+            FilmlyGlassButton(
+              label: _allDirectoriesSelected ? '取消全选' : '全选',
+              icon: _allDirectoriesSelected
+                  ? Icons.deselect_rounded
+                  : Icons.select_all_rounded,
+              onTap: _loading ? null : _toggleSelectAll,
+            ),
           ],
         ),
+        if (_selectedPaths.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _SmbSelectionImportPanel(
+            count: _selectedPaths.length,
+            importing: _importing,
+            onImport: _importSelected,
+          ),
+        ],
         const SizedBox(height: 20),
         if (_error != null && _stack.isNotEmpty) ...[
           Text(
@@ -591,14 +732,20 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
                   ),
                 ),
               if (isDir)
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  color: FilmlyPalette.textSecondary,
-                  size: 20,
+                Checkbox.adaptive(
+                  value: _selectedPaths.contains(entry.path),
+                  onChanged: (value) => _toggleSelection(entry, value == true),
+                  activeColor: FilmlyPalette.accent,
                 )
               else if (isVideo)
                 const Icon(
                   Icons.play_circle_outline_rounded,
+                  color: FilmlyPalette.textSecondary,
+                  size: 20,
+                ),
+              if (isDir)
+                const Icon(
+                  Icons.chevron_right_rounded,
                   color: FilmlyPalette.textSecondary,
                   size: 20,
                 ),
@@ -733,4 +880,62 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     height: 16,
     child: CircularProgressIndicator(strokeWidth: 2),
   );
+}
+
+class _SmbSelectionImportPanel extends StatelessWidget {
+  const _SmbSelectionImportPanel({
+    required this.count,
+    required this.importing,
+    required this.onImport,
+  });
+
+  final int count;
+  final bool importing;
+  final VoidCallback onImport;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilmlyGlassPanel(
+      color: Colors.white.withValues(alpha: 0.82),
+      borderRadius: BorderRadius.circular(18),
+      padding: const EdgeInsets.fromLTRB(16, 13, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '导入后可在 App 内展示和播放，但不会下载这些资源',
+            style: TextStyle(color: FilmlyPalette.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Text(
+                '导入至：',
+                style: TextStyle(
+                  color: FilmlyPalette.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Text(
+                '媒体库 & 资源库',
+                style: TextStyle(
+                  color: FilmlyPalette.accent,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              FilmlyGlassButton(
+                label: importing ? '导入中…' : '导入 $count 项',
+                icon: importing ? null : Icons.download_rounded,
+                accent: true,
+                onTap: importing ? null : onImport,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
