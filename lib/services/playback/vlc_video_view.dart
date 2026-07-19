@@ -14,17 +14,25 @@ class VlcVideoView extends StatelessWidget {
     super.key,
     required this.service,
     required this.nativeOverlayInsets,
+    this.platformViewHitTestable = true,
   });
 
   final PlaybackService service;
   final EdgeInsets nativeOverlayInsets;
+
+  /// When false, the macOS AppKit platform view does not participate in hit
+  /// testing so full-screen Flutter barriers (e.g. episode drawer scrim) can
+  /// receive clicks over the video area.
+  final bool platformViewHitTestable;
 
   @override
   Widget build(BuildContext context) {
     return switch (defaultTargetPlatform) {
       TargetPlatform.macOS => AppKitView(
         viewType: 'open_filmly/vlc_player_view',
-        hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+        hitTestBehavior: platformViewHitTestable
+            ? PlatformViewHitTestBehavior.opaque
+            : PlatformViewHitTestBehavior.transparent,
         gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{},
         creationParams: const <String, Object?>{},
         creationParamsCodec: const StandardMessageCodec(),

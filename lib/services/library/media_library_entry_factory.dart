@@ -904,15 +904,9 @@ class MediaLibraryEntryFactory {
     );
 
     // Collection markers: "1-4季", "1-10 季", "1~12季", "1到10季"
-    result = result.replaceAll(
-      RegExp(r'\s*\d+\s*[-~到至]\s*\d+\s*季\s*$'),
-      '',
-    );
+    result = result.replaceAll(RegExp(r'\s*\d+\s*[-~到至]\s*\d+\s*季\s*$'), '');
     result = result.replaceAll(RegExp(r'\s*[\d\-~]+季\s*$'), '');
-    result = result.replaceAll(
-      RegExp(r'\s*全[一二三四五六七八九十百\d]+\s*季\s*$'),
-      '',
-    );
+    result = result.replaceAll(RegExp(r'\s*全[一二三四五六七八九十百\d]+\s*季\s*$'), '');
 
     // Trailing single-season markers, with optional leading separators.
     result = result.replaceAll(

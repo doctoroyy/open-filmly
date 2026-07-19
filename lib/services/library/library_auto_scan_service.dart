@@ -215,8 +215,7 @@ class LibraryAutoScanService {
           show.tmdbId == null;
       if (!needsRetitle) continue;
 
-      final dropStaleMatch =
-          pathLooksSplit || _isWeakSeasonTitle(show.title);
+      final dropStaleMatch = pathLooksSplit || _isWeakSeasonTitle(show.title);
       await _repo.upsert(
         Media(
           id: show.id,

@@ -1,9 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/image/filmly_image_cache.dart';
 import '../../data/models/app_config.dart';
 import '../../providers/data_providers.dart';
 import '../../widgets/filmly_design.dart';
@@ -146,8 +145,7 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
   Future<void> _clearImageCache() async {
     setState(() => _clearingCache = true);
     try {
-      await CachedNetworkImage.evictFromCache('');
-      await DefaultCacheManager().emptyCache();
+      await FilmlyImageCache.emptyCache();
       _showSnack('海报缓存已清除');
     } catch (e) {
       _showSnack('清除缓存失败：$e');

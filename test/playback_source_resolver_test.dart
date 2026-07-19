@@ -95,25 +95,28 @@ void main() {
     expect(source.httpHeaders, isNull);
   });
 
-  test('throws when SMB media is not connected and no credentials saved', () async {
-    final entry = MediaLibraryEntryFactory.fromSmbFile(
-      config: const SmbConfig(host: 'nas', username: 'guest'),
-      file: smbFile('/Media/Movies/Dune.2021.1080p.mkv', size: bytes.length),
-    );
-    await smb.disconnect();
+  test(
+    'throws when SMB media is not connected and no credentials saved',
+    () async {
+      final entry = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: 'nas', username: 'guest'),
+        file: smbFile('/Media/Movies/Dune.2021.1080p.mkv', size: bytes.length),
+      );
+      await smb.disconnect();
 
-    // No smbConfig callback — cannot recover the session.
-    await expectLater(
-      resolver.resolve(entry.media),
-      throwsA(
-        isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          contains('SMB source is not connected'),
+      // No smbConfig callback — cannot recover the session.
+      await expectLater(
+        resolver.resolve(entry.media),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('SMB source is not connected'),
+          ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 
   test('auto-reconnects SMB from saved credentials after disconnect', () async {
     final entry = MediaLibraryEntryFactory.fromSmbFile(

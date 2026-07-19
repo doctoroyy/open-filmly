@@ -1,8 +1,8 @@
 import 'package:drift/native.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:open_filmly/core/image/filmly_image_cache.dart';
 import 'package:open_filmly/core/router/app_router.dart';
 import 'package:open_filmly/data/database/database.dart';
 import 'package:open_filmly/data/models/media.dart';
@@ -162,8 +162,8 @@ void main() {
     // Sidebar uses 「最近观看」; the in-progress shelf title stays 「最近播放」.
     expect(find.text('最近观看'), findsOneWidget);
     expect(find.text('最近播放'), findsOneWidget);
-    final landscape = tester.widget<CachedNetworkImage>(
-      find.byType(CachedNetworkImage).first,
+    final landscape = tester.widget<FilmlyNetworkImage>(
+      find.byType(FilmlyNetworkImage).first,
     );
     expect(landscape.imageUrl, 'https://image.tmdb.org/t/p/w780/backdrop.jpg');
   });

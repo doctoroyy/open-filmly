@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../../core/platform/desktop_window.dart';
@@ -102,12 +104,7 @@ class PlayerArgs {
 
 /// Full-screen player backed by native VLCKit with a NetEase-style control layer.
 class PlayerPage extends ConsumerStatefulWidget {
-  const PlayerPage({
-    super.key,
-    required this.args,
-    this.onClose,
-    this.host,
-  });
+  const PlayerPage({super.key, required this.args, this.onClose, this.host});
 
   final PlayerArgs args;
 
@@ -129,12 +126,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const _nativeTopControlsReserve = 82.0;
   static const _nativeBottomControlsReserve = 138.0;
   static const _nativeBottomSheetReserve = 430.0;
+
   /// Quick presets shown as chips; continuous speed is adjusted via slider.
   static const _speedPresets = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
   static const _minRate = 0.25;
   static const _maxRate = 4.0;
   static const _rateStep = 0.1;
   static const _accent = Color(0xFF2F6BFF);
+
   /// Baomihua-like muted control grey.
   static const _chromeFg = Color(0xFFE8E8E8);
   static const _chromeDim = Color(0xFFB0B0B0);
@@ -165,11 +164,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Duration _buffer = Duration.zero;
   Duration _lastPersistedPosition = Duration.zero;
   bool _completed = false;
-  bool _playing = true;
+  bool _playing = false;
   bool _buffering = true;
   bool _controlsVisible = true;
   bool _optionSheetVisible = false;
   bool _dragging = false;
+
+  /// True until the first real frame/play event — keeps Baomihua-style spinner.
   bool _opening = true;
   String? _error;
   double _volume = 100;
@@ -177,10 +178,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _muted = false;
   double _rate = 1.0;
   bool _alwaysOnTop = false;
+
   /// Displayed like Baomihua top-right transfer rate (KB/s or MB/s).
   double _transferBytesPerSec = 0;
   DateTime? _speedSampleAt;
   Duration _speedSampleBuffer = Duration.zero;
+  Duration _speedSamplePosition = Duration.zero;
   Timer? _hideTimer;
   Timer? _toastTimer;
   Timer? _autoNextTimer;
@@ -190,12 +193,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   List<Episode> _episodes = const [];
   int _episodeIndex = -1;
-  /// Baomihua-style right-side episode picker (TV only).
+
+  /// Baomihua-style right-side drawers (only one open at a time).
   bool _episodePanelOpen = false;
+  bool _audioPanelOpen = false;
+  bool _subtitlePanelOpen = false;
+
   /// Selected season in the panel (not necessarily the currently playing one).
   int _panelSeason = 1;
+
   /// Which 10-episode page is selected inside the panel (0-based).
   int _episodePageIndex = 0;
+
   /// Cache of TMDB episode metadata: "season:episode" → details.
   final Map<String, TmdbEpisodeDetails> _tmdbEpisodeMeta = {};
   bool _loadingSeasonMeta = false;
@@ -204,6 +213,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   String? _autoSubtitleKey;
   bool _applyingSubtitlePreference = false;
   bool _subtitlePreferencePending = false;
+
+  bool get _anySidePanelOpen =>
+      _episodePanelOpen || _audioPanelOpen || _subtitlePanelOpen;
 
   @override
   void initState() {
@@ -308,52 +320,78 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
+  bool get _isNetworkUri {
+    final u = _uri;
+    return u.startsWith('http://') ||
+        u.startsWith('https://') ||
+        u.startsWith('smb://') ||
+        u.startsWith('webdav://') ||
+        u.startsWith('webdavs://');
+  }
+
   void _sampleTransferRate() {
     if (!mounted) return;
     final now = DateTime.now();
     final prevAt = _speedSampleAt;
     final prevBuf = _speedSampleBuffer;
+    final prevPos = _speedSamplePosition;
     _speedSampleAt = now;
     _speedSampleBuffer = _buffer;
+    _speedSamplePosition = _position;
     if (prevAt == null) return;
     final dt = now.difference(prevAt).inMilliseconds;
     if (dt <= 0) return;
-    // Rough estimate from buffered media advance (network streams). Local
-    // files stay at 0 so the UI can hide or show idle.
-    final isNetwork = _uri.startsWith('http://') || _uri.startsWith('https://');
-    if (!isNetwork) {
-      if (_transferBytesPerSec != 0) {
-        setState(() => _transferBytesPerSec = 0);
-      }
-      return;
-    }
+
+    // Prefer buffer-ahead growth (true download progress while opening /
+    // seeking). Fall back to played-duration growth while the stream is
+    // steady so the top-right rate stays non-zero like Baomihua.
     final dBufMs = (_buffer - prevBuf).inMilliseconds;
-    if (dBufMs <= 0) {
-      if (_buffering || _opening) {
+    final dPosMs = (_position - prevPos).inMilliseconds;
+    final advanceMs = dBufMs > 0
+        ? dBufMs
+        : ((_playing && !_buffering && dPosMs > 0) ? dPosMs : 0);
+
+    if (advanceMs <= 0) {
+      // Keep last sample briefly while loading so UI doesn't flash "0 KB/s"
+      // between packets; only zero after a longer stall.
+      if ((_buffering || _opening) &&
+          now.difference(prevAt).inMilliseconds > 1500 &&
+          _transferBytesPerSec != 0) {
         setState(() => _transferBytesPerSec = 0);
       }
       return;
     }
-    // Assume ~8 Mbps equivalent media bitrate for display purposes when we
-    // only know buffered duration growth.
+
+    // ~8 Mbps nominal media bitrate when we only know duration growth.
     const assumedBitsPerSecond = 8 * 1000 * 1000;
-    final bytes = (dBufMs / 1000.0) * (assumedBitsPerSecond / 8.0);
+    final bytes = (advanceMs / 1000.0) * (assumedBitsPerSecond / 8.0);
     final bps = bytes / (dt / 1000.0);
-    setState(() => _transferBytesPerSec = bps.clamp(0, 200 * 1024 * 1024));
+    // Exponential smooth so the label doesn't jump every sample.
+    final smoothed = _transferBytesPerSec <= 0
+        ? bps
+        : (_transferBytesPerSec * 0.55 + bps * 0.45);
+    setState(() => _transferBytesPerSec = smoothed.clamp(0, 200 * 1024 * 1024));
   }
 
+  /// Transfer rate label (Baomihua top-right + loading spinner).
+  /// Always visible while opening/buffering; while playing show whenever we
+  /// have a sample (or "0 KB/s" for network sources).
   String _formatTransferRate() {
-    if (_buffering || _opening) return '0 KB/s';
     final bps = _transferBytesPerSec;
-    if (bps <= 0) {
-      final isNetwork =
-          _uri.startsWith('http://') || _uri.startsWith('https://');
-      return isNetwork ? '0 KB/s' : '';
-    }
     if (bps >= 1024 * 1024) {
       return '${(bps / (1024 * 1024)).toStringAsFixed(1)} MB/s';
     }
-    return '${(bps / 1024).toStringAsFixed(0)} KB/s';
+    if (bps >= 1024) {
+      return '${(bps / 1024).toStringAsFixed(0)} KB/s';
+    }
+    if (bps > 0) {
+      // Sub-KB rates still render as KB so the unit stays stable.
+      return '${(bps / 1024).toStringAsFixed(1)} KB/s';
+    }
+    if (_buffering || _opening || _isNetworkUri || _controlsVisible) {
+      return '0 KB/s';
+    }
+    return '';
   }
 
   Future<void> _toggleAlwaysOnTop() async {
@@ -368,6 +406,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     setState(() {
       _opening = true;
       _buffering = true;
+      _playing = false;
       _error = null;
       _completed = false;
       _externalSubs = const [];
@@ -378,7 +417,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     try {
       await _playback.open(_uri, startAt: startAt, httpHeaders: _httpHeaders);
       if (!mounted) return;
-      setState(() => _opening = false);
+      // Keep [_opening] true until playback actually starts (or buffering
+      // settles with a known duration). Clearing it here made the spinner
+      // vanish while the window was still black.
       unawaited(_loadExternalSubtitles());
     } catch (e) {
       if (!mounted) return;
@@ -388,6 +429,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _error = '无法打开媒体：$e';
       });
     }
+  }
+
+  void _markMediaReady() {
+    if (!_opening || !mounted) return;
+    setState(() => _opening = false);
   }
 
   Future<void> _loadEpisodePlaylist() async {
@@ -408,13 +454,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _episodes = episodes;
         _episodeIndex = idx;
         _panelSeason = season;
-        _episodePageIndex = idx >= 0
-            ? episodes
-                      .where((e) => e.seasonNumber == season)
-                      .toList()
-                      .indexWhere((e) => e.id == _mediaId) ~/
-                  10
-            : 0;
+        _syncPanelToPlayingEpisode();
       });
       // Prefetch TMDB Chinese titles for the current season.
       unawaited(_ensureSeasonMeta(season));
@@ -517,6 +557,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _durationSub = _playback.player.stream.duration.listen((duration) {
       if (!mounted) return;
       setState(() => _duration = duration);
+      // Duration known + not buffering ⇒ treat as ready (local files often
+      // skip the "playing" edge for a moment after open).
+      if (duration > Duration.zero && !_buffering) _markMediaReady();
     });
     _bufferSub = _playback.player.stream.buffer.listen((buffer) {
       if (!mounted) return;
@@ -525,11 +568,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _playingSub = _playback.player.stream.playing.listen((playing) {
       if (!mounted) return;
       setState(() => _playing = playing);
-      if (playing) _scheduleHideControls();
+      if (playing) {
+        _markMediaReady();
+        _scheduleHideControls();
+      }
     });
     _bufferingSub = _playback.player.stream.buffering.listen((buffering) {
       if (!mounted) return;
       setState(() => _buffering = buffering);
+      if (!buffering && (_playing || _duration > Duration.zero)) {
+        _markMediaReady();
+      }
     });
     _volumeSub = _playback.player.stream.volume.listen((volume) {
       if (!mounted) return;
@@ -660,13 +709,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   void _scheduleHideControls() {
     _hideTimer?.cancel();
-    if (_episodePanelOpen) return; // keep chrome while picking episodes
+    if (_anySidePanelOpen) return; // keep chrome while drawer is open
     _hideTimer = Timer(_controlsHideDelay, () {
       if (mounted &&
           _playing &&
           !_dragging &&
           _error == null &&
-          !_episodePanelOpen) {
+          !_anySidePanelOpen) {
         setState(() => _controlsVisible = false);
       }
     });
@@ -813,6 +862,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     try {
       setState(() {
         _opening = true;
+        _buffering = true;
+        _playing = false;
         _error = null;
       });
       final show = await ref.read(mediaByIdProvider(showId).future);
@@ -836,7 +887,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _title =
             '${widget.args.showTitle ?? show.title} - ${episode.displayLabel}';
         _episodeIndex = targetIndex;
-        _episodePageIndex = targetIndex ~/ 10;
+        // Page tabs are per-season episode-number ranges (1-10 / 11-20…),
+        // never the global playlist index.
+        _syncPanelToPlayingEpisode();
         _position = Duration.zero;
         _duration = Duration.zero;
         _buffer = Duration.zero;
@@ -855,21 +908,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
   }
 
+  /// Align season tab + 1-10/11-20 page to the currently playing episode.
+  /// Uses **episodeNumber** ranges (Baomihua), not the global list index.
+  void _syncPanelToPlayingEpisode() {
+    if (_episodeIndex < 0 || _episodeIndex >= _episodes.length) return;
+    final current = _episodes[_episodeIndex];
+    _panelSeason = current.seasonNumber;
+    final epNo = current.episodeNumber;
+    _episodePageIndex = epNo > 0 ? (epNo - 1) ~/ 10 : 0;
+  }
+
   void _toggleEpisodePanel() {
     setState(() {
-      _episodePanelOpen = !_episodePanelOpen;
-      if (_episodePanelOpen) {
+      final opening = !_episodePanelOpen;
+      _episodePanelOpen = opening;
+      if (opening) {
+        _audioPanelOpen = false;
+        _subtitlePanelOpen = false;
         _controlsVisible = true;
-        if (_episodeIndex >= 0) {
-          _panelSeason = _episodes[_episodeIndex].seasonNumber;
-          final seasonEps = _episodes
-              .where((e) => e.seasonNumber == _panelSeason)
-              .toList(growable: false);
-          final inSeason = seasonEps.indexWhere(
-            (e) => e.id == _episodes[_episodeIndex].id,
-          );
-          _episodePageIndex = inSeason >= 0 ? inSeason ~/ 10 : 0;
-        }
+        _syncPanelToPlayingEpisode();
         _hideTimer?.cancel();
         unawaited(_ensureSeasonMeta(_panelSeason));
       } else {
@@ -933,6 +990,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
+      if (_anySidePanelOpen) {
+        _closeAllSidePanels();
+        return KeyEventResult.handled;
+      }
       unawaited(_handleBack());
       return KeyEventResult.handled;
     }
@@ -958,6 +1019,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 child: VlcVideoView(
                   service: _playback,
                   nativeOverlayInsets: _nativeOverlayInsets,
+                  // Always transparent on desktop: Flutter gesture layer owns
+                  // taps. Toggling this with the drawer remounts AppKitView and
+                  // feels like a 0.5–1s hitch.
+                  platformViewHitTestable: !PlatformCapabilities.isDesktop,
                 ),
               ),
               // Desktop (VLC / nPlayer): whole surface single-click toggles
@@ -967,8 +1032,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 Positioned.fill(
                   child: GestureDetector(
                     key: const Key('player_desktop_gesture'),
-                    behavior: HitTestBehavior.translucent,
-                    onTap: _toggleControls,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      if (_anySidePanelOpen) {
+                        _closeAllSidePanels();
+                      } else {
+                        _toggleControls();
+                      }
+                    },
                     onDoubleTap: () =>
                         unawaited(DesktopWindow.toggleFullScreen()),
                   ),
@@ -1028,33 +1099,39 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _bufferingOverlay() {
-    // Baomihua: centered ring + transfer rate under it.
+    // Baomihua: dim stage + centered ring + transfer rate (or 加载中).
     final rate = _formatTransferRate();
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 44,
-            height: 44,
-            child: CircularProgressIndicator(
-              strokeWidth: 3,
-              color: Colors.white,
-              backgroundColor: Colors.white24,
+    final label = rate.isNotEmpty ? rate : '加载中…';
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ColoredBox(
+          color: Colors.black.withValues(alpha: _opening ? 0.55 : 0.28),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3.2,
+                    color: Colors.white,
+                    backgroundColor: Colors.white24,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
-          if (rate.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text(
-              rate,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -1251,7 +1328,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                     children: [
                       // Traffic-light clearance (system draws buttons here).
                       SizedBox(
-                        width: WindowChromeMetrics.macOSTrafficLightReservedWidth,
+                        width:
+                            WindowChromeMetrics.macOSTrafficLightReservedWidth,
                       ),
                       Expanded(
                         child: Text(
@@ -1267,18 +1345,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                           ),
                         ),
                       ),
-                      if (rateLabel.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Text(
-                            rateLabel,
-                            style: const TextStyle(
-                              color: _chromeDim,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
+                      // Always show transfer rate next to the title when chrome
+                      // is visible (Baomihua top-right). Empty string is rare.
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Text(
+                          rateLabel.isEmpty ? '0 KB/s' : rateLabel,
+                          style: const TextStyle(
+                            color: _chromeDim,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
+                      ),
                       IconButton(
                         tooltip: _alwaysOnTop ? '取消置顶' : '窗口置顶',
                         visualDensity: VisualDensity.compact,
@@ -1317,16 +1396,42 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
         ),
-        // Episode playlist panel (TV) — Baomihua right drawer.
-        if (_episodes.isNotEmpty)
-          Positioned(
-            top: 0,
-            right: 0,
-            bottom: 0,
-            child: _episodeSidePanel(),
-          ),
+        // Right drawers (Baomihua): episodes / audio / subtitle.
+        if (_episodes.isNotEmpty) _episodeSidePanel(),
+        _audioSidePanel(),
+        _subtitleSidePanel(),
       ],
     );
+  }
+
+  void _closeAllSidePanels() {
+    if (!_anySidePanelOpen) return;
+    setState(() {
+      _episodePanelOpen = false;
+      _audioPanelOpen = false;
+      _subtitlePanelOpen = false;
+    });
+    _scheduleHideControls();
+  }
+
+  void _openAudioPanel() {
+    setState(() {
+      _audioPanelOpen = true;
+      _subtitlePanelOpen = false;
+      _episodePanelOpen = false;
+      _controlsVisible = true;
+      _hideTimer?.cancel();
+    });
+  }
+
+  void _openSubtitlePanel() {
+    setState(() {
+      _subtitlePanelOpen = true;
+      _audioPanelOpen = false;
+      _episodePanelOpen = false;
+      _controlsVisible = true;
+      _hideTimer?.cancel();
+    });
   }
 
   Widget _episodeSidePanel() {
@@ -1344,19 +1449,31 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         ? _panelSeason
         : seasonNumbers.first;
     final seasonEps = seasons[panelSeason] ?? const <Episode>[];
-    final pageCount = (seasonEps.length / 10).ceil().clamp(1, 99);
+    // Baomihua pages by episode number: 1-10 / 11-20 / 21-24 …
+    final maxEpNo = seasonEps.isEmpty
+        ? 0
+        : seasonEps.map((e) => e.episodeNumber).reduce((a, b) => a > b ? a : b);
+    final pageCount = maxEpNo <= 0 ? 1 : ((maxEpNo + 9) ~/ 10).clamp(1, 99);
     final page = _episodePageIndex.clamp(0, pageCount - 1);
-    final pageEps = seasonEps.skip(page * 10).take(10).toList(growable: false);
+    final pageStart = page * 10 + 1;
+    final pageEnd = (page + 1) * 10;
+    final pageEps = seasonEps
+        .where(
+          (e) => e.episodeNumber >= pageStart && e.episodeNumber <= pageEnd,
+        )
+        .toList(growable: false);
 
-    return AnimatedSlide(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      offset: _episodePanelOpen ? Offset.zero : const Offset(1, 0),
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 180),
-        opacity: _episodePanelOpen ? 1 : 0,
-        child: IgnorePointer(
-          ignoring: !_episodePanelOpen,
+    // Drawer only — outside-tap closes via root desktop gesture layer.
+    return Positioned(
+      top: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        ignoring: !_episodePanelOpen,
+        child: AnimatedSlide(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          offset: _episodePanelOpen ? Offset.zero : const Offset(1, 0),
           child: Material(
             color: const Color(0xF0141418),
             elevation: 16,
@@ -1368,7 +1485,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
                       child: Row(
                         children: [
                           Expanded(
@@ -1390,15 +1507,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                 color: Colors.white38,
                               ),
                             ),
-                          IconButton(
-                            tooltip: '关闭',
-                            onPressed: _toggleEpisodePanel,
-                            icon: const Icon(
-                              Icons.close_rounded,
-                              color: Colors.white54,
-                              size: 20,
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -1427,7 +1535,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                     onSelected: (_) {
                                       setState(() {
                                         _panelSeason = s;
-                                        _episodePageIndex = 0;
+                                        // If still watching this season, keep
+                                        // the page that contains the playing ep.
+                                        if (_episodeIndex >= 0 &&
+                                            _episodes[_episodeIndex]
+                                                    .seasonNumber ==
+                                                s) {
+                                          _syncPanelToPlayingEpisode();
+                                        } else {
+                                          _episodePageIndex = 0;
+                                        }
                                       });
                                       unawaited(_ensureSeasonMeta(s));
                                     },
@@ -1443,7 +1560,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                           ),
                         ),
                       ),
-                    // Episode range pages within the selected season.
+                    // Episode range pages by episodeNumber (not list index).
                     if (pageCount > 1)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -1456,7 +1573,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                   padding: const EdgeInsets.only(right: 6),
                                   child: ChoiceChip(
                                     label: Text(
-                                      '${i * 10 + 1}-${((i + 1) * 10).clamp(1, seasonEps.length)}',
+                                      '${i * 10 + 1}-${((i + 1) * 10).clamp(1, maxEpNo)}',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: page == i
@@ -1682,8 +1799,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                     },
                     onChanged: (value) {
                       setState(
-                        () =>
-                            _position = Duration(milliseconds: value.round()),
+                        () => _position = Duration(milliseconds: value.round()),
                       );
                     },
                     onChangeEnd: (value) async {
@@ -1819,26 +1935,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   size: 22,
                 ),
               ),
-              Builder(
-                builder: (ctx) => IconButton(
-                  tooltip: '音轨',
-                  onPressed: () => _showAudioTracks(ctx),
-                  icon: const Icon(
-                    Icons.graphic_eq_rounded,
-                    color: _chromeDim,
-                    size: 20,
-                  ),
+              IconButton(
+                tooltip: '音轨',
+                onPressed: _openAudioPanel,
+                icon: Icon(
+                  Icons.graphic_eq_rounded,
+                  color: _audioPanelOpen ? Colors.white : _chromeDim,
+                  size: 20,
                 ),
               ),
-              Builder(
-                builder: (ctx) => IconButton(
-                  tooltip: '字幕',
-                  onPressed: () => _showSubtitleTracks(ctx),
-                  icon: const Icon(
-                    Icons.subtitles_outlined,
-                    color: _chromeDim,
-                    size: 20,
-                  ),
+              IconButton(
+                tooltip: '字幕',
+                onPressed: _openSubtitlePanel,
+                icon: Icon(
+                  Icons.subtitles_outlined,
+                  color: _subtitlePanelOpen ? Colors.white : _chromeDim,
+                  size: 20,
                 ),
               ),
               // Episode list (TV) — Baomihua hamburger.
@@ -1925,7 +2037,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             IconButton(
               key: const Key('player_prev_episode'),
               tooltip: '上一集',
-              icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),
+              icon: const Icon(
+                Icons.skip_previous_rounded,
+                color: Colors.white,
+              ),
               onPressed: () => unawaited(_playAdjacentEpisode(-1)),
             ),
           if (_hasNextEpisode)
@@ -2018,23 +2133,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Builder(
-                      builder: (ctx) => IconButton(
-                        icon: const Icon(
-                          Icons.graphic_eq_rounded,
-                          color: Colors.white70,
-                        ),
-                        onPressed: () => _showAudioTracks(ctx),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.graphic_eq_rounded,
+                        color: Colors.white70,
                       ),
+                      onPressed: _openAudioPanel,
                     ),
-                    Builder(
-                      builder: (ctx) => IconButton(
-                        icon: const Icon(
-                          Icons.subtitles_rounded,
-                          color: Colors.white70,
-                        ),
-                        onPressed: () => _showSubtitleTracks(ctx),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.subtitles_rounded,
+                        color: Colors.white70,
                       ),
+                      onPressed: _openSubtitlePanel,
                     ),
                   ],
                 ),
@@ -2158,10 +2269,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                     child: SliderTheme(
                                       data: SliderTheme.of(context).copyWith(
                                         trackHeight: 3,
-                                        thumbShape:
-                                            const RoundSliderThumbShape(
-                                              enabledThumbRadius: 6,
-                                            ),
+                                        thumbShape: const RoundSliderThumbShape(
+                                          enabledThumbRadius: 6,
+                                        ),
                                         activeTrackColor: _accent,
                                         inactiveTrackColor: Colors.white24,
                                         thumbColor: Colors.white,
@@ -2215,8 +2325,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                         alpha: 0.35,
                                       ),
                                       labelStyle: TextStyle(
-                                        color:
-                                            (value - preset).abs() < 0.01
+                                        color: (value - preset).abs() < 0.01
                                             ? Colors.white
                                             : Colors.white70,
                                         fontSize: 12,
@@ -2322,96 +2431,54 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
   }
 
-  Future<void> _showAudioTracks(BuildContext buttonContext) async {
-    _hideTimer?.cancel();
+  Widget _audioSidePanel() {
     final tracks = _playback.audioTracks;
     final current = _playback.currentAudioTrack;
-    if (PlatformCapabilities.isDesktop) {
-      await _showDesktopTrackMenu(
-        buttonContext: buttonContext,
-        title: '音轨',
-        entries: tracks.isEmpty
-            ? const [('__empty__', '未检测到可切换的音轨')]
-            : [
-                for (final track in tracks)
-                  (track.id, _audioTrackLabel(track)),
-              ],
-        selectedId: current.id,
-        onSelected: (id) {
-          final match = tracks.where((t) => t.id == id);
-          if (match.isNotEmpty) unawaited(_playback.setAudioTrack(match.first));
-        },
-      );
-    } else {
-      setState(() => _optionSheetVisible = true);
-      await showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: const Color(0xFF1A1B23),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (context) => _optionSheet(
-          title: '音轨',
-          children: tracks.isEmpty
-              ? [_emptyTracksHint('未检测到可切换的音轨')]
-              : tracks
-                    .map((track) {
-                      return _optionTile(
-                        label: _audioTrackLabel(track),
-                        selected: track.id == current.id,
-                        onTap: () {
-                          unawaited(_playback.setAudioTrack(track));
-                          Navigator.of(context).pop();
-                        },
-                      );
-                    })
-                    .toList(growable: false),
-        ),
-      );
-      if (mounted) setState(() => _optionSheetVisible = false);
-    }
-    _scheduleHideControls();
+    return _baomihuaRightDrawer(
+      open: _audioPanelOpen,
+      width: 300,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _drawerHeader(title: '音轨'),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+              children: tracks.isEmpty
+                  ? [_drawerHint('未检测到可切换的音轨')]
+                  : [
+                      for (final track in tracks)
+                        _drawerTile(
+                          label: _audioTrackLabel(track),
+                          selected: track.id == current.id,
+                          onTap: () {
+                            unawaited(_playback.setAudioTrack(track));
+                            setState(() {});
+                          },
+                        ),
+                    ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  Future<void> _showSubtitleTracks(BuildContext buttonContext) async {
-    _hideTimer?.cancel();
+  Widget _subtitleSidePanel() {
     final embedded = _playback.subtitleTracks;
     final current = _playback.currentSubtitleTrack;
+    final offSelected = current.id == '-1' || current.id.isEmpty;
 
-    final entries = <(String, String)>[];
-    if (embedded.isEmpty && _externalSubs.isEmpty) {
-      entries.add((
-        '__empty__',
-        _externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…',
-      ));
-    } else {
-      for (final track in embedded) {
-        entries.add((track.id, _subtitleTrackLabel(track)));
-      }
-      // Dedupe external paths (same file can be discovered twice).
-      final seen = <String>{};
-      for (final sub in _externalSubs) {
-        if (!seen.add(sub.uri)) continue;
-        entries.add((sub.uri, sub.label));
-      }
-    }
-
-    if (PlatformCapabilities.isDesktop) {
-      await _showDesktopTrackMenu(
-        buttonContext: buttonContext,
-        title: '字幕',
-        entries: entries,
-        selectedId: current.id,
-        onSelected: (id) {
-          if (id == '__empty__') return;
-          final embeddedMatch = embedded.where((t) => t.id == id);
-          if (embeddedMatch.isNotEmpty) {
-            unawaited(_playback.setSubtitleTrack(embeddedMatch.first));
-            return;
-          }
-          final external = _externalSubs.where((s) => s.uri == id);
-          if (external.isNotEmpty) {
-            final sub = external.first;
+    final externalTiles = <Widget>[];
+    final seen = <String>{};
+    for (final sub in _externalSubs) {
+      if (!seen.add(sub.uri)) continue;
+      final selected = current.uri && current.id == sub.uri;
+      externalTiles.add(
+        _drawerTile(
+          label: sub.label,
+          selected: selected,
+          onTap: () {
             unawaited(
               _playback.setSubtitleTrack(
                 PlaybackSubtitleTrack.uri(
@@ -2421,199 +2488,203 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 ),
               ),
             );
-          }
-        },
-      );
-    } else {
-      setState(() => _optionSheetVisible = true);
-      await showModalBottomSheet<void>(
-        context: context,
-        backgroundColor: const Color(0xFF1A1B23),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            setState(() {});
+          },
         ),
-        builder: (context) {
-          final children = <Widget>[];
-          if (embedded.isEmpty && _externalSubs.isEmpty) {
-            children.add(
-              _emptyTracksHint(
-                _externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…',
-              ),
-            );
-          } else {
-            for (final track in embedded) {
-              children.add(
-                _optionTile(
-                  label: _subtitleTrackLabel(track),
-                  selected: track.id == current.id,
-                  onTap: () {
-                    unawaited(_playback.setSubtitleTrack(track));
-                    Navigator.of(context).pop();
-                  },
-                ),
-              );
-            }
-            final seen = <String>{};
-            for (final sub in _externalSubs) {
-              if (!seen.add(sub.uri)) continue;
-              final selected = current.uri && current.id == sub.uri;
-              children.add(
-                _optionTile(
-                  label: sub.label,
-                  selected: selected,
-                  onTap: () {
-                    unawaited(
-                      _playback.setSubtitleTrack(
-                        PlaybackSubtitleTrack.uri(
-                          sub.uri,
-                          title: sub.label,
-                          language: sub.languageHint,
-                        ),
-                      ),
-                    );
-                    Navigator.of(context).pop();
-                  },
-                ),
-              );
-            }
-          }
-          return _optionSheet(title: '字幕', children: children);
-        },
       );
-      if (mounted) setState(() => _optionSheetVisible = false);
     }
-    _scheduleHideControls();
-  }
 
-  Future<void> _showDesktopTrackMenu({
-    required BuildContext buttonContext,
-    required String title,
-    required List<(String, String)> entries,
-    required String selectedId,
-    required void Function(String id) onSelected,
-  }) async {
-    setState(() => _optionSheetVisible = true);
-    try {
-      final selected = await showMenu<String>(
-        context: buttonContext,
-        position: _menuRect(buttonContext),
-        color: const Color(0xFF1E1F28),
-        elevation: 12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        items: [
-          PopupMenuItem<String>(
-            enabled: false,
-            height: 36,
-            child: Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+    return _baomihuaRightDrawer(
+      open: _subtitlePanelOpen,
+      width: 320,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _drawerHeader(
+            title: '字幕',
+            trailing: TextButton(
+              onPressed: () => unawaited(_pickAndAddSubtitle()),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white70,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                '+ 手动添加',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
               ),
             ),
           ),
-          const PopupMenuDivider(height: 8),
-          for (final entry in entries)
-            if (entry.$1 == '__empty__')
-              PopupMenuItem<String>(
-                enabled: false,
-                child: Text(
-                  entry.$2,
-                  style: const TextStyle(color: Colors.white54),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+              children: [
+                _drawerTile(
+                  label: '关闭字幕',
+                  selected: offSelected,
+                  onTap: () {
+                    unawaited(
+                      _playback.setSubtitleTrack(PlaybackSubtitleTrack.no()),
+                    );
+                    setState(() {});
+                  },
                 ),
-              )
-            else
-              PopupMenuItem<String>(
-                value: entry.$1,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.$2,
-                        style: TextStyle(
-                          color: entry.$1 == selectedId
-                              ? const Color(0xFF66A3FF)
-                              : Colors.white,
-                          fontWeight: entry.$1 == selectedId
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
-                      ),
+                if (embedded.isEmpty &&
+                    _externalSubs.isEmpty &&
+                    !_externalSubsLoaded)
+                  _drawerHint('正在扫描字幕…')
+                else if (embedded.isEmpty && _externalSubs.isEmpty)
+                  _drawerHint('未检测到字幕（内嵌或同目录外挂）'),
+                for (final track in embedded)
+                  if (track.id != '-1')
+                    _drawerTile(
+                      label: _subtitleTrackLabel(track),
+                      selected: track.id == current.id,
+                      onTap: () {
+                        unawaited(_playback.setSubtitleTrack(track));
+                        setState(() {});
+                      },
                     ),
-                    if (entry.$1 == selectedId)
-                      const Icon(
-                        Icons.check_rounded,
-                        size: 18,
-                        color: Color(0xFF66A3FF),
-                      ),
-                  ],
-                ),
-              ),
+                ...externalTiles,
+              ],
+            ),
+          ),
         ],
-      );
-      if (selected != null) onSelected(selected);
-    } finally {
-      if (mounted) setState(() => _optionSheetVisible = false);
-    }
+      ),
+    );
   }
 
-  Widget _optionSheet({required String title, required List<Widget> children}) {
-    return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+  /// Shared Baomihua right drawer chrome (episodes / audio / subtitle).
+  Widget _baomihuaRightDrawer({
+    required bool open,
+    required double width,
+    required Widget child,
+  }) {
+    return Positioned(
+      top: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        ignoring: !open,
+        child: AnimatedSlide(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          offset: open ? Offset.zero : const Offset(1, 0),
+          child: Material(
+            color: const Color(0xF0141418),
+            elevation: 16,
+            child: SizedBox(
+              width: width,
+              child: SafeArea(left: false, child: child),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerHeader({required String title, Widget? trailing}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 12, 10),
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+          Expanded(
             child: Text(
               title,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(child: Column(children: children)),
-          ),
-          const SizedBox(height: 8),
+          ?trailing,
         ],
       ),
     );
   }
 
-  Widget _optionTile({
+  Widget _drawerHint(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
+      child: Text(
+        text,
+        style: const TextStyle(color: Colors.white38, fontSize: 13),
+      ),
+    );
+  }
+
+  Widget _drawerTile({
     required String label,
     required bool selected,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      title: Text(
-        label,
-        style: TextStyle(
-          color: selected ? const Color(0xFF66A3FF) : Colors.white,
-          fontSize: 15,
-          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? Colors.white : Colors.white70,
+                    fontSize: 14,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ),
+              if (selected)
+                const Icon(
+                  Icons.check_circle_outline_rounded,
+                  color: Colors.white70,
+                  size: 18,
+                ),
+            ],
+          ),
         ),
       ),
-      trailing: selected
-          ? const Icon(Icons.check_rounded, color: Color(0xFF66A3FF))
-          : null,
-      onTap: onTap,
     );
   }
 
-  Widget _emptyTracksHint(String message) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Text(
-        message,
-        style: const TextStyle(color: Colors.white54, fontSize: 14),
-      ),
+  Future<void> _pickAndAddSubtitle() async {
+    const group = XTypeGroup(
+      label: '字幕',
+      extensions: ['srt', 'ass', 'ssa', 'vtt', 'sub', 'sup', 'idx'],
     );
+    final file = await openFile(acceptedTypeGroups: const [group]);
+    if (file == null || !mounted) return;
+
+    final path = file.path;
+    final label = p.basename(path);
+    final uri = path.startsWith('/') ? Uri.file(path).toString() : path;
+
+    final external = ExternalSubtitleFile(path: path, label: label);
+    setState(() {
+      if (!_externalSubs.any((s) => s.uri == external.uri || s.path == path)) {
+        _externalSubs = [..._externalSubs, external];
+      }
+    });
+    await _playback.setSubtitleTrack(
+      PlaybackSubtitleTrack.uri(uri, title: label),
+    );
+    if (mounted) {
+      setState(() {});
+      _showToast('已加载字幕：$label');
+    }
   }
 
   String _audioTrackLabel(PlaybackAudioTrack track) {

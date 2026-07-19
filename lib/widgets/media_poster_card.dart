@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/formatters/rating_formatter.dart';
+import '../core/image/filmly_image_cache.dart';
 import '../data/models/media.dart';
 import '../providers/data_providers.dart';
 import 'filmly_design.dart';
@@ -170,9 +170,13 @@ class _MediaPosterCardState extends ConsumerState<MediaPosterCard> {
   Widget _poster(BuildContext context) {
     final posterPath = widget.media.posterPath;
     if (posterPath != null && posterPath.isNotEmpty) {
-      if (posterPath.startsWith('http')) {
-        return CachedNetworkImage(
-          imageUrl: posterPath,
+      final networkUrl = FilmlyImageCache.networkUrl(
+        posterPath,
+        size: TmdbImageSize.w500,
+      );
+      if (networkUrl != null) {
+        return FilmlyNetworkImage(
+          imageUrl: networkUrl,
           fit: BoxFit.cover,
           placeholder: (_, _) => _loadingPlaceholder(context),
           errorWidget: (_, _, _) => _placeholder(context),

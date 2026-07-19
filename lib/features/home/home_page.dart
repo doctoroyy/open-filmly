@@ -1,12 +1,12 @@
 import 'dart:io';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/image/filmly_image_cache.dart';
 import '../../core/platform/open_player.dart';
 import '../../core/router/app_router.dart';
 
@@ -39,21 +39,23 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _resumeMedia(Media media, {Duration? startAt}) async {
     try {
-      final source = await ref
-          .read(playbackSourceResolverProvider)
-          .resolve(media);
-      if (!mounted) return;
-      await openPlayer(
-        context,
-        PlayerArgs(
-          uri: source.uri,
-          title: media.title,
-          mediaId: media.id,
-          startAt: startAt,
-          httpHeaders: source.httpHeaders,
-          subtitles: source.subtitles,
-        ),
-      );
+      await withPlayerLaunchLoading(context, () async {
+        final source = await ref
+            .read(playbackSourceResolverProvider)
+            .resolve(media);
+        if (!mounted) return;
+        await openPlayer(
+          context,
+          PlayerArgs(
+            uri: source.uri,
+            title: media.title,
+            mediaId: media.id,
+            startAt: startAt,
+            httpHeaders: source.httpHeaders,
+            subtitles: source.subtitles,
+          ),
+        );
+      });
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -513,9 +515,13 @@ class _ContinueCard extends StatelessWidget {
     final value = path?.trim() ?? '';
     if (value.isEmpty) return fallback?.call() ?? _placeholder(media);
 
-    if (value.startsWith('http://') || value.startsWith('https://')) {
-      return CachedNetworkImage(
-        imageUrl: value,
+    final networkUrl = FilmlyImageCache.networkUrl(
+      value,
+      size: TmdbImageSize.w780,
+    );
+    if (networkUrl != null) {
+      return FilmlyNetworkImage(
+        imageUrl: networkUrl,
         fit: BoxFit.cover,
         placeholder: (_, _) => _placeholder(media),
         errorWidget: (_, _, _) => fallback?.call() ?? _placeholder(media),
@@ -528,18 +534,6 @@ class _ContinueCard extends StatelessWidget {
         file,
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) => fallback?.call() ?? _placeholder(media),
-      );
-    }
-
-    // TMDB backdrop paths are stored in existing databases as `/abc.jpg`.
-    // Resolve those paths at render time so old library entries immediately
-    // gain the same landscape artwork as newly enriched entries.
-    if (value.startsWith('/')) {
-      return CachedNetworkImage(
-        imageUrl: 'https://image.tmdb.org/t/p/w780$value',
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _placeholder(media),
-        errorWidget: (_, _, _) => fallback?.call() ?? _placeholder(media),
       );
     }
 

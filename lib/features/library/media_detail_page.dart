@@ -1,10 +1,13 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:io';
+
 import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/formatters/rating_formatter.dart';
+import '../../core/image/filmly_image_cache.dart';
 import '../../core/platform/open_player.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../data/models/episode.dart';
@@ -17,6 +20,10 @@ import '../../services/metadata/tmdb_metadata_service.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/filmly_error_state.dart';
 import '../player/player_page.dart';
+
+/// Path context that works for both absolute filesystem paths and
+/// WebDAV/SMB style relative paths (`wd-downloads/...`).
+final _pathCtx = p.Context(style: p.Style.posix);
 
 /// Media detail route for a single library item.
 class MediaDetailPage extends ConsumerWidget {
@@ -84,59 +91,170 @@ class MediaDetailPage extends ConsumerWidget {
     Media media,
     PlaybackProgress? progress,
   ) {
-    final source = (media.fullPath != null && media.fullPath!.isNotEmpty)
-        ? media.fullPath!
-        : media.path;
     final resumeProgress = progress?.hasResumePoint == true ? progress : null;
 
     final backdrop = media.backdropPath?.isNotEmpty == true
         ? media.backdropPath!
         : media.posterPath;
 
-    return ListView(
-      padding: EdgeInsets.zero,
+    // Physical path for playback enablement (may point at one season folder).
+    final playable = (media.fullPath != null && media.fullPath!.isNotEmpty)
+        ? media.fullPath!
+        : media.path;
+    // Prefer a show-root path (not a single season folder) for TV libraries
+    // that were merged from S01/S02/… directories.
+    final displayPath = _displaySourcePath(ref, media);
+
+    // Baomihua 三段式：顶栏 → 封面（底部渐变溶入内容）→ 介绍/选集/演员
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Hero(
-          media: media,
-          backdrop: backdrop,
-          resumeProgress: resumeProgress,
-          completed: progress?.completed == true,
-          progressLabel: progress?.progressLabel,
+        _DetailTopBar(
+          title: media.title,
           onBack: () => context.canPop() ? context.pop() : context.go('/'),
-          onToggleFavorite: () => _toggleFavorite(ref, media),
-          onPlay: source.isEmpty
-              ? null
-              : () => _playMedia(
-                  context,
-                  ref,
-                  media,
-                  startAt: resumeProgress?.position,
-                ),
-          onRestart: source.isEmpty
-              ? null
-              : () => _playMedia(context, ref, media),
-          onReMatch: () => _showReMatchDialog(context, ref, media),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(32, 28, 32, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.zero,
             children: [
-              if (media.type == MediaType.tv) ...[
-                _episodesSection(context, ref, media),
-                const SizedBox(height: 28),
-              ],
-              _CastRow(mediaId: media.id),
-              _infoBlock(context, '片源路径', source),
-              if (media.fileHash != null && media.fileHash!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _infoBlock(context, '文件哈希', media.fileHash!),
-              ],
+              // Cover + intro as one continuous block with a soft bottom fade
+              // so there's no hard edge between artwork and metadata.
+              _CoverWithIntro(
+                backdrop: backdrop,
+                poster: media.posterPath,
+                intro: _DetailIntro(
+                  media: media,
+                  resumeProgress: resumeProgress,
+                  completed: progress?.completed == true,
+                  progressLabel: progress?.progressLabel,
+                  onPlay: playable.isEmpty
+                      ? null
+                      : () => _playMedia(
+                          context,
+                          ref,
+                          media,
+                          startAt: resumeProgress?.position,
+                        ),
+                  onRestart: playable.isEmpty
+                      ? null
+                      : () => _playMedia(context, ref, media),
+                  onToggleFavorite: () => _toggleFavorite(ref, media),
+                  onReMatch: () => _showReMatchDialog(context, ref, media),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(32, 8, 32, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (media.type == MediaType.tv) ...[
+                      _episodesSection(context, ref, media),
+                      const SizedBox(height: 28),
+                    ],
+                    _CastRow(mediaId: media.id),
+                    if (displayPath.isNotEmpty)
+                      _infoBlock(context, '片源路径', displayPath),
+                    if (media.fileHash != null &&
+                        media.fileHash!.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      _infoBlock(context, '文件哈希', media.fileHash!),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         ),
       ],
     );
+  }
+
+  /// Path shown on the detail page: for multi-season TV shows, the common
+  /// parent library folder (e.g. `…/生活大爆炸 1-10 季`) rather than one season
+  /// subfolder that happened to be stored on the media row.
+  String _displaySourcePath(WidgetRef ref, Media media) {
+    final fallback = (media.fullPath != null && media.fullPath!.isNotEmpty)
+        ? media.fullPath!
+        : media.path;
+
+    if (media.type != MediaType.tv) return fallback;
+
+    final seasons =
+        ref.watch(episodesByShowProvider(media.id)).asData?.value ?? const [];
+    final dirs = <String>[];
+    for (final season in seasons) {
+      for (final ep in season.episodes) {
+        final raw = (ep.fullPath != null && ep.fullPath!.isNotEmpty)
+            ? ep.fullPath!
+            : ep.path;
+        if (raw.isEmpty) continue;
+        dirs.add(_pathCtx.dirname(raw));
+      }
+    }
+    if (dirs.isEmpty) {
+      return _stripSeasonFolder(fallback);
+    }
+    var root = _commonDirPrefix(dirs);
+    // Climb out of Sxx / 第N季 folders until we hit the show root.
+    var guard = 0;
+    while (root.isNotEmpty &&
+        _looksLikeSeasonFolder(_pathCtx.basename(root)) &&
+        guard++ < 4) {
+      final parent = _pathCtx.dirname(root);
+      if (parent.isEmpty || parent == root || parent == '.') break;
+      root = parent;
+    }
+    return root.isNotEmpty ? root : _stripSeasonFolder(fallback);
+  }
+
+  static String _stripSeasonFolder(String path) {
+    if (path.isEmpty) return path;
+    final base = _pathCtx.basename(path);
+    if (_looksLikeSeasonFolder(base)) {
+      final parent = _pathCtx.dirname(path);
+      if (parent.isNotEmpty && parent != '.' && parent != path) return parent;
+    }
+    return path;
+  }
+
+  static String _commonDirPrefix(List<String> dirs) {
+    if (dirs.isEmpty) return '';
+    if (dirs.length == 1) return dirs.first;
+    final split = dirs
+        .map((d) => _pathCtx.split(d).where((s) => s.isNotEmpty).toList())
+        .toList(growable: false);
+    final first = split.first;
+    var n = first.length;
+    for (final parts in split.skip(1)) {
+      var i = 0;
+      while (i < n && i < parts.length && parts[i] == first[i]) {
+        i++;
+      }
+      n = i;
+      if (n == 0) break;
+    }
+    if (n == 0) return dirs.first;
+    final joined = first.take(n).join('/');
+    // Preserve leading slash for absolute paths.
+    if (dirs.first.startsWith('/')) return '/$joined';
+    return joined;
+  }
+
+  static bool _looksLikeSeasonFolder(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return false;
+    // S01 / S02.第二季 / Season 2 / Season02
+    if (RegExp(r'^S\d{1,2}([\s._\-]|$)', caseSensitive: false).hasMatch(n)) {
+      return true;
+    }
+    if (RegExp(r'^Season\s*\d+', caseSensitive: false).hasMatch(n)) {
+      return true;
+    }
+    // 第2季 / 第二季 / 第02季
+    if (RegExp(r'^第[0-9一二三四五六七八九十百零〇两]+季').hasMatch(n)) {
+      return true;
+    }
+    return false;
   }
 
   Widget _episodesSection(BuildContext context, WidgetRef ref, Media media) {
@@ -202,35 +320,37 @@ class MediaDetailPage extends ConsumerWidget {
     Media show,
   ) async {
     try {
-      // Episodes inherit the show's source; resolve to a playable URI so that
-      // SMB/WebDAV episodes stream correctly rather than opening a raw id URI.
-      final playable = MediaLibraryEntryFactory.episodePlayableMedia(
-        episode,
-        show,
-      );
-      final source = await ref
-          .read(playbackSourceResolverProvider)
-          .resolve(playable);
-      final progress = await ref
-          .read(playbackProgressRepositoryProvider)
-          .getByMediaId(episode.id);
-      final startAt = progress != null && progress.hasResumePoint
-          ? progress.position
-          : null;
-      if (!context.mounted) return;
-      await openPlayer(
-        context,
-        PlayerArgs(
-          uri: source.uri,
-          title: '${show.title} - ${episode.displayLabel}',
-          mediaId: episode.id,
-          startAt: startAt,
-          httpHeaders: source.httpHeaders,
-          subtitles: source.subtitles,
-          showId: show.id,
-          showTitle: show.title,
-        ),
-      );
+      await withPlayerLaunchLoading(context, () async {
+        // Episodes inherit the show's source; resolve to a playable URI so that
+        // SMB/WebDAV episodes stream correctly rather than opening a raw id URI.
+        final playable = MediaLibraryEntryFactory.episodePlayableMedia(
+          episode,
+          show,
+        );
+        final source = await ref
+            .read(playbackSourceResolverProvider)
+            .resolve(playable);
+        final progress = await ref
+            .read(playbackProgressRepositoryProvider)
+            .getByMediaId(episode.id);
+        final startAt = progress != null && progress.hasResumePoint
+            ? progress.position
+            : null;
+        if (!context.mounted) return;
+        await openPlayer(
+          context,
+          PlayerArgs(
+            uri: source.uri,
+            title: '${show.title} - ${episode.displayLabel}',
+            mediaId: episode.id,
+            startAt: startAt,
+            httpHeaders: source.httpHeaders,
+            subtitles: source.subtitles,
+            showId: show.id,
+            showTitle: show.title,
+          ),
+        );
+      });
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
@@ -246,27 +366,91 @@ class MediaDetailPage extends ConsumerWidget {
     Duration? startAt,
   }) async {
     try {
-      final source = await ref
-          .read(playbackSourceResolverProvider)
-          .resolve(media);
-      if (!context.mounted) return;
-      await openPlayer(
-        context,
-        PlayerArgs(
-          uri: source.uri,
-          title: media.title,
-          mediaId: media.id,
-          startAt: startAt,
-          httpHeaders: source.httpHeaders,
-          subtitles: source.subtitles,
-        ),
-      );
+      await withPlayerLaunchLoading(context, () async {
+        // TV show rows point at a folder / season root — never a playable file.
+        // Resolve to: most-recently-watched episode, else first episode.
+        if (media.type == MediaType.tv) {
+          await _playTvShow(context, ref, media);
+          return;
+        }
+        final source = await ref
+            .read(playbackSourceResolverProvider)
+            .resolve(media);
+        if (!context.mounted) return;
+        await openPlayer(
+          context,
+          PlayerArgs(
+            uri: source.uri,
+            title: media.title,
+            mediaId: media.id,
+            startAt: startAt,
+            httpHeaders: source.httpHeaders,
+            subtitles: source.subtitles,
+          ),
+        );
+      });
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('播放失败：$e')));
     }
+  }
+
+  /// Pick the episode to open when the user hits the main Play button on a
+  /// TV show detail page.
+  ///
+  /// - Never played → SxxEyy first episode (sorted)
+  /// - Has progress → the episode with the latest [PlaybackProgress.updatedAt],
+  ///   resuming if it still has a resume point
+  Future<void> _playTvShow(
+    BuildContext context,
+    WidgetRef ref,
+    Media show,
+  ) async {
+    final episodes = await ref
+        .read(episodeRepositoryProvider)
+        .getByShow(show.id);
+    if (episodes.isEmpty) {
+      throw StateError('该剧暂无剧集，请先扫描片源或手动匹配元数据');
+    }
+
+    final progressRepo = ref.read(playbackProgressRepositoryProvider);
+    Episode target = episodes.first;
+    Duration? resumeAt;
+    DateTime? latest;
+
+    for (final ep in episodes) {
+      final progress = await progressRepo.getByMediaId(ep.id);
+      if (progress == null) continue;
+      if (latest == null || progress.updatedAt.isAfter(latest)) {
+        latest = progress.updatedAt;
+        target = ep;
+        resumeAt = progress.hasResumePoint ? progress.position : null;
+      }
+    }
+
+    final playable = MediaLibraryEntryFactory.episodePlayableMedia(
+      target,
+      show,
+    );
+    final source = await ref
+        .read(playbackSourceResolverProvider)
+        .resolve(playable);
+    if (!context.mounted) return;
+    await openPlayer(
+      context,
+      PlayerArgs(
+        uri: source.uri,
+        title: '${show.title} - ${target.displayLabel}',
+        mediaId: target.id,
+        startAt: resumeAt,
+        httpHeaders: source.httpHeaders,
+        subtitles: source.subtitles,
+        showId: show.id,
+        showTitle: show.title,
+      ),
+    );
   }
 
   Widget _infoBlock(BuildContext context, String label, String value) {
@@ -544,7 +728,7 @@ class _EpisodeCardState extends ConsumerState<_EpisodeCard> {
 
   Widget _still(String? url) {
     if (url != null && url.isNotEmpty) {
-      return CachedNetworkImage(
+      return FilmlyNetworkImage(
         imageUrl: url,
         fit: BoxFit.cover,
         placeholder: (_, _) => _stillPlaceholder(),
@@ -682,7 +866,7 @@ class _EpisodeDetailsSheet extends ConsumerWidget {
             borderRadius: BorderRadius.circular(14),
             child: AspectRatio(
               aspectRatio: 16 / 9,
-              child: CachedNetworkImage(
+              child: FilmlyNetworkImage(
                 imageUrl: still,
                 fit: BoxFit.cover,
                 errorWidget: (_, _, _) =>
@@ -764,259 +948,43 @@ class _Hint extends StatelessWidget {
   }
 }
 
-/// Full-bleed backdrop hero with overlaid title, meta, actions, and overview —
-/// matching NetEase 爆米花's Mac detail layout.
-class _Hero extends StatelessWidget {
-  const _Hero({
-    required this.media,
-    required this.backdrop,
-    required this.resumeProgress,
-    required this.completed,
-    required this.progressLabel,
-    required this.onBack,
-    required this.onToggleFavorite,
-    required this.onPlay,
-    required this.onRestart,
-    required this.onReMatch,
-  });
+/// Top navigation: back + compact title only.
+/// Favorite / re-match sit next to the large title in [_DetailIntro].
+class _DetailTopBar extends StatelessWidget {
+  const _DetailTopBar({required this.title, required this.onBack});
 
-  final Media media;
-  final String? backdrop;
-  final PlaybackProgress? resumeProgress;
-  final bool completed;
-  final String? progressLabel;
+  final String title;
   final VoidCallback onBack;
-  final VoidCallback onToggleFavorite;
-  final VoidCallback? onPlay;
-  final VoidCallback? onRestart;
-  final VoidCallback onReMatch;
 
   @override
   Widget build(BuildContext context) {
-    final meta = <String>[
-      if (media.rating != null && media.rating!.isNotEmpty)
-        '★ ${formatRating(media.rating)}',
-      if (media.year.isNotEmpty) media.year,
-      ...media.genres.take(3),
-    ].join('  ·  ');
-    final showRestart = resumeProgress != null || completed;
-
-    return SizedBox(
-      height: 460,
-      child: Stack(
-        fit: StackFit.expand,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 16, 8),
+      child: Row(
         children: [
-          _background(),
-          // Keep both navigation controls and metadata readable regardless of
-          // whether the artwork itself is bright or dark. The final stop still
-          // dissolves into the light content background below the hero.
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x66000000),
-                  Color(0x00000000),
-                  Color(0x66000000),
-                  Color(0xD9000000),
-                  Color(0xD9000000),
-                  Color(0xFFF3F3F6),
-                ],
-                stops: [0, 0.28, 0.5, 0.74, 0.94, 1],
+          _TopBarIconButton(icon: Icons.chevron_left_rounded, onTap: onBack),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: FilmlyPalette.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.2,
               ),
-            ),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-              child: Row(
-                children: [
-                  _HeroIconButton(
-                    icon: Icons.chevron_left_rounded,
-                    onTap: onBack,
-                  ),
-                  const Spacer(),
-                  _HeroIconButton(
-                    key: const Key('detail_re-match_button'),
-                    icon: Icons.auto_fix_high_rounded,
-                    onTap: onReMatch,
-                  ),
-                  const SizedBox(width: 12),
-                  _HeroIconButton(
-                    icon: media.isFavorite
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    onTap: onToggleFavorite,
-                    tint: media.isFavorite ? FilmlyPalette.accent : null,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 36,
-            right: 36,
-            bottom: 30,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  media.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.6,
-                    height: 1.1,
-                    shadows: [
-                      Shadow(
-                        color: Color(0x99000000),
-                        blurRadius: 12,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                ),
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    meta,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      shadows: [Shadow(color: Colors.black, blurRadius: 8)],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    _heroPlayButton(
-                      label: resumeProgress != null ? '继续播放' : '播放',
-                      filled: true,
-                      onTap: onPlay,
-                    ),
-                    if (showRestart) ...[
-                      const SizedBox(width: 12),
-                      _heroPlayButton(
-                        label: completed ? '重新播放' : '从头播放',
-                        filled: false,
-                        onTap: onRestart,
-                      ),
-                    ],
-                  ],
-                ),
-                if (resumeProgress != null && progressLabel != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '上次播放到 $progressLabel',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
-                  ),
-                ],
-                if (media.overview != null && media.overview!.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 720),
-                    child: Text(
-                      media.overview!,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13.5,
-                        height: 1.55,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 8)],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
             ),
           ),
         ],
       ),
     );
   }
-
-  Widget _background() {
-    final url = backdrop;
-    if (url != null && url.isNotEmpty) {
-      final resolved = url.startsWith('/')
-          ? 'https://image.tmdb.org/t/p/w1280$url'
-          : url;
-      if (!resolved.startsWith('http')) return _gradient();
-      return CachedNetworkImage(
-        imageUrl: resolved,
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-        placeholder: (_, _) => _gradient(),
-        errorWidget: (_, _, _) => _gradient(),
-      );
-    }
-    return _gradient();
-  }
-
-  Widget _gradient() {
-    return const DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFE5E9EC), Color(0xFFEFF2F5)],
-        ),
-      ),
-    );
-  }
-
-  Widget _heroPlayButton({
-    required String label,
-    required bool filled,
-    required VoidCallback? onTap,
-  }) {
-    final enabled = onTap != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        decoration: BoxDecoration(
-          color: filled
-              ? Colors.white.withValues(alpha: enabled ? 0.96 : 0.45)
-              : Colors.black.withValues(alpha: 0.34),
-          borderRadius: BorderRadius.circular(12),
-          border: filled ? null : Border.all(color: Colors.white38),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              filled ? Icons.play_arrow_rounded : Icons.restart_alt_rounded,
-              size: 20,
-              color: filled ? FilmlyPalette.textPrimary : Colors.white,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: filled ? FilmlyPalette.textPrimary : Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
-class _HeroIconButton extends StatelessWidget {
-  const _HeroIconButton({
+class _TopBarIconButton extends StatelessWidget {
+  const _TopBarIconButton({
     super.key,
     required this.icon,
     required this.onTap,
@@ -1031,35 +999,482 @@ class _HeroIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (PlatformCapabilities.isIOS) {
       return SizedBox.square(
-        dimension: 40,
+        dimension: 36,
         child: CNButton.icon(
           customIcon: icon,
-          tint: tint ?? Colors.white,
+          tint: tint ?? FilmlyPalette.textPrimary,
           onPressed: onTap,
           config: const CNButtonConfig(
-            style: CNButtonStyle.glass,
-            width: 40,
-            minHeight: 40,
+            style: CNButtonStyle.plain,
+            width: 36,
+            minHeight: 36,
             padding: EdgeInsets.zero,
-            borderRadius: 20,
-            customIconSize: 20,
-            glassEffectUnionId: 'detail-hero-actions',
+            borderRadius: 18,
+            customIconSize: 22,
+            glassEffectUnionId: 'detail-top-actions',
           ),
         ),
       );
     }
+    return IconButton(
+      onPressed: onTap,
+      icon: Icon(icon, color: tint ?? FilmlyPalette.textPrimary, size: 24),
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(8),
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+    );
+  }
+}
+
+/// Cover + intro as one continuous block (Baomihua): artwork dissolves into
+/// white via a long soft gradient; title/play/overview sit on that fade.
+class _CoverWithIntro extends StatelessWidget {
+  const _CoverWithIntro({
+    required this.backdrop,
+    required this.poster,
+    required this.intro,
+  });
+
+  final String? backdrop;
+  final String? poster;
+  final Widget intro;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    // Baomihua uses a tall landscape banner; keep it dominant but bounded.
+    final coverHeight = (width / 1.9).clamp(260.0, 460.0);
+    // Intro rides up into the soft white zone under the faces.
+    final overlap = (coverHeight * 0.28).clamp(72.0, 130.0);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        SizedBox(
+          height: coverHeight,
+          width: double.infinity,
+          child: _coverImage(),
+        ),
+        // Multi-stop white wash — no hard edge between art and content.
+        Positioned(
+          left: 0,
+          right: 0,
+          top: coverHeight * 0.42,
+          bottom: 0,
+          child: const IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x00FFFFFF),
+                    Color(0x33FFFFFF),
+                    Color(0x88FFFFFF),
+                    Color(0xEEF3F3F6),
+                    FilmlyPalette.background,
+                    FilmlyPalette.background,
+                  ],
+                  stops: [0.0, 0.18, 0.40, 0.62, 0.82, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(36, coverHeight - overlap, 36, 4),
+          child: intro,
+        ),
+      ],
+    );
+  }
+
+  Widget _coverImage() {
+    final path = (backdrop != null && backdrop!.isNotEmpty)
+        ? backdrop!
+        : poster;
+    if (path == null || path.isEmpty) return _placeholder();
+
+    if (!path.startsWith('http://') && !path.startsWith('https://')) {
+      final asFile = File(path);
+      final looksLikeLocal =
+          path.length > 4 && !path.startsWith('/') || asFile.existsSync();
+      if (looksLikeLocal && asFile.existsSync()) {
+        return Image.file(
+          asFile,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          alignment: Alignment.topCenter,
+          errorBuilder: (_, _, _) => _placeholder(),
+        );
+      }
+    }
+
+    final url = FilmlyImageCache.networkUrl(path, size: TmdbImageSize.w1280);
+    if (url == null) return _placeholder();
+
+    return FilmlyNetworkImage(
+      imageUrl: url,
+      fit: BoxFit.cover,
+      alignment: Alignment.topCenter,
+      width: double.infinity,
+      height: double.infinity,
+      placeholder: (_, _) => _placeholder(),
+      errorWidget: (_, _, _) => _placeholder(),
+    );
+  }
+
+  Widget _placeholder() {
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFE5E9EC), Color(0xFFEFF2F5)],
+        ),
+      ),
+    );
+  }
+}
+
+/// Baomihua intro: title (+ rematch/favorite) → [play | meta + 2-line overview].
+class _DetailIntro extends StatelessWidget {
+  const _DetailIntro({
+    required this.media,
+    required this.resumeProgress,
+    required this.completed,
+    required this.progressLabel,
+    required this.onPlay,
+    required this.onRestart,
+    required this.onToggleFavorite,
+    required this.onReMatch,
+  });
+
+  final Media media;
+  final PlaybackProgress? resumeProgress;
+  final bool completed;
+  final String? progressLabel;
+  final VoidCallback? onPlay;
+  final VoidCallback? onRestart;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onReMatch;
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = <String>[
+      if (media.rating != null && media.rating!.isNotEmpty)
+        '★ ${formatRating(media.rating)}',
+      if (media.releaseDate != null && media.releaseDate!.isNotEmpty)
+        media.releaseDate!
+      else if (media.year.isNotEmpty)
+        media.year,
+      ...media.genres.take(3),
+    ].join('  ');
+
+    final playLabel = resumeProgress != null
+        ? (progressLabel != null && progressLabel!.isNotEmpty
+              ? '继续播放  $progressLabel'
+              : '继续播放')
+        : '播放';
+    final showRestart = resumeProgress != null || completed;
+    final overview = media.overview?.trim() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text(
+                media.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: FilmlyPalette.textPrimary,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.4,
+                  height: 1.15,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _TopBarIconButton(
+              key: const Key('detail_re-match_button'),
+              icon: Icons.auto_fix_high_rounded,
+              onTap: onReMatch,
+            ),
+            _TopBarIconButton(
+              icon: media.isFavorite
+                  ? Icons.favorite_rounded
+                  : Icons.favorite_border_rounded,
+              onTap: onToggleFavorite,
+              tint: media.isFavorite ? FilmlyPalette.accent : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // Play on the left; meta + clamped overview on the right (Baomihua).
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 560;
+            final playColumn = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _playButton(label: playLabel, filled: true, onTap: onPlay),
+                if (showRestart) ...[
+                  const SizedBox(height: 10),
+                  _playButton(
+                    label: completed ? '重新播放' : '从头播放',
+                    filled: false,
+                    onTap: onRestart,
+                  ),
+                ],
+              ],
+            );
+            final infoColumn = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (meta.isNotEmpty)
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: FilmlyPalette.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.3,
+                    ),
+                  ),
+                if (overview.isNotEmpty) ...[
+                  if (meta.isNotEmpty) const SizedBox(height: 6),
+                  _ClampedOverview(text: overview, title: media.title),
+                ],
+              ],
+            );
+
+            if (!wide) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  playColumn,
+                  if (meta.isNotEmpty || overview.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    infoColumn,
+                  ],
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                playColumn,
+                const SizedBox(width: 20),
+                Expanded(child: infoColumn),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _playButton({
+    required String label,
+    required bool filled,
+    required VoidCallback? onTap,
+  }) {
+    final enabled = onTap != null;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 38,
-        height: 38,
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.32),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white24),
+          color: filled
+              ? FilmlyPalette.primary.withValues(alpha: enabled ? 1 : 0.45)
+              : FilmlyPalette.surfaceStrong,
+          borderRadius: BorderRadius.circular(10),
+          border: filled ? null : Border.all(color: FilmlyPalette.divider),
         ),
-        child: Icon(icon, color: tint ?? Colors.white, size: 22),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              filled ? Icons.play_arrow_rounded : Icons.restart_alt_rounded,
+              size: 20,
+              color: filled ? Colors.white : FilmlyPalette.textPrimary,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: filled ? Colors.white : FilmlyPalette.textPrimary,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+/// Exactly 2 lines of overview; when truncated, a blue「更多」sits at the end
+/// of the second line (Baomihua) and opens the full synopsis dialog.
+class _ClampedOverview extends StatelessWidget {
+  const _ClampedOverview({required this.text, required this.title});
+
+  final String text;
+  final String title;
+
+  static const _style = TextStyle(
+    color: FilmlyPalette.textSecondary,
+    fontSize: 13,
+    height: 1.55,
+  );
+
+  static const _moreStyle = TextStyle(
+    color: FilmlyPalette.accent,
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    height: 1.55,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        final full = TextPainter(
+          text: const TextSpan(text: '占', style: _style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final lineH = full.height;
+        final twoLineH = lineH * 2;
+
+        final measure = TextPainter(
+          text: TextSpan(text: text, style: _style),
+          maxLines: 2,
+          textDirection: TextDirection.ltr,
+          ellipsis: '…',
+        )..layout(maxWidth: maxW);
+        final overflows = measure.didExceedMaxLines;
+
+        if (!overflows) {
+          return Text(text, maxLines: 2, style: _style);
+        }
+
+        // Reserve room for「更多」on the second line; fade the body into it.
+        final morePainter = TextPainter(
+          text: const TextSpan(text: '更多', style: _moreStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final moreW = morePainter.width + 2;
+
+        return SizedBox(
+          height: twoLineH,
+          width: maxW,
+          child: Stack(
+            children: [
+              // Body text with trailing padding so ellipsis doesn't sit under 更多.
+              Padding(
+                padding: EdgeInsets.only(right: moreW),
+                child: Text(
+                  text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: _style,
+                ),
+              ),
+              // Soft white wash into the 更多 chip.
+              Positioned(
+                right: moreW - 8,
+                bottom: 0,
+                width: 28,
+                height: lineH,
+                child: const IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0x00F3F3F6), FilmlyPalette.background],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 0,
+                bottom: 0,
+                height: lineH,
+                child: GestureDetector(
+                  onTap: () => _showFullOverview(context),
+                  behavior: HitTestBehavior.opaque,
+                  child: const Align(
+                    alignment: Alignment.centerRight,
+                    child: Text('更多', style: _moreStyle),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFullOverview(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: FilmlyPalette.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: SizedBox(
+            width: 480,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.5,
+              ),
+              child: SingleChildScrollView(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    color: FilmlyPalette.textSecondary,
+                    fontSize: 14,
+                    height: 1.65,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text(
+                '关闭',
+                style: TextStyle(color: FilmlyPalette.accent),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1118,7 +1533,7 @@ class _CastRow extends ConsumerWidget {
                                     size: 30,
                                   ),
                                 )
-                              : CachedNetworkImage(
+                              : FilmlyNetworkImage(
                                   imageUrl: member.profileUrl!,
                                   fit: BoxFit.cover,
                                   errorWidget: (_, _, _) => Container(
@@ -1627,7 +2042,7 @@ class _ResultCardState extends State<_ResultCard> {
                   width: 44,
                   height: 66,
                   child: widget.result.posterPath != null
-                      ? CachedNetworkImage(
+                      ? FilmlyNetworkImage(
                           imageUrl: widget.result.posterPath!,
                           fit: BoxFit.cover,
                           errorWidget: (_, _, _) => Container(

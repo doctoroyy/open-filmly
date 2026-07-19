@@ -132,69 +132,66 @@ void main() {
       expect(smbFirst.media.id, isNot(davFirst.media.id));
     });
 
-    test(
-      'Chinese pack layout S01.第一季 under 生活大爆炸 1-10 季 groups as one show',
-      () {
-        // Real-world NAS layout that previously produced one show per season
-        // because "S01.第一季" was not recognized as a season folder and the
-        // title collapsed to bare "S01" / "S02" / …
-        final s01 = MediaLibraryEntryFactory.fromSmbFile(
-          config: const SmbConfig(host: '192.168.31.252'),
-          file: SmbFile(
-            '/btsync-data/生活大爆炸 1-10 季/S01.第一季/S01E01.Pilot.mkv',
-            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S01.第一季\S01E01.Pilot.mkv',
-            'wd-downloads',
-            0,
-            0,
-            0,
-            0x20,
-            1,
-            true,
-          ),
-        );
-        final s02 = MediaLibraryEntryFactory.fromSmbFile(
-          config: const SmbConfig(host: '192.168.31.252'),
-          file: SmbFile(
-            '/btsync-data/生活大爆炸 1-10 季/S02.第二季/S02E01.The.Bad.Fish.Paradigm.mkv',
-            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S02.第二季\S02E01.The.Bad.Fish.Paradigm.mkv',
-            'wd-downloads',
-            0,
-            0,
-            0,
-            0x20,
-            1,
-            true,
-          ),
-        );
-        final s12 = MediaLibraryEntryFactory.fromSmbFile(
-          config: const SmbConfig(host: '192.168.31.252'),
-          file: SmbFile(
-            '/btsync-data/生活大爆炸 1-10 季/S12.第十二季/S12E24.mkv',
-            r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S12.第十二季\S12E24.mkv',
-            'wd-downloads',
-            0,
-            0,
-            0,
-            0x20,
-            1,
-            true,
-          ),
-        );
+    test('Chinese pack layout S01.第一季 under 生活大爆炸 1-10 季 groups as one show', () {
+      // Real-world NAS layout that previously produced one show per season
+      // because "S01.第一季" was not recognized as a season folder and the
+      // title collapsed to bare "S01" / "S02" / …
+      final s01 = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: '192.168.31.252'),
+        file: SmbFile(
+          '/btsync-data/生活大爆炸 1-10 季/S01.第一季/S01E01.Pilot.mkv',
+          r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S01.第一季\S01E01.Pilot.mkv',
+          'wd-downloads',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+      final s02 = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: '192.168.31.252'),
+        file: SmbFile(
+          '/btsync-data/生活大爆炸 1-10 季/S02.第二季/S02E01.The.Bad.Fish.Paradigm.mkv',
+          r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S02.第二季\S02E01.The.Bad.Fish.Paradigm.mkv',
+          'wd-downloads',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
+      final s12 = MediaLibraryEntryFactory.fromSmbFile(
+        config: const SmbConfig(host: '192.168.31.252'),
+        file: SmbFile(
+          '/btsync-data/生活大爆炸 1-10 季/S12.第十二季/S12E24.mkv',
+          r'\\nas\wd-downloads\btsync-data\生活大爆炸 1-10 季\S12.第十二季\S12E24.mkv',
+          'wd-downloads',
+          0,
+          0,
+          0,
+          0x20,
+          1,
+          true,
+        ),
+      );
 
-        expect(s01.media.type, MediaType.tv);
-        expect(s01.media.title, '生活大爆炸');
-        expect(s02.media.title, '生活大爆炸');
-        expect(s12.media.title, '生活大爆炸');
-        expect(s01.media.id, s02.media.id);
-        expect(s01.media.id, s12.media.id);
-        expect(s01.media.id, isNot(contains(':s01')));
-        expect(s01.hasEpisode, isTrue);
-        expect(s01.episode!.seasonNumber, 1);
-        expect(s01.episode!.episodeNumber, 1);
-        expect(s02.episode!.seasonNumber, 2);
-        expect(s12.episode!.seasonNumber, 12);
-      },
-    );
+      expect(s01.media.type, MediaType.tv);
+      expect(s01.media.title, '生活大爆炸');
+      expect(s02.media.title, '生活大爆炸');
+      expect(s12.media.title, '生活大爆炸');
+      expect(s01.media.id, s02.media.id);
+      expect(s01.media.id, s12.media.id);
+      expect(s01.media.id, isNot(contains(':s01')));
+      expect(s01.hasEpisode, isTrue);
+      expect(s01.episode!.seasonNumber, 1);
+      expect(s01.episode!.episodeNumber, 1);
+      expect(s02.episode!.seasonNumber, 2);
+      expect(s12.episode!.seasonNumber, 12);
+    });
 
     test('local S01.第一季 pack also shares one show id', () {
       final a = MediaLibraryEntryFactory.fromLocalPath(

@@ -204,7 +204,10 @@ class PlaybackSourceResolver {
     var path = trimmed;
     if (path.startsWith('smb://') || path.startsWith('SMB://')) {
       // Strip scheme + authority, keep the raw path (CJK intact).
-      path = path.replaceFirst(RegExp(r'^smb://[^/]*', caseSensitive: false), '');
+      path = path.replaceFirst(
+        RegExp(r'^smb://[^/]*', caseSensitive: false),
+        '',
+      );
     }
     if (path.isEmpty) path = '/';
     if (!path.startsWith('/')) path = '/$path';
@@ -220,7 +223,10 @@ class PlaybackSourceResolver {
 
   /// Maps an SMB path onto a local Finder/OS mount when present, e.g.
   /// `/wd-downloads/foo.mkv` → `/Volumes/wd-downloads/foo.mkv`.
-  static String? _localMountPathIfExists(SmbMediaSource source, String playPath) {
+  static String? _localMountPathIfExists(
+    SmbMediaSource source,
+    String playPath,
+  ) {
     final candidates = <String>[];
     final normalized = playPath.startsWith('/') ? playPath : '/$playPath';
     final share = source.share.trim();

@@ -619,42 +619,11 @@ class _Sidebar extends StatelessWidget {
               const SizedBox(height: 12),
               const Divider(height: 1, color: FilmlyPalette.divider),
               const SizedBox(height: 10),
-              // Account row + quick actions (favorites / sources / settings)
+              // Quick actions only — no fake account row (no user system yet).
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Row(
                   children: [
-                    Container(
-                      width: 28,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: FilmlyPalette.accent.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: FilmlyPalette.divider),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'X',
-                          style: TextStyle(
-                            color: FilmlyPalette.accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        'xiaoyu',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: FilmlyPalette.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
                     _SidebarIconButton(
                       key: const Key('sidebar_/favorites'),
                       icon: Icons.favorite_rounded,
@@ -669,6 +638,7 @@ class _Sidebar extends StatelessWidget {
                       tooltip: '来源',
                       onTap: onTapSources,
                     ),
+                    const Spacer(),
                     _SidebarIconButton(
                       key: const Key('sidebar_/config'),
                       icon: Icons.settings_rounded,
