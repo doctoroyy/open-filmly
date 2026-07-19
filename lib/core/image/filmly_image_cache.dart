@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 /// Long-lived disk cache for posters / backdrops / cast photos.
@@ -12,15 +13,21 @@ class FilmlyImageCache {
 
   static const key = 'openFilmlyImageCache';
 
-  static final CacheManager instance = CacheManager(
-    Config(
-      key,
-      stalePeriod: const Duration(days: 365),
-      maxNrOfCacheObjects: 8000,
-      repo: JsonCacheInfoRepository(databaseName: key),
-      fileService: HttpFileService(),
-    ),
-  );
+  static CacheManager? _instance;
+
+  /// Lazily created so pure unit tests never touch path_provider / platform
+  /// channels just by importing this library.
+  static CacheManager get instance {
+    return _instance ??= CacheManager(
+      Config(
+        key,
+        stalePeriod: const Duration(days: 365),
+        maxNrOfCacheObjects: 8000,
+        repo: JsonCacheInfoRepository(databaseName: key),
+        fileService: HttpFileService(),
+      ),
+    );
+  }
 
   /// Resolve a stored poster/backdrop path (absolute URL, local file, or TMDB
   /// relative `/abc.jpg`) into a network URL when possible.
@@ -39,8 +46,23 @@ class FilmlyImageCache {
     return null;
   }
 
-  /// Warm the disk cache for a list of image URLs (best-effort, fire-and-forget).
+  /// True when Flutter platform channels are available (not plain unit tests).
+  static bool get _diskCacheAvailable {
+    try {
+      // Accessing ServicesBinding.instance throws if bindings were never set up.
+      ServicesBinding.instance;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Warm the disk cache for a list of image URLs (best-effort).
+  ///
+  /// Safe to call from unit tests: no-ops when Flutter bindings are missing,
+  /// and never throws on network errors.
   static Future<void> precacheUrls(Iterable<String?> urls) async {
+    if (!_diskCacheAvailable) return;
     for (final raw in urls) {
       final url = raw?.trim();
       if (url == null || url.isEmpty) continue;
@@ -53,7 +75,10 @@ class FilmlyImageCache {
     }
   }
 
-  static Future<void> emptyCache() => instance.emptyCache();
+  static Future<void> emptyCache() async {
+    if (!_diskCacheAvailable) return;
+    await instance.emptyCache();
+  }
 }
 
 enum TmdbImageSize {

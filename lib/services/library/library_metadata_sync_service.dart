@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../core/image/filmly_image_cache.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/media.dart';
@@ -91,14 +93,16 @@ class LibraryMetadataSyncService {
           detailsJson: payload.detailsJson,
         ),
       );
-      // Warm disk cache so cold starts don't re-download posters.
-      await FilmlyImageCache.precacheUrls([
-        payload.posterPath,
-        FilmlyImageCache.networkUrl(
+      // Warm disk cache in the background — never block scrape / unit tests.
+      unawaited(
+        FilmlyImageCache.precacheUrls([
           payload.posterPath,
-          size: TmdbImageSize.w500,
-        ),
-      ]);
+          FilmlyImageCache.networkUrl(
+            payload.posterPath,
+            size: TmdbImageSize.w500,
+          ),
+        ]),
+      );
       updated++;
     }
 
@@ -139,10 +143,15 @@ class LibraryMetadataSyncService {
 
     // 更新主媒体数据
     await _repo.upsert(updatedMedia);
-    await FilmlyImageCache.precacheUrls([
-      payload.posterPath,
-      FilmlyImageCache.networkUrl(payload.posterPath, size: TmdbImageSize.w500),
-    ]);
+    unawaited(
+      FilmlyImageCache.precacheUrls([
+        payload.posterPath,
+        FilmlyImageCache.networkUrl(
+          payload.posterPath,
+          size: TmdbImageSize.w500,
+        ),
+      ]),
+    );
 
     // 手动匹配同一 TMDB 后，把同库拆散的季合并到一条 show 上。
     if (payload.type == MediaType.tv) {
