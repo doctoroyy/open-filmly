@@ -193,22 +193,29 @@ class PlaybackSourceResolver {
 
   /// Accepts either a share-relative path (`/Movies/x.mkv`) or a full
   /// `smb://host/share/x.mkv` URI and returns the path the proxy/session use.
+  ///
+  /// Important: do **not** use `Uri.parse` for `smb://` URLs. Dart percent-encodes
+  /// non-ASCII path segments (e.g. `生活大爆炸` → `%E7%94%9F…`), which then
+  /// breaks both `/Volumes/...` mount lookup and smb_connect file open.
   static String _normalizeSmbPlayPath(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return trimmed;
-    if (trimmed.startsWith('smb://')) {
-      try {
-        final uri = Uri.parse(trimmed);
-        final path = uri.path;
-        return path.startsWith('/') ? path : '/$path';
-      } catch (_) {
-        final stripped = trimmed.replaceFirst(RegExp(r'^smb://[^/]+'), '');
-        return stripped.isEmpty
-            ? '/'
-            : (stripped.startsWith('/') ? stripped : '/$stripped');
-      }
+
+    var path = trimmed;
+    if (path.startsWith('smb://') || path.startsWith('SMB://')) {
+      // Strip scheme + authority, keep the raw path (CJK intact).
+      path = path.replaceFirst(RegExp(r'^smb://[^/]*', caseSensitive: false), '');
     }
-    return trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    if (path.isEmpty) path = '/';
+    if (!path.startsWith('/')) path = '/$path';
+
+    // Decode any already-encoded segments without re-encoding the rest.
+    try {
+      path = Uri.decodeFull(path);
+    } catch (_) {
+      // Leave as-is when malformed percent escapes are present.
+    }
+    return path;
   }
 
   /// Maps an SMB path onto a local Finder/OS mount when present, e.g.

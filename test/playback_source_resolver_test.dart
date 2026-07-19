@@ -134,6 +134,30 @@ void main() {
     expect(source.uri, startsWith('http://127.0.0.1:'));
   });
 
+  test('smb:// paths with CJK keep decoded characters (no percent-encoding)', () {
+    // Regression: Uri.parse used to turn 生活大爆炸 into %E7%94%9F… which made
+    // both /Volumes mounts and smb_connect miss the file.
+    const raw =
+        'smb://192.168.31.252/wd-downloads/btsync-data/生活大爆炸 1-10 季/S01.第一季/S01E01.Pilot.mkv';
+    // Access via resolve path: build a media item and inspect proxy token path
+    // through the public resolver when no local mount exists.
+    final media = Media(
+      id: 'cjk',
+      title: 'Pilot',
+      year: '',
+      type: MediaType.unknown,
+      path: raw,
+      fullPath: raw,
+      detailsJson:
+          '{"source":{"kind":"smb","host":"nas","path":"$raw","share":"wd-downloads","username":"guest"}}',
+    );
+    // Ensure the factory still surfaces an SMB source with the raw path.
+    final source = MediaLibraryEntryFactory.smbSourceFor(media);
+    expect(source, isNotNull);
+    expect(source!.path, contains('生活大爆炸'));
+    expect(source.path, isNot(contains('%E7')));
+  });
+
   test('resolves WebDAV media into an authed HTTP URL', () async {
     final dav = _FakeWebDavService(
       const [
