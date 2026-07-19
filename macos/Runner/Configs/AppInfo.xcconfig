@@ -4,8 +4,9 @@
 // future. If not, the values below would default to using the project name when this becomes a
 // 'flutter create' template.
 
-// The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = open_filmly
+// Display / bundle name shown in Finder, Dock, and the menu bar.
+// Title case with a space — not snake_case open_filmly.
+PRODUCT_NAME = Open Filmly
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.openfilmly.openFilmly
