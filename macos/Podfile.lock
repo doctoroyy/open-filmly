@@ -1,8 +1,11 @@
 PODS:
+  - desktop_multi_window (0.0.1):
+    - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - VLCKit (3.7.3)
 
 DEPENDENCIES:
+  - desktop_multi_window (from `Flutter/ephemeral/.symlinks/plugins/desktop_multi_window/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - VLCKit (= 3.7.3)
 
@@ -11,10 +14,13 @@ SPEC REPOS:
     - VLCKit
 
 EXTERNAL SOURCES:
+  desktop_multi_window:
+    :path: Flutter/ephemeral/.symlinks/plugins/desktop_multi_window/macos
   FlutterMacOS:
     :path: Flutter/ephemeral
 
 SPEC CHECKSUMS:
+  desktop_multi_window: 93667594ccc4b88d91a97972fd3b1b89667fa80a
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   VLCKit: 4f2c462daaab6de88b93ab7609bdefbada557a4d
 

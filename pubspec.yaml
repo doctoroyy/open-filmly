@@ -33,6 +33,7 @@ dependencies:
     path: packages/flutter_vlc_player
   native_glass_navbar: ^1.0.2
   cupertino_native_better: ^1.5.2
+  desktop_multi_window: ^0.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

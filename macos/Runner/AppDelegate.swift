@@ -4,44 +4,10 @@ import VLCKit
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  private let vlcRegistry = VlcPlayerRegistry()
-
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    let controller = mainFlutterWindow?.contentViewController as! FlutterViewController
-    let windowChannel = FlutterMethodChannel(name: "com.openfilmly.window", binaryMessenger: controller.engine.binaryMessenger)
-    let vlcChannel = FlutterMethodChannel(name: "com.openfilmly.vlc_player", binaryMessenger: controller.engine.binaryMessenger)
-
-    controller.registrar(forPlugin: "OpenFilmlyVlcPlayer").register(
-      VlcPlayerViewFactory(registry: vlcRegistry),
-      withId: "open_filmly/vlc_player_view"
-    )
-    
-    windowChannel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
-      // Prefer the key window so an independent player process/window
-      // receives fullscreen / zoom, not a stale main library window.
-      guard let window = NSApp.keyWindow ?? self?.mainFlutterWindow else {
-        result(FlutterError(code: "UNAVAILABLE", message: "Window is not available", details: nil))
-        return
-      }
-      switch call.method {
-      case "toggleFullScreen":
-        window.toggleFullScreen(nil)
-        result(nil)
-      case "maximize":
-        window.zoom(nil)
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
-
-    vlcChannel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
-      self?.vlcRegistry.handle(call: call, result: result)
-    }
-
-    // Register the platform view before Flutter finishes launching. Calling
-    // super first lets Dart build AppKitView while its view type is still
-    // unknown, which leaves the player permanently at 00:00.
+    // VLC + window channels are registered in MainFlutterWindow.awakeFromNib
+    // (before this runs) and again for every multi-window engine via
+    // FlutterMultiWindowPlugin.setOnWindowCreatedCallback.
     super.applicationDidFinishLaunching(notification)
 
     mainFlutterWindow?.makeKeyAndOrderFront(nil)
@@ -49,6 +15,7 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    // Quit only when library + all player windows are gone.
     return true
   }
 
@@ -57,7 +24,7 @@ class AppDelegate: FlutterAppDelegate {
   }
 }
 
-private final class VlcPlayerRegistry {
+final class VlcPlayerRegistry {
   private var views: [Int64: VlcPlayerNativeView] = [:]
 
   func register(view: VlcPlayerNativeView, id: Int64) {
@@ -163,7 +130,7 @@ private final class VlcPlayerRegistry {
   }
 }
 
-private final class VlcPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
+final class VlcPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
   private weak var registry: VlcPlayerRegistry?
 
   init(registry: VlcPlayerRegistry) {
@@ -181,7 +148,7 @@ private final class VlcPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
-private final class VlcPlayerNativeView: NSView, VLCMediaPlayerDelegate {
+final class VlcPlayerNativeView: NSView, VLCMediaPlayerDelegate {
   private let mediaPlayer = VLCMediaPlayer()
   private var didSelectPreferredSubtitle = false
   private var isNetworkMedia = false
