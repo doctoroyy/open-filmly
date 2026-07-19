@@ -11,66 +11,71 @@ on:
       - 'packages/**'
       - '.github/workflows/build-windows-arm64.yml'
 
-env:
-  FLUTTER_VERSION: '3.44.0'
-
 jobs:
   build-windows-arm64:
     name: Windows ARM64 release zip
-    # Native ARM64 Windows runner (public free for GitHub-hosted).
+    # Native ARM64 Windows runner.
     runs-on: windows-11-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
+      # Flutter does not ship a prebuilt Windows-ARM64 SDK archive that
+      # subosito/flutter-action can download. Clone stable from git instead;
+      # on an ARM64 host `flutter build windows` produces arm64 binaries.
+      - name: Install Flutter (git clone, stable)
+        shell: pwsh
+        run: |
+          $flutterRoot = Join-Path $env:USERPROFILE "flutter"
+          if (Test-Path $flutterRoot) { Remove-Item $flutterRoot -Recurse -Force }
+          git clone https://github.com/flutter/flutter.git -b stable --depth 1 $flutterRoot
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $flutterRoot "bin")
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $flutterRoot "bin\cache\dart-sdk\bin")
 
-      - name: Enable Windows desktop
-        run: flutter config --enable-windows-desktop
+      - name: Flutter doctor / enable Windows
+        shell: pwsh
+        run: |
+          flutter --version
+          flutter config --enable-windows-desktop
+          flutter precache --windows
+          flutter doctor -v
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build Windows (host is ARM64)
-        run: flutter build windows --release
+      - name: Build Windows release (ARM64 host)
+        run: flutter build windows --release -v
 
       - name: Detect release output dir
         id: out
         shell: pwsh
         run: |
           $candidates = @(
-            "build/windows/arm64/runner/Release",
-            "build/windows/x64/runner/Release",
-            "build/windows/runner/Release"
+            "build\windows\arm64\runner\Release",
+            "build\windows\x64\runner\Release",
+            "build\windows\runner\Release"
           )
           $found = $null
           foreach ($p in $candidates) {
             if (Test-Path $p) { $found = $p; break }
           }
           if (-not $found) {
-            Get-ChildItem -Recurse build/windows -ErrorAction SilentlyContinue | Select-Object -First 50 FullName
+            Write-Host "=== build/windows tree ==="
+            Get-ChildItem -Recurse build\windows -ErrorAction SilentlyContinue |
+              Select-Object -First 80 FullName
             throw "Windows Release output not found"
           }
           Write-Host "Using output: $found"
           "path=$found" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          # Report arch of the main exe
-          $exe = Get-ChildItem $found -Filter *.exe | Select-Object -First 1
-          if ($exe) {
-            Write-Host "Main exe: $($exe.FullName)"
-          }
+          Get-ChildItem $found | Format-Table Name, Length
 
       - name: Package zip
         shell: pwsh
         run: |
           $src = "${{ steps.out.outputs.path }}"
-          $out = "build/Open-Filmly-windows-arm64.zip"
+          $out = "build\Open-Filmly-windows-arm64.zip"
           if (Test-Path $out) { Remove-Item $out -Force }
-          Compress-Archive -Path "$src/*" -DestinationPath $out
+          Compress-Archive -Path "$src\*" -DestinationPath $out
           Get-Item $out | Format-List Name, Length, FullName
 
       - name: Upload artifact
