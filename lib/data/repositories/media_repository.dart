@@ -274,6 +274,20 @@ class MediaRepository {
     return counts;
   }
 
+  /// Count of items per exclusive [LibraryShelf] (same rules as sidebar /
+  /// poster walls: TMDB match required for 电影/电视剧, etc.).
+  Future<Map<LibraryShelf, int>> countByShelf() async {
+    final items = (await (_db.select(
+      _db.mediaItems,
+    )).get()).map(_toDomain).toList(growable: false);
+    final counts = {for (final shelf in LibraryShelf.values) shelf: 0};
+    for (final media in items) {
+      final shelf = LibraryShelfClassifier.classify(media);
+      counts[shelf] = (counts[shelf] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   /// Returns IDs of items that have no poster (i.e. need metadata enrichment).
   Future<List<String>> getIdsWithoutPoster() async {
     final rows = await (_db.select(

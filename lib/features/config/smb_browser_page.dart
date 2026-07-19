@@ -7,7 +7,6 @@ import 'package:smb_connect/smb_connect.dart';
 
 import '../../core/platform/open_player.dart';
 import '../../data/models/app_config.dart';
-import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/playback/external_subtitle_finder.dart';
@@ -168,11 +167,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
         metadataMessage =
             '，元数据更新 ${metadataResult.updatedItems}/${metadataResult.requestedItems}';
       }
-      ref.invalidate(libraryCountsProvider);
-      ref.invalidate(recentMediaProvider);
-      for (final type in MediaType.values) {
-        ref.invalidate(mediaLibraryProvider(type));
-      }
+      invalidateLibraryViews(ref);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

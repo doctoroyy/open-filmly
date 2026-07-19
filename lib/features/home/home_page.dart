@@ -11,6 +11,7 @@ import '../../core/platform/open_player.dart';
 import '../../core/router/app_router.dart';
 
 import '../../data/models/continue_watching_item.dart';
+import '../../data/models/library_shelf.dart';
 import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
@@ -97,14 +98,20 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final counts = ref.watch(libraryCountsProvider).asData?.value ?? const {};
+    final typeCounts =
+        ref.watch(libraryCountsProvider).asData?.value ?? const {};
+    final shelfCounts =
+        ref.watch(libraryShelfCountsProvider).asData?.value ?? const {};
     final continueItems =
         ref.watch(continueWatchingProvider).asData?.value ?? const [];
     final favorites = ref.watch(favoritesProvider).asData?.value ?? const [];
     final movies = ref.watch(featuredMoviesProvider).asData?.value ?? const [];
     final tv = ref.watch(featuredTvProvider).asData?.value ?? const [];
     final recent = ref.watch(recentMediaProvider).asData?.value ?? const [];
-    final total = counts.values.fold<int>(0, (s, v) => s + v);
+    // Empty library check still uses raw type totals.
+    final total = typeCounts.values.fold<int>(0, (s, v) => s + v);
+    final movieShelfCount = shelfCounts[LibraryShelf.movie] ?? movies.length;
+    final tvShelfCount = shelfCounts[LibraryShelf.tv] ?? tv.length;
 
     return SafeArea(
       child: Column(
@@ -151,15 +158,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                         _PosterShelf(
                           title: '电影',
                           items: movies,
-                          moreLabel:
-                              '全部 ${counts[MediaType.movie] ?? movies.length}',
+                          moreLabel: '全部 $movieShelfCount',
                           onMore: () => context.go('/movies'),
                         ),
                       if (tv.isNotEmpty)
                         _PosterShelf(
                           title: '电视剧',
                           items: tv,
-                          moreLabel: '全部 ${counts[MediaType.tv] ?? tv.length}',
+                          moreLabel: '全部 $tvShelfCount',
                           onMore: () => context.go('/tv'),
                         ),
                       if (continueItems.isEmpty &&

@@ -78,6 +78,7 @@ void main() {
         year: '1999',
         type: MediaType.movie,
         path: '/movies/matrix.mkv',
+        detailsJson: '{"tmdbId": 603}',
         dateAdded: '2026-06-01T10:00:00.000',
       ),
     );
@@ -88,6 +89,7 @@ void main() {
         year: '2008',
         type: MediaType.tv,
         path: '/tv/breaking-bad',
+        detailsJson: '{"tmdbId": 1396}',
         dateAdded: '2026-06-01T11:00:00.000',
       ),
     );
@@ -99,6 +101,36 @@ void main() {
     expect(find.text('电影'), findsWidgets);
     expect(find.text('电视剧'), findsWidgets);
     expect(find.byType(MediaPosterCard), findsAtLeastNWidgets(1));
+  });
+
+  testWidgets('dashboard movie count follows the exclusive movie shelf', (
+    tester,
+  ) async {
+    await repo.upsert(
+      const Media(
+        id: 'matched-movie',
+        title: 'The Matrix',
+        year: '1999',
+        type: MediaType.movie,
+        path: '/movies/matrix.mkv',
+        detailsJson: '{"tmdbId":603}',
+      ),
+    );
+    await repo.upsert(
+      const Media(
+        id: 'unmatched-movie',
+        title: '课程视频',
+        year: '2026',
+        type: MediaType.movie,
+        path: '/courses/css3.mkv',
+      ),
+    );
+
+    await pumpApp(tester);
+
+    expect(find.text('全部 1'), findsOneWidget);
+    expect(find.text('The Matrix'), findsAtLeastNWidgets(1));
+    expect(find.text('课程视频'), findsNothing);
   });
 
   testWidgets('top bar search button opens the global search overlay', (
@@ -177,7 +209,7 @@ void main() {
         type: MediaType.movie,
         path: '/movies/matrix.mkv',
         detailsJson:
-            '{"overview":"Neo learns the truth.","genres":["Sci-Fi","Action"]}',
+            '{"tmdbId":603,"overview":"Neo learns the truth.","genres":["Sci-Fi","Action"]}',
         dateAdded: '2026-06-01T10:00:00.000',
       ),
     );
@@ -203,6 +235,7 @@ void main() {
         year: '1999',
         type: MediaType.movie,
         path: '/movies/matrix.mkv',
+        detailsJson: '{"tmdbId": 603}',
       ),
     );
     await repo.upsert(
@@ -212,6 +245,7 @@ void main() {
         year: '2010',
         type: MediaType.movie,
         path: '/movies/inception.mkv',
+        detailsJson: '{"tmdbId": 27205}',
       ),
     );
 
@@ -236,6 +270,7 @@ void main() {
         year: '2026',
         type: MediaType.movie,
         path: '/movies/movie-1.mkv',
+        detailsJson: '{"tmdbId": 1}',
       ),
     );
 
@@ -255,6 +290,7 @@ void main() {
         year: '2026',
         type: MediaType.movie,
         path: '/movies/movie-1.mkv',
+        detailsJson: '{"tmdbId": 1}',
       ),
     );
     await tester.tap(find.byKey(const Key('invalidate_library_views')));

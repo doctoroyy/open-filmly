@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/data/database/database.dart';
 import 'package:open_filmly/data/models/app_config.dart';
+import 'package:open_filmly/data/models/library_shelf.dart';
 import 'package:open_filmly/data/models/media.dart';
 import 'package:open_filmly/data/models/media_library_query.dart';
 import 'package:open_filmly/data/models/playback_progress.dart';
@@ -93,9 +94,67 @@ void main() {
       expect(byId!.type, MediaType.tv);
 
       final counts = await repo.countByType();
+      final shelfCounts = await repo.countByShelf();
+      // Shelf counts are exclusive and only include TMDB-matched movie/tv.
+      expect(
+        shelfCounts.values.fold<int>(0, (a, b) => a + b),
+        counts.values.fold<int>(0, (a, b) => a + b),
+      );
+      expect(shelfCounts[LibraryShelf.movie], 0);
+      expect(shelfCounts[LibraryShelf.tv], 0);
+      expect(shelfCounts[LibraryShelf.other], 2);
       expect(counts[MediaType.movie], 1);
       expect(counts[MediaType.tv], 1);
       expect(counts[MediaType.unknown], 0);
+    });
+
+    test('countByShelf keeps matched and unmatched media exclusive', () async {
+      final repo = MediaRepository(db);
+      await repo.upsert(
+        const Media(
+          id: 'matched-movie',
+          title: 'The Matrix',
+          year: '1999',
+          type: MediaType.movie,
+          path: '/movies/matrix.mkv',
+          detailsJson: '{"tmdbId":603}',
+        ),
+      );
+      await repo.upsert(
+        const Media(
+          id: 'unmatched-movie',
+          title: '课程视频',
+          year: '2026',
+          type: MediaType.movie,
+          path: '/courses/css3.mkv',
+        ),
+      );
+      await repo.upsert(
+        const Media(
+          id: 'matched-tv',
+          title: 'Breaking Bad',
+          year: '2008',
+          type: MediaType.tv,
+          path: '/tv/breaking-bad',
+          detailsJson: '{"tmdbId":1396}',
+        ),
+      );
+      await repo.upsert(
+        const Media(
+          id: 'anime',
+          title: '动漫文件',
+          year: '2026',
+          type: MediaType.movie,
+          path: '/media/动漫/show.mkv',
+        ),
+      );
+
+      final counts = await repo.countByShelf();
+
+      expect(counts[LibraryShelf.movie], 1);
+      expect(counts[LibraryShelf.tv], 1);
+      expect(counts[LibraryShelf.anime], 1);
+      expect(counts[LibraryShelf.other], 1);
     });
 
     test('upsert updates an existing row in place', () async {

@@ -121,9 +121,17 @@ final mediaBrowseProvider =
           );
     });
 
-/// Item counts grouped by media type for the dashboard summary.
+/// Item counts grouped by media type (DB type column — not exclusive shelves).
 final libraryCountsProvider = FutureProvider<Map<MediaType, int>>((ref) {
   return ref.watch(mediaRepositoryProvider).countByType();
+});
+
+/// Item counts per exclusive [LibraryShelf] — matches sidebar / 电影墙 rules
+/// (e.g. only TMDB-matched rows count as 电影/电视剧).
+final libraryShelfCountsProvider = FutureProvider<Map<LibraryShelf, int>>((
+  ref,
+) {
+  return ref.watch(mediaRepositoryProvider).countByShelf();
 });
 
 /// Recently added items for the dashboard surfaces.
@@ -272,6 +280,7 @@ final castProvider = FutureProvider.family<List<TmdbCastMember>, String>((
 /// so all dashboard shelves, library grids, and sidebar counts rebuild.
 void invalidateLibraryViews(WidgetRef ref) {
   ref.invalidate(libraryCountsProvider);
+  ref.invalidate(libraryShelfCountsProvider);
   ref.invalidate(recentMediaProvider);
   ref.invalidate(topRatedMediaProvider);
   ref.invalidate(featuredMoviesProvider);
