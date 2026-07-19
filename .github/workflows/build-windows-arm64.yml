@@ -12,7 +12,7 @@ on:
       - '.github/workflows/build-windows-arm64.yml'
 
 env:
-  FLUTTER_VERSION: '3.38.3'
+  FLUTTER_VERSION: '3.44.0'
 
 jobs:
   build-windows-arm64:
