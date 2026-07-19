@@ -22,6 +22,9 @@ class OpenFilmlyPlayerApp extends ConsumerStatefulWidget {
 
 class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
     with WindowListener {
+  final _host = PlayerHostHandle();
+  bool _closing = false;
+
   @override
   void initState() {
     super.initState();
@@ -31,7 +34,7 @@ class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
 
   Future<void> _configureWindow() async {
     if (!PlatformCapabilities.isDesktop) return;
-    // Intercept the red traffic-light so we can close *this* window only.
+    // Intercept the red traffic-light so we can stop audio first.
     await windowManager.setPreventClose(true);
     await windowManager.setTitle(widget.args.title);
     await windowManager.setBackgroundColor(const Color(0xFF000000));
@@ -43,8 +46,14 @@ class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
   }
 
   Future<void> _closePlayerWindow() async {
-    // CRITICAL: never call windowManager.destroy() — on macOS that runs
-    // NSApp.terminate and quits the whole application.
+    if (_closing) return;
+    _closing = true;
+    // 1) Stop VLC so audio does not continue after the window is gone.
+    try {
+      await _host.stopPlayback?.call();
+    } catch (_) {}
+    // 2) Close only this NSWindow — never windowManager.destroy()
+    //    (that calls NSApp.terminate and kills the library too).
     try {
       await windowManager.setPreventClose(false);
     } catch (_) {}
@@ -69,6 +78,7 @@ class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
       ),
       home: PlayerPage(
         args: widget.args,
+        host: _host,
         onClose: () => unawaited(_closePlayerWindow()),
       ),
     );

@@ -224,6 +224,38 @@ class TmdbMetadataService {
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) return null;
 
+    return _mapEpisode(decoded);
+  }
+
+  /// Fetches an entire season's episode list in one request (Chinese titles +
+  /// overviews + stills). Keyed by episode_number.
+  Future<Map<int, TmdbEpisodeDetails>> fetchSeasonEpisodes({
+    required Object tvId,
+    required int seasonNumber,
+    required String apiKey,
+  }) async {
+    final endpoint = '/tv/$tvId/season/$seasonNumber';
+    final response = await _client.get(
+      _buildUri(endpoint, {'api_key': apiKey, 'language': 'zh-CN'}),
+    );
+    if (response.statusCode != 200) return const {};
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) return const {};
+    final list = decoded['episodes'];
+    if (list is! List) return const {};
+
+    final out = <int, TmdbEpisodeDetails>{};
+    for (final item in list) {
+      if (item is! Map<String, dynamic>) continue;
+      final n = int.tryParse(item['episode_number']?.toString() ?? '');
+      if (n == null) continue;
+      out[n] = _mapEpisode(item);
+    }
+    return out;
+  }
+
+  TmdbEpisodeDetails _mapEpisode(Map<String, dynamic> decoded) {
     return TmdbEpisodeDetails(
       name: decoded['name']?.toString() ?? '',
       overview: decoded['overview']?.toString() ?? '',

@@ -15,11 +15,18 @@ import '../../data/repositories/playback_progress_repository.dart';
 import '../../providers/data_providers.dart';
 import '../../services/library/media_library_entry_factory.dart';
 import '../../providers/smb_providers.dart';
+import '../../services/metadata/tmdb_metadata_service.dart';
 import '../../services/playback/external_subtitle_finder.dart';
 import '../../services/playback/playback_service.dart';
 import '../../services/playback/playback_source_resolver.dart';
 import '../../services/playback/subtitle_preference.dart';
 import '../../services/playback/vlc_video_view.dart';
+
+/// Host handle so the window chrome can stop VLC **before** the NSWindow is
+/// torn down (otherwise audio keeps playing in the background).
+class PlayerHostHandle {
+  Future<void> Function()? stopPlayback;
+}
 
 /// Arguments passed to [PlayerPage] via go_router's `extra` or a player window.
 class PlayerArgs {
@@ -95,12 +102,20 @@ class PlayerArgs {
 
 /// Full-screen player backed by native VLCKit with a NetEase-style control layer.
 class PlayerPage extends ConsumerStatefulWidget {
-  const PlayerPage({super.key, required this.args, this.onClose});
+  const PlayerPage({
+    super.key,
+    required this.args,
+    this.onClose,
+    this.host,
+  });
 
   final PlayerArgs args;
 
   /// When set (standalone player window), invoked instead of Navigator.pop.
   final VoidCallback? onClose;
+
+  /// Optional host bridge so the window chrome can stop audio before closing.
+  final PlayerHostHandle? host;
 
   @override
   ConsumerState<PlayerPage> createState() => _PlayerPageState();
@@ -177,8 +192,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   int _episodeIndex = -1;
   /// Baomihua-style right-side episode picker (TV only).
   bool _episodePanelOpen = false;
+  /// Selected season in the panel (not necessarily the currently playing one).
+  int _panelSeason = 1;
   /// Which 10-episode page is selected inside the panel (0-based).
   int _episodePageIndex = 0;
+  /// Cache of TMDB episode metadata: "season:episode" → details.
+  final Map<String, TmdbEpisodeDetails> _tmdbEpisodeMeta = {};
+  bool _loadingSeasonMeta = false;
   List<ExternalSubtitleFile> _externalSubs = const [];
   bool _externalSubsLoaded = false;
   String? _autoSubtitleKey;
@@ -189,6 +209,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   void initState() {
     super.initState();
     _playback = PlaybackService();
+    widget.host?.stopPlayback = _stopPlaybackForHost;
     _uri = widget.args.uri;
     _title = widget.args.title;
     _mediaId = widget.args.mediaId;
@@ -212,8 +233,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
+  Future<void> _stopPlaybackForHost() async {
+    try {
+      await _persistProgress(force: true);
+    } catch (_) {}
+    try {
+      await _playback.stop();
+    } catch (_) {}
+    try {
+      _playback.dispose();
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    if (widget.host?.stopPlayback == _stopPlaybackForHost) {
+      widget.host?.stopPlayback = null;
+    }
     _restorePlatformAfterPlayback();
     _hideTimer?.cancel();
     _toastTimer?.cancel();
@@ -230,7 +266,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _tracksSub?.cancel();
     _videoEventSub?.cancel();
     _focusNode.dispose();
-    _playback.dispose();
+    // May already have been disposed by host close path.
+    try {
+      _playback.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -362,13 +401,86 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       final idx = _mediaId == null
           ? -1
           : episodes.indexWhere((e) => e.id == _mediaId);
+      final season = idx >= 0
+          ? episodes[idx].seasonNumber
+          : (episodes.isNotEmpty ? episodes.first.seasonNumber : 1);
       setState(() {
         _episodes = episodes;
         _episodeIndex = idx;
+        _panelSeason = season;
+        _episodePageIndex = idx >= 0
+            ? episodes
+                      .where((e) => e.seasonNumber == season)
+                      .toList()
+                      .indexWhere((e) => e.id == _mediaId) ~/
+                  10
+            : 0;
       });
+      // Prefetch TMDB Chinese titles for the current season.
+      unawaited(_ensureSeasonMeta(season));
     } catch (_) {
       // Playlist is best-effort.
     }
+  }
+
+  Future<void> _ensureSeasonMeta(int seasonNumber) async {
+    final showId = widget.args.showId;
+    if (showId == null || showId.isEmpty) return;
+    // Skip if we already have any episode meta for this season.
+    final hasAny = _tmdbEpisodeMeta.keys.any(
+      (k) => k.startsWith('$seasonNumber:'),
+    );
+    if (hasAny) return;
+
+    final show = await ref.read(mediaByIdProvider(showId).future);
+    final tmdbId = show?.tmdbId;
+    if (tmdbId == null) return;
+    final config = await ref.read(configProvider.future);
+    if (config.tmdbApiKey.isEmpty) return;
+
+    if (mounted) setState(() => _loadingSeasonMeta = true);
+    try {
+      final map = await ref
+          .read(tmdbMetadataProvider)
+          .fetchSeasonEpisodes(
+            tvId: tmdbId,
+            seasonNumber: seasonNumber,
+            apiKey: config.tmdbApiKey,
+          );
+      if (!mounted) return;
+      setState(() {
+        for (final entry in map.entries) {
+          _tmdbEpisodeMeta['$seasonNumber:${entry.key}'] = entry.value;
+        }
+        _loadingSeasonMeta = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingSeasonMeta = false);
+    }
+  }
+
+  TmdbEpisodeDetails? _metaFor(Episode ep) =>
+      _tmdbEpisodeMeta['${ep.seasonNumber}:${ep.episodeNumber}'];
+
+  String _displayEpisodeTitle(Episode ep) {
+    final meta = _metaFor(ep);
+    if (meta != null && meta.name.isNotEmpty) return meta.name;
+    // Strip release-group noise from raw file basenames.
+    final raw = ep.title.trim();
+    if (raw.isEmpty) return '第${ep.episodeNumber}集';
+    if (RegExp(
+      r'(rovers|amzn|ntb|web-?dl|bluray|x264|x265|1080p|720p)',
+      caseSensitive: false,
+    ).hasMatch(raw)) {
+      return '第${ep.episodeNumber}集';
+    }
+    return raw;
+  }
+
+  String _displayEpisodeOverview(Episode ep) {
+    final meta = _metaFor(ep);
+    if (meta != null && meta.overview.isNotEmpty) return meta.overview;
+    return '';
   }
 
   Future<void> _loadExternalSubtitles() async {
@@ -748,8 +860,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _episodePanelOpen = !_episodePanelOpen;
       if (_episodePanelOpen) {
         _controlsVisible = true;
-        _episodePageIndex = _episodeIndex >= 0 ? _episodeIndex ~/ 10 : 0;
+        if (_episodeIndex >= 0) {
+          _panelSeason = _episodes[_episodeIndex].seasonNumber;
+          final seasonEps = _episodes
+              .where((e) => e.seasonNumber == _panelSeason)
+              .toList(growable: false);
+          final inSeason = seasonEps.indexWhere(
+            (e) => e.id == _episodes[_episodeIndex].id,
+          );
+          _episodePageIndex = inSeason >= 0 ? inSeason ~/ 10 : 0;
+        }
         _hideTimer?.cancel();
+        unawaited(_ensureSeasonMeta(_panelSeason));
       } else {
         _scheduleHideControls();
       }
@@ -1212,11 +1334,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     for (final ep in _episodes) {
       seasons.putIfAbsent(ep.seasonNumber, () => []).add(ep);
     }
+    for (final list in seasons.values) {
+      list.sort((a, b) => a.episodeNumber.compareTo(b.episodeNumber));
+    }
     final seasonNumbers = seasons.keys.toList()..sort();
-    final currentSeason = _episodeIndex >= 0
-        ? _episodes[_episodeIndex].seasonNumber
-        : (seasonNumbers.isNotEmpty ? seasonNumbers.first : 1);
-    final seasonEps = seasons[currentSeason] ?? const <Episode>[];
+    if (seasonNumbers.isEmpty) return const SizedBox.shrink();
+
+    final panelSeason = seasonNumbers.contains(_panelSeason)
+        ? _panelSeason
+        : seasonNumbers.first;
+    final seasonEps = seasons[panelSeason] ?? const <Episode>[];
     final pageCount = (seasonEps.length / 10).ceil().clamp(1, 99);
     final page = _episodePageIndex.clamp(0, pageCount - 1);
     final pageEps = seasonEps.skip(page * 10).take(10).toList(growable: false);
@@ -1234,7 +1361,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             color: const Color(0xF0141418),
             elevation: 16,
             child: SizedBox(
-              width: 340,
+              width: 360,
               child: SafeArea(
                 left: false,
                 child: Column(
@@ -1246,7 +1373,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         children: [
                           Expanded(
                             child: Text(
-                              '第$currentSeason季（共${seasonEps.length}集）',
+                              '第$panelSeason季（共${seasonEps.length}集）',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 15,
@@ -1254,6 +1381,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                               ),
                             ),
                           ),
+                          if (_loadingSeasonMeta)
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white38,
+                              ),
+                            ),
                           IconButton(
                             tooltip: '关闭',
                             onPressed: _toggleEpisodePanel,
@@ -1266,6 +1402,48 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         ],
                       ),
                     ),
+                    // Season tabs — all seasons of the show, not just current.
+                    if (seasonNumbers.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (final s in seasonNumbers)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: ChoiceChip(
+                                    label: Text(
+                                      '第$s季',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: panelSeason == s
+                                            ? Colors.white
+                                            : Colors.white70,
+                                      ),
+                                    ),
+                                    selected: panelSeason == s,
+                                    onSelected: (_) {
+                                      setState(() {
+                                        _panelSeason = s;
+                                        _episodePageIndex = 0;
+                                      });
+                                      unawaited(_ensureSeasonMeta(s));
+                                    },
+                                    selectedColor: Colors.white24,
+                                    backgroundColor: Colors.white10,
+                                    side: BorderSide.none,
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    // Episode range pages within the selected season.
                     if (pageCount > 1)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -1313,6 +1491,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                             (e) => e.id == ep.id,
                           );
                           final playing = globalIndex == _episodeIndex;
+                          final title = _displayEpisodeTitle(ep);
+                          final overview = _displayEpisodeOverview(ep);
+                          final still = _metaFor(ep)?.stillUrl;
                           return InkWell(
                             borderRadius: BorderRadius.circular(10),
                             onTap: () {
@@ -1339,42 +1520,70 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    width: 92,
-                                    height: 52,
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white10,
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: playing
-                                        ? Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: const Text(
-                                              '正在播放',
-                                              style: TextStyle(
-                                                color: Colors.black87,
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w700,
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: SizedBox(
+                                      width: 100,
+                                      height: 56,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          if (still != null && still.isNotEmpty)
+                                            Image.network(
+                                              still,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, _, _) =>
+                                                  Container(
+                                                    color: Colors.white10,
+                                                    alignment: Alignment.center,
+                                                    child: Text(
+                                                      '${ep.episodeNumber}',
+                                                      style: const TextStyle(
+                                                        color: Colors.white54,
+                                                        fontSize: 18,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ),
+                                            )
+                                          else
+                                            Container(
+                                              color: Colors.white10,
+                                              alignment: Alignment.center,
+                                              child: Text(
+                                                '${ep.episodeNumber}',
+                                                style: const TextStyle(
+                                                  color: Colors.white54,
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                               ),
                                             ),
-                                          )
-                                        : Text(
-                                            '${ep.episodeNumber}',
-                                            style: const TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.w600,
+                                          if (playing)
+                                            Align(
+                                              alignment: Alignment.bottomCenter,
+                                              child: Container(
+                                                width: double.infinity,
+                                                color: Colors.black54,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 2,
+                                                    ),
+                                                child: const Text(
+                                                  '正在播放',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                              ),
                                             ),
-                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
@@ -1383,7 +1592,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          '${ep.episodeNumber}. ${ep.title.isEmpty ? '第${ep.episodeNumber}集' : ep.title}',
+                                          '${ep.episodeNumber}. $title',
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
@@ -1396,14 +1605,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'S${ep.seasonNumber.toString().padLeft(2, '0')}E${ep.episodeNumber.toString().padLeft(2, '0')}',
-                                          style: const TextStyle(
-                                            color: Colors.white38,
-                                            fontSize: 11,
+                                        if (overview.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            overview,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white38,
+                                              fontSize: 11,
+                                              height: 1.3,
+                                            ),
                                           ),
-                                        ),
+                                        ],
                                       ],
                                     ),
                                   ),

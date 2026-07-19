@@ -284,7 +284,34 @@ class PlaybackService {
 
   double get rate => _rate;
 
+  /// Stops native playback immediately without tearing down stream controllers.
+  /// Call before closing a secondary player window so audio does not keep
+  /// running after the NSWindow is gone.
+  Future<void> stop() async {
+    if (_disposed) return;
+    _pollTimer?.cancel();
+    _mobileTrackRefreshTimer?.cancel();
+    final mobile = _mobileController;
+    if (mobile != null) {
+      try {
+        await mobile.stop();
+      } catch (_) {
+        try {
+          await mobile.pause();
+        } catch (_) {}
+      }
+      return;
+    }
+    try {
+      await _invoke('dispose');
+    } catch (_) {}
+    // Clear view id so later dispose() is a no-op on the channel.
+    _viewId = null;
+    _pendingOpen = null;
+  }
+
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     _pollTimer?.cancel();
     _mobileTrackRefreshTimer?.cancel();
