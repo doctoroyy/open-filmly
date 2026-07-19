@@ -16,11 +16,21 @@ APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$APP_DIR"
 
 APP_NAME="Open Filmly"
-BUILT_APP="build/macos/Build/Products/Release/open_filmly.app"
+# PRODUCT_NAME is "Open Filmly" (title case + space); keep a fallback for older
+# local builds that still produce open_filmly.app.
+RELEASE_DIR="build/macos/Build/Products/Release"
+if [[ -d "$RELEASE_DIR/Open Filmly.app" ]]; then
+  BUILT_APP="$RELEASE_DIR/Open Filmly.app"
+elif [[ -d "$RELEASE_DIR/open_filmly.app" ]]; then
+  BUILT_APP="$RELEASE_DIR/open_filmly.app"
+else
+  BUILT_APP=""
+fi
 OUTPUT="${1:-build/Open-Filmly.dmg}"
 
-if [[ ! -d "$BUILT_APP" ]]; then
-  echo "error: $BUILT_APP not found. Run 'flutter build macos --release' first." >&2
+if [[ -z "$BUILT_APP" || ! -d "$BUILT_APP" ]]; then
+  echo "error: Open Filmly.app not found under $RELEASE_DIR." >&2
+  echo "Run 'flutter build macos --release' first." >&2
   exit 1
 fi
 
