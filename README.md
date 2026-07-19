@@ -1,147 +1,149 @@
 # Open Filmly
 
-Open Filmly 是一个本地优先、自托管的开源 AI 播放器：它不只是播放文件，而是逐步理解你的整个私人影视库，并允许你与影片内容交互。
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-> **Open Filmly 1.0 愿景：一个能理解你私人影视库的开源 AI 播放器。**
+Open Filmly is a local-first, self-hosted, open-source **AI-native personal media OS**. It connects the files you own, the content they contain, your viewing history, and the actions you want to take.
 
-![Open Filmly 首页](docs/screenshots/home.png)
+> **Open Filmly 1.0 vision: an open-source AI-native personal media OS for your private library.**
 
-![Open Filmly 电视剧详情](docs/screenshots/tv-detail.png)
+![Open Filmly home](docs/screenshots/home.png)
 
-## 产品愿景
+![Open Filmly TV detail](docs/screenshots/tv-detail.png)
 
-传统媒体库的链路通常是：
+## Product vision
 
-```text
-文件 → 元数据 → 海报 → 播放
-```
-
-Open Filmly 希望把它推进为：
+The traditional media-library loop is:
 
 ```text
-文件 → AI 理解 → 语义索引 → 个人记忆 → AI Agent → 播放
+Files → Metadata → Posters → Playback
 ```
 
-这意味着媒体库不再只是文件列表，而会逐步理解影片中的人物、场景、地点、事件、对白、情绪、主题和时间轴。用户可以用自然语言寻找内容、询问当前剧情，并直接跳转到匹配的时间点。
+Open Filmly is evolving it into:
 
-Open Filmly 的核心原则：
+```text
+Files → AI Understanding → Semantic Index → Personal Memory → AI Agent → Playback
+```
 
-- **本地优先**：媒体文件、索引和观看记忆默认留在用户自己的设备与存储中。
-- **渐进式 AI**：先把字幕、搜索和观看辅助做好，再扩展到推荐与自动化管理。
-- **时间轴优先**：每个理解结果都尽量关联具体片段、截图和播放位置。
-- **无剧透交互**：AI Companion 只基于用户已经看到的内容回答问题。
-- **用户可控**：AI 提供建议和操作预览，不擅自移动、删除或改写用户的媒体文件。
+The media library should understand people, scenes, places, events, dialogue, emotions, themes, and timelines. It should remember your relationship with what you watch, answer questions in context, and help you act on your library. You should be able to search by what happened in a scene, ask questions while watching, and jump directly to the matching moment.
 
-## AI 路线图：未来 3–6 个月
+Our product principles:
 
-路线图围绕三个最能体现产品差异的能力展开：**AI 字幕、Ask Filmly、无剧透 AI Companion**。
+- **Local first**: media files, indexes, and viewing memory stay on your devices and storage by default.
+- **Progressive AI**: make subtitles, search, and in-player assistance excellent before expanding into recommendations and automation.
+- **Timeline first**: every understanding result should map to a playable segment, screenshot, and timestamp whenever possible.
+- **Spoiler safe**: AI Companion answers from the part of the story the viewer has already watched.
+- **User controlled**: AI proposes actions and previews; it never moves, deletes, or rewrites media files without confirmation.
 
-| 优先级 | 方向 | 用户体验 | 计划产出 |
+## AI roadmap — next 3–6 months
+
+The roadmap focuses on three capabilities that can make Open Filmly immediately recognizable: **AI subtitles, Ask Filmly, and spoiler-safe AI Companion**.
+
+| Priority | Direction | User experience | Planned output |
 | --- | --- | --- | --- |
-| P0 | AI 字幕 | 语音识别、中文字幕、翻译、校准、纠错和双语显示 | 本地/可选云端 ASR、字幕时间轴编辑、专有名词与上下文修正 |
-| P0 | Ask Filmly | 用自然语言搜索影片、对白、人物和场景，并跳转到时间点 | Cmd/Ctrl + K 入口、语义检索、时间段结果、截图与一键播放 |
-| P1 | AI Companion | 看片时问“他是谁”“前面发生了什么”“这里为什么这样说” | 当前进度感知、上下文问答、无剧透边界、回看相关片段 |
-| P1 | AI 合集与推荐 | “赛博朋克但不沉重”“今晚两小时看什么” | 基于媒体内容、观看历史和当前意图生成可编辑合集 |
-| P2 | Personal Film Memory | 回顾自己看过什么、喜欢什么、在哪些片段停留过 | 观看记忆、主题回顾、跨设备同步与隐私控制 |
-| P2 | Media Agent | 批量生成字幕、整理重复文件、检查画质和长期未观看内容 | 可预览任务计划、批处理队列、可撤销的文件管理操作 |
+| P0 | AI subtitles | Transcription, translation, timing, correction, and bilingual display | Local or optional cloud ASR, subtitle timeline editing, context-aware names and terms |
+| P0 | Ask Filmly | Search movies, dialogue, people, and scenes in natural language, then jump to the timestamp | Cmd/Ctrl + K entry point, semantic retrieval, timestamped results, screenshots, one-click playback |
+| P1 | AI Companion | Ask “Who is he?”, “What happened before?”, or “Why did they say that?” while watching | Current-progress awareness, contextual answers, spoiler boundaries, linked rewatch moments |
+| P1 | AI collections and recommendations | “Cyberpunk but not too heavy” or “What can I watch tonight in two hours?” | Editable collections generated from content, viewing history, and current intent |
+| P2 | Personal Film Memory | Remember what you watched, liked, revisited, and where you stopped | Viewing memory, thematic retrospectives, cross-device sync, privacy controls |
+| P2 | Media Agent | Batch-generate subtitles, find duplicates, audit quality, and surface unwatched downloads | Previewable plans, task queues, backups, and reversible file operations |
 
-### 第一阶段：把看片体验做好
+### Phase 1: make watching better
 
-AI 字幕是最直接的入口。目标不是简单接入语音识别，而是让字幕真正适合观看：
+AI subtitles are the most direct entry point. The goal is not just speech recognition, but subtitles that are genuinely good to watch:
 
-- 自动识别语音、生成字幕并校准时间轴
-- 翻译成中文或其他目标语言，支持双语显示
-- 根据影片上下文统一人名、地名和专有名词
-- 识别片头、片尾、前情提要、广告和彩蛋，提供智能跳过
-- 在播放器中解释文化梗和字幕译法，同时避免剧透
+- Transcribe speech, generate subtitles, and align the timeline automatically.
+- Translate into Chinese or another target language with bilingual display.
+- Keep names, places, and specialized terms consistent using the film context.
+- Detect intros, outros, recaps, ads, and post-credit scenes for smart skipping.
+- Explain cultural references or translation choices in the player without spoiling the story.
 
-### 第二阶段：Ask Filmly
+### Phase 2: Ask Filmly
 
-用户不必记得片名或文件名，可以直接描述想找的内容：
-
-```text
-找那个男主角在雨里等女主角的电影
-找所有关于 AI 失控的影片
-找我收藏里出现纽约夜景的片段
-找 Nolan 电影里关于时间的对白
-```
-
-结果应当包含影片、场景、时间轴、截图和匹配理由，并支持点击后直接播放。Ask Filmly 将成为 Open Filmly 的核心入口，而不是传统媒体库搜索框的附属功能。
-
-### 第三阶段：AI Companion
-
-AI Companion 关注观看过程中的即时疑问：
+You should not need to remember a title or filename. Describe what you want to find:
 
 ```text
-他是谁？
-这个东西之前出现过吗？
-为什么他生气？
-前面发生了什么？
+Find the movie where the male lead waits for her in the rain.
+Find every film about an AI going out of control.
+Find scenes with New York at night in my favorites.
+Find dialogue about time across Nolan's films.
 ```
 
-回答必须结合当前播放位置，只使用用户已经看过的内容。例如用户暂停在某个角色第一次出现的片段，AI 应该解释其已知身份和前文关联，而不能泄露后续剧情。
+Results should include the title, scene, timestamp, screenshot, and an explanation of why it matches. One click should start playback at that moment. Ask Filmly is intended to become a primary way to enter the library, not another filter beside a title search box.
 
-## 当前能力
+### Phase 3: AI Companion
 
-- 电影、电视剧、动漫、综艺、演唱会、纪录片等媒体分类
-- TMDB 元数据、海报、背景图、演员与分集信息
-- 最近播放、续播进度、收藏、全局搜索与自动扫描
-- 电视剧按季 Tab 展示，使用 16:9 分集剧照卡片
-- 本地目录、SMB、WebDAV、Emby 和 Jellyfin 媒体来源
-- 资源库管理：添加、编辑、导入和删除网络资源，并区分本地下载与远程来源
-- 跨设备数据库导入/导出，覆盖安装时保留现有数据
-- 数字文件名剧集识别、旁车文件清理、重复剧集修复和同剧重复卡片合并
-- macOS VLCKit 3.7.3、Windows libVLC 与 iOS / Android MobileVLCKit / libVLC 原生播放
-- 硬件解码、音轨、字幕轨道、外挂字幕、播放缓冲、进度拖动、倍速、音量、上下集与自动连播
-- macOS / Windows 窗口拖动、双击最大化、全屏和桌面键盘快捷键
-- 窄屏底部导航、移动端双击手势与沉浸式播放交互
+AI Companion is for questions that arise during playback:
 
-## 平台状态
+```text
+Who is he?
+Has this object appeared before?
+Why is she angry?
+What happened earlier?
+```
 
-| 平台 | 状态 | 说明 |
+Answers must be grounded in the current playback position and only use information the viewer has already reached. If the viewer pauses at a character’s first appearance, the assistant can explain the known identity and earlier context without revealing what happens later.
+
+## Current capabilities
+
+- Separate shelves for movies, TV shows, anime, variety, concerts, documentaries, and more.
+- TMDB metadata, posters, backdrops, cast, and episode information.
+- Recently watched, resume progress, favorites, global search, and automatic scanning.
+- Season-tab TV details with 16:9 episode still cards.
+- Local folders, SMB, WebDAV, Emby, and Jellyfin media sources.
+- Resource-source management: add, edit, import, and remove network resources while keeping local and remote sources distinct.
+- Cross-device database import/export with data-preserving app upgrades.
+- Numeric episode filename recognition, AppleDouble sidecar cleanup, legacy episode repair, and duplicate TV-card consolidation.
+- Native playback with VLCKit 3.7.3 on macOS, libVLC on Windows and Android, and MobileVLCKit on iOS.
+- Hardware decoding, audio and subtitle tracks, external subtitles, buffering, seeking, speed, volume, next/previous episode, and autoplay.
+- macOS and Windows window dragging, double-click maximize, fullscreen, and desktop keyboard shortcuts.
+- Compact mobile navigation, mobile double-tap gestures, and immersive playback interactions.
+
+## Platform status
+
+| Platform | Status | Notes |
 | --- | --- | --- |
-| macOS | 可运行 | 使用 VLCKit 3.7.3 原生播放器与沙盒数据库 |
-| Windows | 可运行 | 使用 Windows Runner 与 libVLC 原生播放器 |
-| iOS | 可运行 | iOS Runner、系统文件导入、MobileVLCKit 播放与数据库迁移 |
-| Android | 可运行 | Android Runner、系统文件导入与 libVLC 播放 |
+| macOS | Runnable | Native VLCKit 3.7.3 playback with a sandboxed database |
+| Windows | Runnable | Windows Runner with native libVLC playback |
+| iOS | Runnable | iOS Runner, system file import, MobileVLCKit playback, and database migration |
+| Android | Runnable | Android Runner, system file import, and libVLC playback |
 
-## 技术方向
+## Technical direction
 
-### 媒体理解层
+### Media understanding layer
 
-导入视频后，逐步建立以下结构化信息：
+As a video is imported, Open Filmly will progressively build structured information:
 
 ```text
-影片
-├── 人物与人物关系
-├── 场景、地点与事件
-├── 对白与字幕时间轴
-├── 情绪、主题与关键概念
-└── 截图、向量索引与可播放时间点
+Film
+├── People and relationships
+├── Scenes, places, and events
+├── Dialogue and subtitle timeline
+├── Emotions, themes, and key concepts
+└── Screenshots, vector indexes, and playable timestamps
 ```
 
-实现上会优先采用可替换、可本地运行的组件：语音转录、字幕翻译、视觉理解、向量索引和可选的远程大模型。没有 AI 服务时，基础媒体库和播放器仍然完整可用。
+The implementation will favor replaceable components that can run locally: speech transcription, subtitle translation, visual understanding, vector indexing, and optional remote models. Without an AI service, the core library and player remain fully usable.
 
-### Agent 安全边界
+### Agent safety boundaries
 
-任何会影响文件或媒体库的自动化操作都遵循：
+Any automation that affects files or the library follows this sequence:
 
-1. 先分析并展示计划
-2. 允许用户预览和修改范围
-3. 执行前明确确认
-4. 保留备份或提供撤销路径
+1. Analyze the request and show a plan.
+2. Let the user preview and adjust the scope.
+3. Ask for explicit confirmation before execution.
+4. Keep a backup or provide a way to undo the change.
 
-## 开发
+## Development
 
 ```bash
 flutter pub get
 flutter run -d macos
-# Windows 主机：flutter run -d windows
-# iOS：flutter run -d <ios-device-id>
-# Android：flutter run -d <android-device-id>
+# Windows host: flutter run -d windows
+# iOS: flutter run -d <ios-device-id>
+# Android: flutter run -d <android-device-id>
 ```
 
-质量检查：
+Quality checks:
 
 ```bash
 flutter analyze lib
@@ -151,32 +153,32 @@ flutter build apk --debug
 flutter build ios --simulator
 ```
 
-环境依赖测试：
+Environment-dependent tests:
 
-- `integration_smb_real_test.dart` 需要可访问的局域网 SMB 服务。
-- `ui_automation_test.dart` 需要正在运行的应用和 Flutter VM Service。
+- `integration_smb_real_test.dart` requires an accessible SMB service on the local network.
+- `ui_automation_test.dart` requires a running app and Flutter VM Service.
 
-## 参与路线图
+## Contributing to the roadmap
 
-当前最适合贡献的方向：
+The most useful contribution areas right now are:
 
-- AI 字幕流水线：ASR、翻译、时间轴校准和字幕编辑
-- 多模态索引：对白、画面、截图与播放时间点的统一数据模型
-- Ask Filmly：自然语言检索、结果解释和时间轴跳转
-- AI Companion：当前进度感知和无剧透上下文窗口
-- 本地模型适配：让用户可以在不上传视频的情况下运行核心 AI 能力
-- 跨平台体验：保持 macOS、Windows、iOS 和 Android 的能力一致，同时尊重端特性
+- AI subtitle pipeline: ASR, translation, timeline alignment, and subtitle editing.
+- Multimodal indexing: one data model for dialogue, visuals, screenshots, and playback timestamps.
+- Ask Filmly: natural-language retrieval, result explanations, and timeline jumps.
+- AI Companion: current-progress awareness and spoiler-safe context windows.
+- Local model adapters: core AI features without uploading video files.
+- Cross-platform UX: consistent capabilities across macOS, Windows, iOS, and Android while respecting each platform’s strengths.
 
-## 技术栈
+## Tech stack
 
-- UI：Flutter、Material 3
-- 状态管理：Riverpod
-- 路由：`go_router`
-- 播放：VLCKit 3.7.3（macOS）/ libVLC（Windows、Android）/ MobileVLCKit（iOS）
-- 数据库：Drift / SQLite
-- 网络媒体：SMB Range 代理、WebDAV、Emby / Jellyfin
-- 桌面窗口：`window_manager` + macOS / Windows 原生窗口桥接
+- UI: Flutter, Material 3
+- State management: Riverpod
+- Routing: `go_router`
+- Playback: VLCKit 3.7.3 (macOS), libVLC (Windows and Android), MobileVLCKit (iOS)
+- Database: Drift / SQLite
+- Network media: SMB Range proxy, WebDAV, Emby / Jellyfin
+- Desktop windows: `window_manager` with native macOS / Windows window bridges
 
 ---
 
-Open Filmly 的终点不是“再做一个 Plex 或 Jellyfin”，而是让你的私人影视库真正变得可理解、可询问、可记忆、可协作。
+Open Filmly is not trying to be another Plex, Jellyfin, or media player. It is building an AI-native personal media OS: a private layer of understanding, memory, and agency across the media you own.
