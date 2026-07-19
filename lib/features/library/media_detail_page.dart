@@ -1172,11 +1172,9 @@ class _DetailIntro extends StatelessWidget {
       ...media.genres.take(3),
     ].join('  ');
 
-    final playLabel = resumeProgress != null
-        ? (progressLabel != null && progressLabel!.isNotEmpty
-              ? '继续播放  $progressLabel'
-              : '继续播放')
-        : '播放';
+    // Keep the primary action label short so tests and UI match Baomihua;
+    // resume position is shown as a separate line under the buttons.
+    final playLabel = resumeProgress != null ? '继续播放' : '播放';
     final showRestart = resumeProgress != null || completed;
     final overview = media.overview?.trim() ?? '';
 
