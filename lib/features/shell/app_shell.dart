@@ -69,6 +69,7 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   String _location(BuildContext context) => GoRouterState.of(context).uri.path;
 
+  /// Desktop sidebar index (full library nav).
   int _selectedIndex(BuildContext context) {
     final location = _location(context);
     if (location == '/media') {
@@ -88,6 +89,30 @@ class _AppShellState extends ConsumerState<AppShell> {
         return i;
       }
     }
+    return 0;
+  }
+
+  /// Mobile bottom tabs: 媒体库 / 资源 / 搜索 / 我的.
+  int _mobileTabIndex(BuildContext context) {
+    final location = _location(context);
+    if (location.startsWith('/sources') ||
+        location.startsWith('/smb') ||
+        location.startsWith('/webdav') ||
+        location.startsWith('/emby')) {
+      return 1;
+    }
+    if (location.startsWith('/search')) return 2;
+    if (location.startsWith('/me') ||
+        location.startsWith('/config') ||
+        location.startsWith('/favorites') ||
+        location.startsWith('/anime') ||
+        location.startsWith('/variety') ||
+        location.startsWith('/concert') ||
+        location.startsWith('/documentary') ||
+        location.startsWith('/other')) {
+      return 3;
+    }
+    // Home, recent, movies, tv, media detail → 媒体库
     return 0;
   }
 
@@ -235,12 +260,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                 bottomNavigationBar: useSidebar
                     ? null
                     : _MobileNavigation(
-                        selectedIndex: selected,
-                        moreSelected:
-                            selected > 3 ||
-                            settingsSelected ||
-                            favoritesSelected ||
-                            sourcesSelected,
+                        selectedIndex: _mobileTabIndex(context),
                         onNavigate: (path) => context.go(path),
                       ),
               );
@@ -252,229 +272,113 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 }
 
-class _MobileNavigation extends StatefulWidget {
+/// Baomihua-style mobile tabs — fixed 4 destinations, never an ActionSheet.
+class _MobileNavigation extends StatelessWidget {
   const _MobileNavigation({
     required this.selectedIndex,
-    required this.moreSelected,
     required this.onNavigate,
   });
 
+  static const _paths = <String>['/', '/sources', '/search', '/me'];
+
   final int selectedIndex;
-  final bool moreSelected;
   final ValueChanged<String> onNavigate;
 
-  @override
-  State<_MobileNavigation> createState() => _MobileNavigationState();
-}
+  int get _current => selectedIndex.clamp(0, 3);
 
-class _MobileNavigationState extends State<_MobileNavigation> {
-  int get _current => widget.moreSelected
-      ? 4
-      : widget.selectedIndex < 0
-      ? 0
-      : widget.selectedIndex > 3
-      ? 3
-      : widget.selectedIndex;
-
-  void _select(int index, {bool fromDrag = false}) {
-    if (index < 4) {
-      widget.onNavigate(AppShell._navItems[index].path);
-    } else if (!fromDrag) {
-      _showMore(context);
-    }
+  void _select(int index) {
+    if (index < 0 || index >= _paths.length) return;
+    onNavigate(_paths[index]);
   }
 
   @override
   Widget build(BuildContext context) {
     if (PlatformCapabilities.isIOS) {
-      return _buildIOSNavigation(context);
+      return NativeGlassNavBar(
+        currentIndex: _current,
+        tintColor: CupertinoColors.activeBlue,
+        tabs: const [
+          NativeGlassNavBarItem(label: '媒体库', symbol: 'play.rectangle'),
+          NativeGlassNavBarItem(label: '资源', symbol: 'folder'),
+          NativeGlassNavBarItem(label: '搜索', symbol: 'magnifyingglass'),
+          NativeGlassNavBarItem(label: '我的', symbol: 'person'),
+        ],
+        onTap: (index) {
+          HapticFeedback.selectionClick();
+          _select(index);
+        },
+        fallback: CupertinoTabBar(
+          height: 58,
+          currentIndex: _current,
+          onTap: _select,
+          border: null,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.play_rectangle),
+              ),
+              activeIcon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.play_rectangle_fill),
+              ),
+              label: '媒体库',
+            ),
+            BottomNavigationBarItem(
+              icon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.folder),
+              ),
+              activeIcon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.folder_fill),
+              ),
+              label: '资源',
+            ),
+            BottomNavigationBarItem(
+              icon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.search),
+              ),
+              label: '搜索',
+            ),
+            BottomNavigationBarItem(
+              icon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.person),
+              ),
+              activeIcon: Padding(
+                padding: EdgeInsets.only(bottom: 5),
+                child: Icon(CupertinoIcons.person_fill),
+              ),
+              label: '我的',
+            ),
+          ],
+        ),
+      );
     }
     return NavigationBar(
       height: 68,
       selectedIndex: _current,
-      onDestinationSelected: (index) {
-        _select(index);
-      },
+      onDestinationSelected: _select,
       destinations: const [
-        NavigationDestination(icon: Icon(Icons.home_rounded), label: '首页'),
-        NavigationDestination(icon: Icon(Icons.history_rounded), label: '最近'),
-        NavigationDestination(icon: Icon(Icons.movie_rounded), label: '电影'),
-        NavigationDestination(icon: Icon(Icons.tv_rounded), label: '电视剧'),
         NavigationDestination(
-          icon: Icon(Icons.more_horiz_rounded),
-          label: '更多',
+          icon: Icon(Icons.video_library_outlined),
+          selectedIcon: Icon(Icons.video_library_rounded),
+          label: '媒体库',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.folder_outlined),
+          selectedIcon: Icon(Icons.folder_rounded),
+          label: '资源',
+        ),
+        NavigationDestination(icon: Icon(Icons.search_rounded), label: '搜索'),
+        NavigationDestination(
+          icon: Icon(Icons.person_outline_rounded),
+          selectedIcon: Icon(Icons.person_rounded),
+          label: '我的',
         ),
       ],
-    );
-  }
-
-  Widget _buildIOSNavigation(BuildContext context) {
-    return NativeGlassNavBar(
-      currentIndex: _current,
-      tintColor: CupertinoColors.activeBlue,
-      tabs: const [
-        NativeGlassNavBarItem(label: '首页', symbol: 'house'),
-        NativeGlassNavBarItem(label: '最近', symbol: 'clock'),
-        NativeGlassNavBarItem(label: '电影', symbol: 'film'),
-        NativeGlassNavBarItem(label: '电视剧', symbol: 'tv'),
-        NativeGlassNavBarItem(label: '更多', symbol: 'ellipsis'),
-      ],
-      onTap: (index) {
-        HapticFeedback.selectionClick();
-        _select(index);
-      },
-      fallback: CupertinoTabBar(
-        height: 58,
-        currentIndex: _current,
-        onTap: _select,
-        border: null,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.house),
-            ),
-            activeIcon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.house_fill),
-            ),
-            label: '首页',
-          ),
-          BottomNavigationBarItem(
-            icon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.clock),
-            ),
-            activeIcon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.clock_fill),
-            ),
-            label: '最近',
-          ),
-          BottomNavigationBarItem(
-            icon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.film),
-            ),
-            activeIcon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.film_fill),
-            ),
-            label: '电影',
-          ),
-          BottomNavigationBarItem(
-            icon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.tv),
-            ),
-            activeIcon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.tv_fill),
-            ),
-            label: '电视剧',
-          ),
-          BottomNavigationBarItem(
-            icon: Padding(
-              padding: EdgeInsets.only(bottom: 5),
-              child: Icon(CupertinoIcons.ellipsis),
-            ),
-            label: '更多',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showMore(BuildContext context) {
-    if (PlatformCapabilities.isIOS) {
-      return showCupertinoModalPopup<void>(
-        context: context,
-        builder: (popupContext) => CupertinoActionSheet(
-          title: const Text('更多媒体库'),
-          message: const Text('选择要打开的内容'),
-          actions: [
-            for (final item in AppShell._navItems.skip(4))
-              CupertinoActionSheetAction(
-                onPressed: () {
-                  Navigator.pop(popupContext);
-                  widget.onNavigate(item.path);
-                },
-                child: Text(item.label),
-              ),
-            CupertinoActionSheetAction(
-              onPressed: () {
-                Navigator.pop(popupContext);
-                widget.onNavigate('/favorites');
-              },
-              child: const Text('收藏'),
-            ),
-            CupertinoActionSheetAction(
-              onPressed: () {
-                Navigator.pop(popupContext);
-                widget.onNavigate('/sources');
-              },
-              child: const Text('来源'),
-            ),
-            CupertinoActionSheetAction(
-              onPressed: () {
-                Navigator.pop(popupContext);
-                widget.onNavigate('/config');
-              },
-              child: const Text('设置'),
-            ),
-          ],
-          cancelButton: CupertinoActionSheetAction(
-            onPressed: () => Navigator.pop(popupContext),
-            child: const Text('取消'),
-          ),
-        ),
-      );
-    }
-    return showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-          children: [
-            for (final item in AppShell._navItems.skip(4))
-              ListTile(
-                leading: Icon(item.icon),
-                title: Text(item.label),
-                onTap: () {
-                  Navigator.pop(context);
-                  widget.onNavigate(item.path);
-                },
-              ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.favorite_rounded),
-              title: const Text('收藏'),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onNavigate('/favorites');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.dns_rounded),
-              title: const Text('来源'),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onNavigate('/sources');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_rounded),
-              title: const Text('设置'),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onNavigate('/config');
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

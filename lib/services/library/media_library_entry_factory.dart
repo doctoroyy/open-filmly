@@ -117,7 +117,25 @@ class MediaLibraryEntryFactory {
   /// Library root / media-type folder names that must never become a show title.
   static final _libraryRootNamePattern = RegExp(
     r'^(?:电视剧|电影|动漫|综艺|纪录片|剧集|影视|动画片|'
-    r'tv|tvs|shows?|series|movies?|films?|anime|media|videos?|娱乐)$',
+    r'tv|tvs|shows?|series|movies?|films?|anime|media|videos?|娱乐|'
+    // Mount / share roots that appear in absolute paths.
+    r'volumes?|mnt|mount|shares?|nas|disk\d*|drive|users|home|var|private|data|'
+    r'wd|wd-?downloads?|btsync|samba|smb'
+    r')$',
+    caseSensitive: false,
+  );
+
+  /// Download dumps / inbox folders. Walking up past a season pack must NOT
+  /// promote these to the show title (e.g. aria2-downloads / Genius.S01…/ep).
+  /// Matching is done on a separator-stripped form so "aria2 downloads" and
+  /// "aria2-downloads" both hit.
+  static final _dumpOrInboxFolderPattern = RegExp(
+    r'^(?:'
+    r'aria2(?:downloads?)?|downloads?|download|downloading|incomplete|'
+    r'complete|completed|incoming|inbox|torrent|torrents|btsync(?:data)?|'
+    r'transmission|qbittorrent|rtorrent|deluge|nzb|usenet|'
+    r'临时|下载|下载中|已完成|未完成|种子'
+    r')$',
     caseSensitive: false,
   );
 
@@ -772,6 +790,12 @@ class MediaLibraryEntryFactory {
       if (_isEpisodeFolderName(dirName) || _isSeasonFolderName(dirName)) {
         final parent = path.dirname(dir);
         if (parent == dir || parent.isEmpty) break;
+        final parentName = path.basename(parent);
+        // Never promote a download dump to the show root.
+        if (isDumpOrInboxFolderName(parentName) ||
+            _libraryRootNamePattern.hasMatch(parentName.trim())) {
+          break;
+        }
         dir = parent;
         continue;
       }
@@ -795,6 +819,14 @@ class MediaLibraryEntryFactory {
     while (end > 0) {
       final name = segments[end - 1];
       if (_isEpisodeFolderName(name) || _isSeasonFolderName(name)) {
+        // Keep the season pack when its parent is a dump/inbox root.
+        if (end >= 2) {
+          final parent = segments[end - 2];
+          if (isDumpOrInboxFolderName(parent) ||
+              _libraryRootNamePattern.hasMatch(parent.trim())) {
+            break;
+          }
+        }
         end -= 1;
         continue;
       }
@@ -806,6 +838,21 @@ class MediaLibraryEntryFactory {
           : logicalPath;
     }
     return segments.sublist(0, end).join('/');
+  }
+
+  /// True for download dumps / inbox folders that must never be a show title.
+  static bool isDumpOrInboxFolderName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return false;
+    if (_dumpOrInboxFolderPattern.hasMatch(trimmed)) return true;
+    // "aria2 downloads" / "BTSync Data" after cleaning separators.
+    final compact = trimmed.toLowerCase().replaceAll(RegExp(r'[\s._\-]+'), '');
+    if (_dumpOrInboxFolderPattern.hasMatch(compact)) return true;
+    // Share roots like "wd-downloads", "nas-download", "my downloads".
+    if (compact.endsWith('downloads') || compact.endsWith('download')) {
+      return true;
+    }
+    return false;
   }
 
   /// Whether [name] is a pure season container directory.
@@ -835,20 +882,46 @@ class MediaLibraryEntryFactory {
 
   static MediaType _detectType(String logicalPath, String basename) {
     final lower = logicalPath.toLowerCase();
+    // Non-entertainment / system dumps should not default into 电影.
+    if (_looksLikeNonEntertainment(logicalPath, basename)) {
+      return MediaType.unknown;
+    }
     if (_episodePattern.hasMatch(basename) ||
         lower.contains('/tv/') ||
         lower.contains('/shows/') ||
         lower.contains('/series/') ||
+        lower.contains('/电视剧') ||
+        lower.contains('/剧集') ||
         lower.contains('/season ') ||
         lower.contains('/season') ||
         _pathHasSeasonFolder(logicalPath) ||
         _looksLikeSeasonPackFolder(logicalPath)) {
       return MediaType.tv;
     }
-    if (lower.contains('/movie/') || lower.contains('/movies/')) {
+    if (lower.contains('/movie/') ||
+        lower.contains('/movies/') ||
+        lower.contains('/电影')) {
       return MediaType.movie;
     }
+    // Default movie only for ordinary video files; scanners still may
+    // reclassify via shelf heuristics when unmatched.
     return MediaType.movie;
+  }
+
+  /// Courses, ISOs, samples, audiobooks, etc. — not library entertainment.
+  static bool _looksLikeNonEntertainment(String logicalPath, String basename) {
+    final blob = '$logicalPath $basename'.toLowerCase();
+    if (RegExp(
+      r'课件|教程|教育|大师课|源码|前端|后端|小程序|编程|有声书|听书|'
+      r'渡一|慕课|ubuntu|windows\.iso|\.iso\b|/sample|/trailer|'
+      r'\bcss3?\b|\bhtml5?\b|\bvue\b|\breact\b|\bjavascript\b',
+      caseSensitive: false,
+    ).hasMatch(blob)) {
+      return true;
+    }
+    // Bare numeric lesson files: "01.mp4", "18.mkv".
+    if (RegExp(r'^\d{1,3}$').hasMatch(basename.trim())) return true;
+    return false;
   }
 
   static bool _pathHasSeasonFolder(String logicalPath) {
@@ -883,6 +956,24 @@ class MediaLibraryEntryFactory {
         .where((segment) => segment.isNotEmpty)
         .toList(growable: false);
 
+    // Strategy 0: Release-style season pack under a dump/inbox root
+    // (…/aria2-downloads/Genius.S01.1080p…/ep → "Genius"). Only when the
+    // parent is NOT a real show pack (e.g. 权力的游戏… still wins below).
+    for (var i = segmentList.length - 1; i >= 0; i--) {
+      final seg = segmentList[i];
+      if (!_isSeasonFolderName(seg) || _isEpisodeFolderName(seg)) continue;
+      final fromSeason = _cleanTitle(_stripSeasonSuffix(seg));
+      if (!_isUsableShowTitle(fromSeason)) continue;
+      if (i == 0) return fromSeason;
+      final parent = segmentList[i - 1];
+      final parentTitle = _cleanTitle(_stripSeasonSuffix(parent));
+      if (isDumpOrInboxFolderName(parent) ||
+          _libraryRootNamePattern.hasMatch(parent.trim()) ||
+          !_isUsableShowTitle(parentTitle)) {
+        return fromSeason;
+      }
+    }
+
     // Strategy 1: Find a pure season / episode-container folder
     // (S01 / S01E10 / Season 1 / 第一季) — the nearest usable parent is the show.
     for (var i = 0; i < segmentList.length; i++) {
@@ -896,6 +987,7 @@ class MediaLibraryEntryFactory {
             _isEpisodeFolderName(segmentList[j])) {
           continue;
         }
+        if (isDumpOrInboxFolderName(segmentList[j])) continue;
         final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[j]));
         if (_isUsableShowTitle(candidate)) return candidate;
       }
@@ -907,6 +999,7 @@ class MediaLibraryEntryFactory {
       for (var offset = 2; offset <= segmentList.length; offset++) {
         final dir = segmentList[segmentList.length - offset];
         if (_isSeasonFolderName(dir) || _isEpisodeFolderName(dir)) continue;
+        if (isDumpOrInboxFolderName(dir)) continue;
         final stripped = _stripSeasonSuffix(dir);
         final candidate = _cleanTitle(stripped);
         if (_isUsableShowTitle(candidate)) return candidate;
@@ -914,16 +1007,18 @@ class MediaLibraryEntryFactory {
     }
 
     // Strategy 3: Show title embedded in the filename before SxxExx.
+    // Used for flat dumps (…/aria2/severance.s01e01.mkv).
     final match = _showTitleFromFilenamePattern.firstMatch(fallback);
     if (match != null) {
       final candidate = _cleanTitle(match.group(1)!);
       if (_isUsableShowTitle(candidate)) return candidate;
     }
 
-    // Fallback: nearest non-season / non-episode parent folder.
+    // Fallback: nearest non-season / non-episode / non-dump parent folder.
     for (var i = segmentList.length - 2; i >= 0; i--) {
       if (_isSeasonFolderName(segmentList[i]) ||
-          _isEpisodeFolderName(segmentList[i])) {
+          _isEpisodeFolderName(segmentList[i]) ||
+          isDumpOrInboxFolderName(segmentList[i])) {
         continue;
       }
       final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[i]));
@@ -941,6 +1036,8 @@ class MediaLibraryEntryFactory {
     if (_episodeFolderPattern.hasMatch(trimmed)) return false;
     // Reject media-library root folders ("电视剧", "Movies", …).
     if (_libraryRootNamePattern.hasMatch(trimmed)) return false;
+    // Reject download dumps ("aria2-downloads", "btsync-data", …).
+    if (isDumpOrInboxFolderName(trimmed)) return false;
     // Reject titles that still end with a leftover season token after cleanup.
     if (RegExp(
       r'(?:^|[\s._\-])(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',

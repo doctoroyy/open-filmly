@@ -1466,71 +1466,56 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       await showModalBottomSheet<void>(
         context: context,
         backgroundColor: const Color(0xFF1A1B23),
-        isScrollControlled: true,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
         builder: (ctx) {
           return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(12, 4, 12, 12),
-                    child: Text(
-                      '音轨',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  const Text(
+                    '音轨',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                  const SizedBox(height: 12),
                   if (tracks.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(20),
-                      child: Text(
-                        '未检测到可切换的音轨',
-                        style: TextStyle(color: Colors.white54),
-                      ),
+                    const Text(
+                      '未检测到可切换的音轨',
+                      style: TextStyle(color: Colors.white54),
                     )
                   else
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: MediaQuery.sizeOf(ctx).height * 0.45,
-                      ),
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          for (final track in tracks)
-                            ListTile(
-                              title: Text(
-                                _audioTrackLabel(track),
-                                style: TextStyle(
-                                  color: track.id == current.id
-                                      ? Colors.white
-                                      : Colors.white70,
-                                  fontWeight: track.id == current.id
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final track in tracks)
+                          ChoiceChip(
+                            label: Text(
+                              _audioTrackLabel(track),
+                              style: TextStyle(
+                                color: track.id == current.id
+                                    ? Colors.black
+                                    : Colors.white,
+                                fontSize: 13,
                               ),
-                              trailing: track.id == current.id
-                                  ? const Icon(
-                                      Icons.check_rounded,
-                                      color: Colors.white,
-                                    )
-                                  : null,
-                              onTap: () {
-                                unawaited(_playback.setAudioTrack(track));
-                                Navigator.of(ctx).pop();
-                              },
                             ),
-                        ],
-                      ),
+                            selected: track.id == current.id,
+                            selectedColor: Colors.white,
+                            backgroundColor: const Color(0xFF2A2B33),
+                            onSelected: (_) {
+                              unawaited(_playback.setAudioTrack(track));
+                              Navigator.of(ctx).pop();
+                            },
+                          ),
+                      ],
                     ),
                 ],
               ),
@@ -1556,132 +1541,128 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       await showModalBottomSheet<void>(
         context: context,
         backgroundColor: const Color(0xFF1A1B23),
-        isScrollControlled: true,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
         builder: (ctx) {
-          final embedded = _playback.subtitleTracks;
+          final embedded = _playback.subtitleTracks
+              .where((t) => t.id != '-1' && t.id.isNotEmpty)
+              .toList(growable: false);
           final current = _playback.currentSubtitleTrack;
           final offSelected = current.id == '-1' || current.id.isEmpty;
           return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 4, 8),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          '字幕',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          Navigator.of(ctx).pop();
+                          await _pickAndAddSubtitle();
+                        },
+                        child: const Text(
+                          '+ 添加',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Horizontal chips — no long ActionSheet list.
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        const Expanded(
-                          child: Text(
-                            '字幕',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            Navigator.of(ctx).pop();
-                            await _pickAndAddSubtitle();
-                          },
-                          child: const Text('+ 手动添加'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.sizeOf(ctx).height * 0.5,
-                    ),
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        ListTile(
-                          title: Text(
-                            '关闭字幕',
-                            style: TextStyle(
-                              color: offSelected
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontWeight: offSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                          trailing: offSelected
-                              ? const Icon(
-                                  Icons.check_rounded,
-                                  color: Colors.white,
-                                )
-                              : null,
-                          onTap: () {
-                            unawaited(
-                              _playback.setSubtitleTrack(
-                                PlaybackSubtitleTrack.no(),
-                              ),
-                            );
-                            Navigator.of(ctx).pop();
-                          },
-                        ),
-                        for (final track in embedded)
-                          if (track.id != '-1')
-                            ListTile(
-                              title: Text(
-                                _subtitleTrackLabel(track),
-                                style: TextStyle(
-                                  color: track.id == current.id
-                                      ? Colors.white
-                                      : Colors.white70,
-                                  fontWeight: track.id == current.id
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                ),
-                              ),
-                              trailing: track.id == current.id
-                                  ? const Icon(
-                                      Icons.check_rounded,
-                                      color: Colors.white,
-                                    )
-                                  : null,
-                              onTap: () {
-                                unawaited(_playback.setSubtitleTrack(track));
-                                Navigator.of(ctx).pop();
-                              },
-                            ),
-                        for (final sub in _externalSubs)
-                          ListTile(
-                            title: Text(
-                              sub.label,
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(
+                              '关闭',
                               style: TextStyle(
-                                color: current.uri && current.id == sub.uri
-                                    ? Colors.white
-                                    : Colors.white70,
+                                color: offSelected
+                                    ? Colors.black
+                                    : Colors.white,
+                                fontSize: 13,
                               ),
                             ),
-                            trailing: current.uri && current.id == sub.uri
-                                ? const Icon(
-                                    Icons.check_rounded,
-                                    color: Colors.white,
-                                  )
-                                : null,
-                            onTap: () {
+                            selected: offSelected,
+                            selectedColor: Colors.white,
+                            backgroundColor: const Color(0xFF2A2B33),
+                            onSelected: (_) {
                               unawaited(
                                 _playback.setSubtitleTrack(
-                                  PlaybackSubtitleTrack.uri(
-                                    sub.uri,
-                                    title: sub.label,
-                                    language: sub.languageHint,
-                                  ),
+                                  PlaybackSubtitleTrack.no(),
                                 ),
                               );
                               Navigator.of(ctx).pop();
                             },
+                          ),
+                        ),
+                        for (final track in embedded)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(
+                                _subtitleTrackLabel(track),
+                                style: TextStyle(
+                                  color: track.id == current.id
+                                      ? Colors.black
+                                      : Colors.white,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              selected: track.id == current.id,
+                              selectedColor: Colors.white,
+                              backgroundColor: const Color(0xFF2A2B33),
+                              onSelected: (_) {
+                                unawaited(_playback.setSubtitleTrack(track));
+                                Navigator.of(ctx).pop();
+                              },
+                            ),
+                          ),
+                        for (final sub in _externalSubs)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(
+                                sub.label,
+                                style: TextStyle(
+                                  color: current.uri && current.id == sub.uri
+                                      ? Colors.black
+                                      : Colors.white,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              selected: current.uri && current.id == sub.uri,
+                              selectedColor: Colors.white,
+                              backgroundColor: const Color(0xFF2A2B33),
+                              onSelected: (_) {
+                                unawaited(
+                                  _playback.setSubtitleTrack(
+                                    PlaybackSubtitleTrack.uri(
+                                      sub.uri,
+                                      title: sub.label,
+                                      language: sub.languageHint,
+                                    ),
+                                  ),
+                                );
+                                Navigator.of(ctx).pop();
+                              },
+                            ),
                           ),
                       ],
                     ),
@@ -2667,62 +2648,62 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Future<void> _showMobileSpeedSheet() async {
     setState(() => _optionSheetVisible = true);
-    final rate = ValueNotifier<double>(_rate);
     try {
       await showModalBottomSheet<void>(
         context: context,
         backgroundColor: const Color(0xFF1A1B23),
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
-        builder: (context) {
+        builder: (sheetContext) {
           return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: ValueListenableBuilder<double>(
-                valueListenable: rate,
-                builder: (context, value, _) {
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '倍速  ${_formatRate(_rate)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      Text(
-                        '播放速度  ${_formatRate(value)}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Slider(
-                        value: value.clamp(_minRate, _maxRate),
-                        min: _minRate,
-                        max: _maxRate,
-                        onChanged: (v) => rate.value = v,
-                        onChangeEnd: (v) => unawaited(_setRate(v)),
-                      ),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          for (final preset in _speedPresets)
-                            ActionChip(
-                              label: Text(_formatRate(preset)),
-                              onPressed: () {
-                                rate.value = preset;
-                                unawaited(_setRate(preset));
-                              },
+                      for (final preset in _speedPresets)
+                        ChoiceChip(
+                          label: Text(
+                            _formatRate(preset),
+                            style: TextStyle(
+                              color: (_rate - preset).abs() < 0.01
+                                  ? Colors.black
+                                  : Colors.white,
+                              fontSize: 13,
                             ),
-                        ],
-                      ),
+                          ),
+                          selected: (_rate - preset).abs() < 0.01,
+                          selectedColor: Colors.white,
+                          backgroundColor: const Color(0xFF2A2B33),
+                          onSelected: (_) {
+                            unawaited(_setRate(preset));
+                            Navigator.of(sheetContext).pop();
+                          },
+                        ),
                     ],
-                  );
-                },
+                  ),
+                ],
               ),
             ),
           );
         },
       );
     } finally {
-      rate.dispose();
       if (mounted) setState(() => _optionSheetVisible = false);
     }
   }

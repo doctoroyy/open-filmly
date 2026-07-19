@@ -128,4 +128,62 @@ void main() {
       expect(e7.episode!.episodeNumber, 1);
     });
   });
+
+  group('download dump must not become a TV show', () {
+    const genius =
+        '/Volumes/wd-downloads/aria2-downloads/'
+        'Genius.S01.1080p.AMZN.WEBRip.DDP5.1.x265-SiGMA[rartv]/'
+        'Genius.S01E02.Einstein.Chapter.Two.1080p.AMZN.WEB-DL.DD.5.1.H.265-SiGMA.mkv';
+    const severance =
+        '/Volumes/wd-downloads/aria2-downloads/'
+        'severance.s01e01.2160p.web.h265-glhf.mkv';
+    const billions =
+        '/Volumes/wd-downloads/aria2-downloads/'
+        'Billions (2016) Season 1 S01 (1080p BluRay x265 HEVC 10bit AAC 5.1 Vyndros)/'
+        'Billions.S01E03.YumTime.1080p.10bit.BluRay.AAC5.1.HEVC-Vyndros.mkv';
+
+    test('Genius under aria2-downloads is Genius, not aria2 downloads', () {
+      final e = MediaLibraryEntryFactory.fromLocalPath(genius);
+      expect(e.media.type, MediaType.tv);
+      expect(e.media.title.toLowerCase(), contains('genius'));
+      expect(e.media.title.toLowerCase(), isNot(contains('aria2')));
+      expect(e.episode!.seasonNumber, 1);
+      expect(e.episode!.episodeNumber, 2);
+    });
+
+    test('flat dump file uses filename show title', () {
+      final e = MediaLibraryEntryFactory.fromLocalPath(severance);
+      expect(e.media.type, MediaType.tv);
+      expect(e.media.title.toLowerCase(), contains('severance'));
+      expect(e.media.title.toLowerCase(), isNot(contains('aria2')));
+    });
+
+    test('unrelated dump shows do not share one id', () {
+      final a = MediaLibraryEntryFactory.fromLocalPath(genius);
+      final b = MediaLibraryEntryFactory.fromLocalPath(severance);
+      final c = MediaLibraryEntryFactory.fromLocalPath(billions);
+      expect(a.media.id, isNot(equals(b.media.id)));
+      expect(b.media.id, isNot(equals(c.media.id)));
+      expect(a.media.id, isNot(equals(c.media.id)));
+    });
+
+    test('isDumpOrInboxFolderName covers cleaned titles', () {
+      expect(
+        MediaLibraryEntryFactory.isDumpOrInboxFolderName('aria2-downloads'),
+        isTrue,
+      );
+      expect(
+        MediaLibraryEntryFactory.isDumpOrInboxFolderName('aria2 downloads'),
+        isTrue,
+      );
+      expect(
+        MediaLibraryEntryFactory.isDumpOrInboxFolderName('btsync-data'),
+        isTrue,
+      );
+      expect(
+        MediaLibraryEntryFactory.isDumpOrInboxFolderName('权力的游戏'),
+        isFalse,
+      );
+    });
+  });
 }

@@ -108,7 +108,12 @@ void main() {
 
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byKey(const Key('sidebar_/')), findsNothing);
-    expect(find.text('更多'), findsOneWidget);
+    // Baomihua-style 4 tabs — no「更多」ActionSheet.
+    expect(find.text('媒体库'), findsWidgets);
+    expect(find.text('资源'), findsOneWidget);
+    expect(find.text('搜索'), findsOneWidget);
+    expect(find.text('我的'), findsOneWidget);
+    expect(find.text('更多'), findsNothing);
   });
 
   testWidgets('movie details keep the movie sidebar selected', (tester) async {

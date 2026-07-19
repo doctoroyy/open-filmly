@@ -112,7 +112,14 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           _TopBar(
             refreshing: _refreshing,
-            onSearch: () => GlobalSearch.show(context),
+            onSearch: () {
+              // Desktop: overlay search. Mobile uses the bottom「搜索」tab.
+              if (Platform.isIOS || Platform.isAndroid) {
+                context.go('/search');
+              } else {
+                GlobalSearch.show(context);
+              }
+            },
             onRefresh: _refresh,
             onSources: () => context.go('/sources'),
             onSettings: () => context.go('/config'),
@@ -239,34 +246,38 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMac = Theme.of(context).platform == TargetPlatform.macOS;
-    final isIOS = Platform.isIOS;
+    final isMobile = Platform.isIOS || Platform.isAndroid;
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        isIOS ? 20 : 28,
-        isMac ? 34 : (isIOS ? 14 : 18),
-        isIOS ? 18 : 24,
+        isMobile ? 20 : 28,
+        isMac ? 34 : (isMobile ? 14 : 18),
+        isMobile ? 18 : 24,
         10,
       ),
       child: Row(
         children: [
           Text(
-            '首页',
+            // Match 爆米花: large title; mobile says 媒体库, desktop 首页.
+            isMobile ? '媒体库' : '首页',
             style: TextStyle(
               color: FilmlyPalette.textPrimary,
-              fontSize: isIOS ? 28 : 22,
+              fontSize: isMobile ? 28 : 22,
               fontWeight: FontWeight.w700,
-              letterSpacing: isIOS ? -0.8 : -0.4,
+              letterSpacing: isMobile ? -0.8 : -0.4,
             ),
           ),
           const Spacer(),
-          _circleButton(
-            context,
-            Icons.search_rounded,
-            onSearch,
-            tooltip: '搜索 (⌘F)',
-            key: const Key('home_search_button'),
-          ),
-          const SizedBox(width: 10),
+          // Mobile: search is a bottom tab — keep only refresh (+ add on desktop).
+          if (!isMobile) ...[
+            _circleButton(
+              context,
+              Icons.search_rounded,
+              onSearch,
+              tooltip: '搜索 (⌘F)',
+              key: const Key('home_search_button'),
+            ),
+            const SizedBox(width: 10),
+          ],
           _circleButton(
             context,
             Icons.refresh_rounded,
@@ -275,14 +286,16 @@ class _TopBar extends StatelessWidget {
             spinning: refreshing,
             key: const Key('home_refresh_button'),
           ),
-          const SizedBox(width: 10),
-          _circleButton(
-            context,
-            Icons.add_rounded,
-            onSources,
-            tooltip: '添加来源',
-            key: const Key('home_add_source_button'),
-          ),
+          if (!isMobile) ...[
+            const SizedBox(width: 10),
+            _circleButton(
+              context,
+              Icons.add_rounded,
+              onSources,
+              tooltip: '添加来源',
+              key: const Key('home_add_source_button'),
+            ),
+          ],
         ],
       ),
     );

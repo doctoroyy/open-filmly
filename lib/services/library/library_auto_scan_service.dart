@@ -66,6 +66,9 @@ class LibraryAutoScanService {
     // Reunite TV seasons that older parsers split into one-show-per-season
     // (e.g. `S01.第一季` → title "S01"). Safe / idempotent.
     final repaired = await _repairSplitTvShows();
+    // Split pseudo-shows that used a download dump as the title
+    // (e.g. "aria2 downloads" holding Genius + Billions + Severance).
+    final dumpFixed = await _repairDumpRootShows();
 
     var scannedFiles = 0;
     var importedItems = 0;
@@ -91,12 +94,12 @@ class LibraryAutoScanService {
         );
         enriched = syncResult.updatedItems;
       }
-    } else if (repaired > 0) {
+    } else if (repaired > 0 || dumpFixed > 0) {
       // Even without TMDB, re-run title-based consolidation after repair.
       await _repo.consolidateAllTvShows();
     }
 
-    final hygiene = retitled + purged + fakeEps + repaired;
+    final hygiene = retitled + purged + fakeEps + repaired + dumpFixed;
 
     return AutoScanResult(
       scannedFiles: scannedFiles,
@@ -264,6 +267,7 @@ class LibraryAutoScanService {
   static bool _isWeakSeasonTitle(String title) {
     final t = title.trim();
     if (t.isEmpty) return true;
+    if (MediaLibraryEntryFactory.isDumpOrInboxFolderName(t)) return true;
     // Bare season tokens OR bare episode tokens left as show titles.
     if (RegExp(
       r'^(?:s\d{1,2}(?:e\d{1,2})?|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
@@ -276,6 +280,89 @@ class LibraryAutoScanService {
       r'(?:^|[\s._\-])(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
       caseSensitive: false,
     ).hasMatch(t);
+  }
+
+  /// Re-homes episodes that were wrongly parented under a download dump
+  /// folder treated as a single TV show (aria2-downloads, btsync-data, …).
+  Future<int> _repairDumpRootShows() async {
+    final episodeRepo = _episodeRepo;
+    if (episodeRepo == null) return 0;
+
+    final shows = await _repo.browse(type: MediaType.tv);
+    var fixed = 0;
+    for (final show in shows) {
+      final pathLeaf =
+          (show.fullPath ?? show.path)
+              .split('/')
+              .where((s) => s.isNotEmpty)
+              .lastOrNull ??
+          '';
+      final isDump =
+          MediaLibraryEntryFactory.isDumpOrInboxFolderName(show.title) ||
+          MediaLibraryEntryFactory.isDumpOrInboxFolderName(pathLeaf);
+      if (!isDump) continue;
+
+      final episodes = await episodeRepo.getByShow(show.id);
+      if (episodes.isEmpty) {
+        await _repo.deleteById(show.id);
+        fixed++;
+        continue;
+      }
+
+      final rehomedTo = <String>{};
+      for (final episode in episodes) {
+        final raw = episode.path.startsWith('smb://')
+            ? episode.path
+            : (episode.fullPath ?? episode.path);
+        final candidatePath = _logicalMediaPath(raw);
+        if (candidatePath.isEmpty) continue;
+
+        final parsed = MediaLibraryEntryFactory.fromLocalPath(candidatePath);
+        if (parsed.media.type != MediaType.tv || parsed.episode == null) {
+          continue;
+        }
+        if (MediaLibraryEntryFactory.isDumpOrInboxFolderName(
+          parsed.media.title,
+        )) {
+          continue;
+        }
+        if (_isWeakSeasonTitle(parsed.media.title)) continue;
+
+        // Keep the original SMB/WebDAV source blob so scope/consolidate match.
+        final newShow = parsed.media.copyWith(
+          detailsJson: show.detailsJson ?? parsed.media.detailsJson,
+          // Prefer the parsed show path; fall back to episode directory.
+          path: parsed.media.path,
+          fullPath: parsed.media.fullPath ?? parsed.media.path,
+        );
+        final newEpisode = parsed.episode!.copyWith(
+          id: episode.id,
+          showId: newShow.id,
+          path: episode.path,
+          fullPath: episode.fullPath,
+          dateAdded: episode.dateAdded,
+          title: episode.title.isNotEmpty
+              ? episode.title
+              : parsed.episode!.title,
+        );
+        await _repo.upsert(newShow);
+        await episodeRepo.upsert(newEpisode);
+        rehomedTo.add(newShow.id);
+        fixed++;
+      }
+
+      if (!rehomedTo.contains(show.id)) {
+        final remaining = await episodeRepo.getByShow(show.id);
+        if (remaining.isEmpty) {
+          await _repo.deleteById(show.id);
+        }
+      }
+    }
+
+    if (fixed > 0) {
+      await _repo.consolidateAllTvShows();
+    }
+    return fixed;
   }
 
   static bool _looksLikeSeasonFullPath(String path) {
