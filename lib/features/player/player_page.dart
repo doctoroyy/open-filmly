@@ -175,6 +175,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   List<Episode> _episodes = const [];
   int _episodeIndex = -1;
+  /// Baomihua-style right-side episode picker (TV only).
+  bool _episodePanelOpen = false;
+  /// Which 10-episode page is selected inside the panel (0-based).
+  int _episodePageIndex = 0;
   List<ExternalSubtitleFile> _externalSubs = const [];
   bool _externalSubsLoaded = false;
   String? _autoSubtitleKey;
@@ -544,8 +548,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   void _scheduleHideControls() {
     _hideTimer?.cancel();
+    if (_episodePanelOpen) return; // keep chrome while picking episodes
     _hideTimer = Timer(_controlsHideDelay, () {
-      if (mounted && _playing && !_dragging && _error == null) {
+      if (mounted &&
+          _playing &&
+          !_dragging &&
+          _error == null &&
+          !_episodePanelOpen) {
         setState(() => _controlsVisible = false);
       }
     });
@@ -674,8 +683,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Future<void> _playAdjacentEpisode(int delta) async {
-    _cancelAutoNext();
     final targetIndex = _episodeIndex + delta;
+    if (targetIndex < 0 || targetIndex >= _episodes.length) return;
+    await _playEpisodeAt(targetIndex, toast: delta > 0 ? '下一集' : '上一集');
+  }
+
+  Future<void> _playEpisodeAt(int targetIndex, {String? toast}) async {
+    _cancelAutoNext();
     if (targetIndex < 0 || targetIndex >= _episodes.length) return;
 
     final showId = widget.args.showId;
@@ -710,14 +724,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _title =
             '${widget.args.showTitle ?? show.title} - ${episode.displayLabel}';
         _episodeIndex = targetIndex;
+        _episodePageIndex = targetIndex ~/ 10;
         _position = Duration.zero;
         _duration = Duration.zero;
         _buffer = Duration.zero;
         _lastPersistedPosition = Duration.zero;
         _progressRepo = ref.read(playbackProgressRepositoryProvider);
       });
+      await DesktopWindow.setTitle(_title);
       await _openCurrent();
-      _showToast(delta > 0 ? '下一集' : '上一集');
+      if (toast != null) _showToast(toast);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -725,6 +741,19 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _error = '切换剧集失败：$e';
       });
     }
+  }
+
+  void _toggleEpisodePanel() {
+    setState(() {
+      _episodePanelOpen = !_episodePanelOpen;
+      if (_episodePanelOpen) {
+        _controlsVisible = true;
+        _episodePageIndex = _episodeIndex >= 0 ? _episodeIndex ~/ 10 : 0;
+        _hideTimer?.cancel();
+      } else {
+        _scheduleHideControls();
+      }
+    });
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
@@ -1166,7 +1195,232 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
         ),
+        // Episode playlist panel (TV) — Baomihua right drawer.
+        if (_episodes.isNotEmpty)
+          Positioned(
+            top: 0,
+            right: 0,
+            bottom: 0,
+            child: _episodeSidePanel(),
+          ),
       ],
+    );
+  }
+
+  Widget _episodeSidePanel() {
+    final seasons = <int, List<Episode>>{};
+    for (final ep in _episodes) {
+      seasons.putIfAbsent(ep.seasonNumber, () => []).add(ep);
+    }
+    final seasonNumbers = seasons.keys.toList()..sort();
+    final currentSeason = _episodeIndex >= 0
+        ? _episodes[_episodeIndex].seasonNumber
+        : (seasonNumbers.isNotEmpty ? seasonNumbers.first : 1);
+    final seasonEps = seasons[currentSeason] ?? const <Episode>[];
+    final pageCount = (seasonEps.length / 10).ceil().clamp(1, 99);
+    final page = _episodePageIndex.clamp(0, pageCount - 1);
+    final pageEps = seasonEps.skip(page * 10).take(10).toList(growable: false);
+
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      offset: _episodePanelOpen ? Offset.zero : const Offset(1, 0),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: _episodePanelOpen ? 1 : 0,
+        child: IgnorePointer(
+          ignoring: !_episodePanelOpen,
+          child: Material(
+            color: const Color(0xF0141418),
+            elevation: 16,
+            child: SizedBox(
+              width: 340,
+              child: SafeArea(
+                left: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '第$currentSeason季（共${seasonEps.length}集）',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '关闭',
+                            onPressed: _toggleEpisodePanel,
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white54,
+                              size: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (pageCount > 1)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (var i = 0; i < pageCount; i++)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: ChoiceChip(
+                                    label: Text(
+                                      '${i * 10 + 1}-${((i + 1) * 10).clamp(1, seasonEps.length)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: page == i
+                                            ? Colors.white
+                                            : Colors.white70,
+                                      ),
+                                    ),
+                                    selected: page == i,
+                                    onSelected: (_) {
+                                      setState(() => _episodePageIndex = i);
+                                    },
+                                    selectedColor: Colors.white24,
+                                    backgroundColor: Colors.white10,
+                                    side: BorderSide.none,
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                        itemCount: pageEps.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final ep = pageEps[i];
+                          final globalIndex = _episodes.indexWhere(
+                            (e) => e.id == ep.id,
+                          );
+                          final playing = globalIndex == _episodeIndex;
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              unawaited(
+                                _playEpisodeAt(
+                                  globalIndex,
+                                  toast: '第${ep.episodeNumber}集',
+                                ),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: playing
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.white.withValues(alpha: 0.03),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: playing
+                                      ? Colors.white30
+                                      : Colors.white10,
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 92,
+                                    height: 52,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white10,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: playing
+                                        ? Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                            ),
+                                            child: const Text(
+                                              '正在播放',
+                                              style: TextStyle(
+                                                color: Colors.black87,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          )
+                                        : Text(
+                                            '${ep.episodeNumber}',
+                                            style: const TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${ep.episodeNumber}. ${ep.title.isEmpty ? '第${ep.episodeNumber}集' : ep.title}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: playing
+                                                ? Colors.white
+                                                : Colors.white.withValues(
+                                                    alpha: 0.92,
+                                                  ),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'S${ep.seasonNumber.toString().padLeft(2, '0')}E${ep.episodeNumber.toString().padLeft(2, '0')}',
+                                          style: const TextStyle(
+                                            color: Colors.white38,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1304,6 +1558,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 child: const Text('原画', style: TextStyle(fontSize: 13)),
               ),
               const Spacer(),
+              // Baomihua center: prev / play / next (episode for TV)
+              if (_episodes.isNotEmpty)
+                IconButton(
+                  key: const Key('player_prev_episode'),
+                  tooltip: '上一集 (P)',
+                  onPressed: _hasPrevEpisode
+                      ? () => unawaited(_playAdjacentEpisode(-1))
+                      : null,
+                  icon: Icon(
+                    Icons.skip_previous_rounded,
+                    color: _hasPrevEpisode ? Colors.white : Colors.white24,
+                    size: 26,
+                  ),
+                ),
               IconButton(
                 key: const Key('player_play_pause'),
                 tooltip: _playing ? '暂停' : '播放',
@@ -1314,23 +1582,20 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   size: 32,
                 ),
               ),
-              const Spacer(),
-              if (_hasPrevEpisode)
-                IconButton(
-                  key: const Key('player_prev_episode'),
-                  tooltip: '上一集 (P)',
-                  icon: const Icon(Icons.skip_previous_rounded, size: 22),
-                  color: _chromeDim,
-                  onPressed: () => unawaited(_playAdjacentEpisode(-1)),
-                ),
-              if (_hasNextEpisode)
+              if (_episodes.isNotEmpty)
                 IconButton(
                   key: const Key('player_next_episode'),
                   tooltip: '下一集 (N)',
-                  icon: const Icon(Icons.skip_next_rounded, size: 22),
-                  color: _chromeDim,
-                  onPressed: () => unawaited(_playAdjacentEpisode(1)),
+                  onPressed: _hasNextEpisode
+                      ? () => unawaited(_playAdjacentEpisode(1))
+                      : null,
+                  icon: Icon(
+                    Icons.skip_next_rounded,
+                    color: _hasNextEpisode ? Colors.white : Colors.white24,
+                    size: 26,
+                  ),
                 ),
+              const Spacer(),
               IconButton(
                 tooltip: '全屏 (F)',
                 onPressed: () => unawaited(DesktopWindow.toggleFullScreen()),
@@ -1362,6 +1627,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   ),
                 ),
               ),
+              // Episode list (TV) — Baomihua hamburger.
+              if (_episodes.isNotEmpty)
+                IconButton(
+                  key: const Key('player_episode_list'),
+                  tooltip: '选集',
+                  onPressed: _toggleEpisodePanel,
+                  icon: Icon(
+                    Icons.menu_rounded,
+                    color: _episodePanelOpen ? Colors.white : _chromeDim,
+                    size: 22,
+                  ),
+                ),
             ],
           ),
         ],

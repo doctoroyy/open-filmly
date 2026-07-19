@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../core/platform/platform_capabilities.dart';
+import '../../core/platform/window_channel.dart';
 import 'player_page.dart';
 
 /// Secondary-window player UI (same process as the library).
@@ -30,6 +31,7 @@ class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
 
   Future<void> _configureWindow() async {
     if (!PlatformCapabilities.isDesktop) return;
+    // Intercept the red traffic-light so we can close *this* window only.
     await windowManager.setPreventClose(true);
     await windowManager.setTitle(widget.args.title);
     await windowManager.setBackgroundColor(const Color(0xFF000000));
@@ -41,14 +43,12 @@ class _OpenFilmlyPlayerAppState extends ConsumerState<OpenFilmlyPlayerApp>
   }
 
   Future<void> _closePlayerWindow() async {
+    // CRITICAL: never call windowManager.destroy() — on macOS that runs
+    // NSApp.terminate and quits the whole application.
     try {
       await windowManager.setPreventClose(false);
-      await windowManager.destroy();
-    } catch (_) {
-      try {
-        await windowManager.close();
-      } catch (_) {}
-    }
+    } catch (_) {}
+    await WindowChannel.closeCurrentWindow();
   }
 
   @override

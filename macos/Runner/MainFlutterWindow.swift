@@ -101,6 +101,12 @@ enum FilmlyWindowBootstrap {
       case "maximize":
         window.zoom(nil)
         result(nil)
+      case "closeCurrentWindow":
+        // Close only this window. Do NOT call NSApp.terminate — that would
+        // kill the library window in the same process.
+        window.orderOut(nil)
+        window.close()
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
