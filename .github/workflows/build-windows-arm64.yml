@@ -1,0 +1,81 @@
+name: Build Windows ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'packages/**'
+      - '.github/workflows/build-windows-arm64.yml'
+
+env:
+  FLUTTER_VERSION: '3.38.3'
+
+jobs:
+  build-windows-arm64:
+    name: Windows ARM64 release zip
+    # Native ARM64 Windows runner (public free for GitHub-hosted).
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows (host is ARM64)
+        run: flutter build windows --release
+
+      - name: Detect release output dir
+        id: out
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "build/windows/arm64/runner/Release",
+            "build/windows/x64/runner/Release",
+            "build/windows/runner/Release"
+          )
+          $found = $null
+          foreach ($p in $candidates) {
+            if (Test-Path $p) { $found = $p; break }
+          }
+          if (-not $found) {
+            Get-ChildItem -Recurse build/windows -ErrorAction SilentlyContinue | Select-Object -First 50 FullName
+            throw "Windows Release output not found"
+          }
+          Write-Host "Using output: $found"
+          "path=$found" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # Report arch of the main exe
+          $exe = Get-ChildItem $found -Filter *.exe | Select-Object -First 1
+          if ($exe) {
+            Write-Host "Main exe: $($exe.FullName)"
+          }
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $src = "${{ steps.out.outputs.path }}"
+          $out = "build/Open-Filmly-windows-arm64.zip"
+          if (Test-Path $out) { Remove-Item $out -Force }
+          Compress-Archive -Path "$src/*" -DestinationPath $out
+          Get-Item $out | Format-List Name, Length, FullName
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-filmly-windows-arm64
+          path: build/Open-Filmly-windows-arm64.zip
+          if-no-files-found: error
