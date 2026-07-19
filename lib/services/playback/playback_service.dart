@@ -250,6 +250,7 @@ class PlaybackService {
       if (track.uri) {
         final uri = track.id;
         if (uri.startsWith('http://') || uri.startsWith('https://')) {
+          // Proxy URLs are already re-encoded to UTF-8 by the source resolver.
           await mobile.addSubtitleFromNetwork(uri);
         } else {
           final source = File(Uri.tryParse(uri)?.toFilePath() ?? uri);
@@ -264,7 +265,18 @@ class PlaybackService {
     }
     if (track.uri) {
       try {
-        await _invoke('addSubtitleTrack', {'uri': track.id});
+        // Always re-encode local sidecars to UTF-8 before handing them to
+        // native VLC. macOS forces `subsdec-encoding=UTF-8`, so GBK/GB18030
+        // files would otherwise render as mojibake and can stutter while
+        // FreeType struggles with the broken code points.
+        final uri = track.id;
+        final resolved =
+            (uri.startsWith('http://') || uri.startsWith('https://'))
+            ? uri
+            : (await _normalizeLocalSubtitle(
+                File(Uri.tryParse(uri)?.toFilePath() ?? uri),
+              )).path;
+        await _invoke('addSubtitleTrack', {'uri': resolved});
       } on MissingPluginException {
         // The current Windows libVLC bridge supports embedded subtitle tracks
         // but does not expose runtime sidecar attachment yet.
@@ -369,7 +381,8 @@ class PlaybackService {
     final options = VlcPlayerOptions(
       advanced: VlcAdvancedOptions([
         VlcAdvancedOptions.networkCaching(12000),
-        VlcAdvancedOptions.fileCaching(3000),
+        // Larger file cache for SMB/NAS mounts reduces HEVC 10-bit hitching.
+        VlcAdvancedOptions.fileCaching(8000),
         VlcAdvancedOptions.clockJitter(0),
       ]),
       http: VlcHttpOptions([
@@ -377,7 +390,15 @@ class PlaybackService {
         if (pending.httpHeaders?['User-Agent'] case final userAgent?)
           VlcHttpOptions.httpUserAgent(userAgent),
       ]),
-      extras: _mobileHeaderOptions(pending.httpHeaders),
+      extras: [
+        ..._mobileHeaderOptions(pending.httpHeaders),
+        // External sidecars are re-encoded to UTF-8 before addSubtitleFromFile.
+        // Keep decoder on UTF-8 so Chinese text renders correctly; disable
+        // auto-load of sibling .srt that would bypass our normalizer.
+        '--no-sub-autodetect-file',
+        '--subsdec-encoding=UTF-8',
+        '--subsdec-autodetect-utf8',
+      ],
       video: VlcVideoOptions([
         VlcVideoOptions.dropLateFrames(true),
         VlcVideoOptions.skipFrames(true),

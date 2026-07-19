@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:cupertino_native_better/cupertino_native_better.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -105,6 +104,9 @@ class MediaDetailPage extends ConsumerWidget {
     // that were merged from S01/S02/… directories.
     final displayPath = _displaySourcePath(ref, media);
 
+    final isMobile = PlatformCapabilities.isMobile;
+    final pagePad = isMobile ? 16.0 : 32.0;
+
     // Baomihua 三段式：顶栏 → 封面（底部渐变溶入内容）→ 介绍/选集/演员
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -122,11 +124,13 @@ class MediaDetailPage extends ConsumerWidget {
               _CoverWithIntro(
                 backdrop: backdrop,
                 poster: media.posterPath,
+                isMobile: isMobile,
                 intro: _DetailIntro(
                   media: media,
                   resumeProgress: resumeProgress,
                   completed: progress?.completed == true,
                   progressLabel: progress?.progressLabel,
+                  isMobile: isMobile,
                   onPlay: playable.isEmpty
                       ? null
                       : () => _playMedia(
@@ -143,7 +147,7 @@ class MediaDetailPage extends ConsumerWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(32, 8, 32, 32),
+                padding: EdgeInsets.fromLTRB(pagePad, 8, pagePad, 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -169,59 +173,121 @@ class MediaDetailPage extends ConsumerWidget {
     );
   }
 
-  /// Path shown on the detail page: for multi-season TV shows, the common
-  /// parent library folder (e.g. `…/生活大爆炸 1-10 季`) rather than one season
-  /// subfolder that happened to be stored on the media row.
+  /// Path shown on the detail page.
+  ///
+  /// For TV shows, prefer the **show pack folder** recovered from episode
+  /// files (e.g. `//wd/电视剧/异星灾变.第1季`), not the library category
+  /// (`//wd/电视剧`) and not a per-episode container (`…/S01E10`).
   String _displaySourcePath(WidgetRef ref, Media media) {
     final fallback = (media.fullPath != null && media.fullPath!.isNotEmpty)
         ? media.fullPath!
         : media.path;
 
-    if (media.type != MediaType.tv) return fallback;
+    if (media.type != MediaType.tv) {
+      return _normalizeDisplayPath(fallback);
+    }
 
     final seasons =
         ref.watch(episodesByShowProvider(media.id)).asData?.value ?? const [];
-    final dirs = <String>[];
+    final showRoots = <String>{};
     for (final season in seasons) {
       for (final ep in season.episodes) {
         final raw = (ep.fullPath != null && ep.fullPath!.isNotEmpty)
             ? ep.fullPath!
             : ep.path;
-        if (raw.isEmpty) continue;
-        dirs.add(_pathCtx.dirname(raw));
+        final root = _showPackRootFromEpisodePath(raw);
+        if (root.isNotEmpty) showRoots.add(root);
       }
     }
-    if (dirs.isEmpty) {
-      return _stripSeasonFolder(fallback);
+
+    if (showRoots.isEmpty) {
+      final fromFallback = _showPackRootFromEpisodePath(fallback);
+      return _normalizeDisplayPath(
+        fromFallback.isNotEmpty ? fromFallback : fallback,
+      );
     }
-    var root = _commonDirPrefix(dirs);
-    // Climb out of Sxx / 第N季 folders until we hit the show root.
-    var guard = 0;
-    while (root.isNotEmpty &&
-        _looksLikeSeasonFolder(_pathCtx.basename(root)) &&
-        guard++ < 4) {
-      final parent = _pathCtx.dirname(root);
-      if (parent.isEmpty || parent == root || parent == '.') break;
-      root = parent;
+    if (showRoots.length == 1) {
+      return _normalizeDisplayPath(showRoots.first);
     }
-    return root.isNotEmpty ? root : _stripSeasonFolder(fallback);
+    // Multi-pack show (e.g. 良医1-2季 + 良医第3季): longest common parent.
+    return _normalizeDisplayPath(_commonDirPrefix(showRoots.toList()));
   }
 
-  static String _stripSeasonFolder(String path) {
-    if (path.isEmpty) return path;
+  /// Walk up from an episode file/folder past pure season/episode containers
+  /// (`S01`, `S01E10`, `第一季`) and stop at the pack folder
+  /// (`异星灾变.第1季` keeps its season suffix — that is the show pack).
+  static String _showPackRootFromEpisodePath(String raw) {
+    var path = raw.trim().replaceAll('\\', '/');
+    if (path.isEmpty) return '';
+
+    // Drop filename when it's a video.
     final base = _pathCtx.basename(path);
-    if (_looksLikeSeasonFolder(base)) {
+    if (MediaLibraryEntryFactory.isVideoPath(base) ||
+        base.contains('.') &&
+            RegExp(
+              r'\.(mkv|mp4|avi|mov|m4v|ts|m2ts|wmv|flv|webm)$',
+              caseSensitive: false,
+            ).hasMatch(base)) {
+      path = _pathCtx.dirname(path);
+    }
+
+    for (var guard = 0; guard < 6; guard++) {
+      final name = _pathCtx.basename(path);
+      if (!_isPureSeasonOrEpisodeContainer(name)) break;
       final parent = _pathCtx.dirname(path);
-      if (parent.isNotEmpty && parent != '.' && parent != path) return parent;
+      if (parent.isEmpty || parent == path || parent == '.') break;
+      path = parent;
     }
     return path;
+  }
+
+  /// Pure containers only — NOT "异星灾变.第1季" / "良医1-2季".
+  static bool _isPureSeasonOrEpisodeContainer(String name) {
+    final n = name.trim();
+    if (n.isEmpty) return false;
+    // S01E10
+    if (RegExp(r'^s\d{1,2}e\d{1,2}$', caseSensitive: false).hasMatch(n)) {
+      return true;
+    }
+    // S01 / Season 1 / 第一季 / 第1季
+    if (RegExp(
+      r'^(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百零〇两\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(n)) {
+      return true;
+    }
+    // S01.第一季
+    if (RegExp(
+      r'^s\d{1,2}[\s._\-]+第[一二三四五六七八九十百零〇两\d]+季$',
+      caseSensitive: false,
+    ).hasMatch(n)) {
+      return true;
+    }
+    return false;
+  }
+
+  static String _normalizeDisplayPath(String path) {
+    var value = path.trim().replaceAll('\\', '/');
+    if (value.isEmpty) return value;
+    // Keep a single leading slash style: //share/... or /abs/...
+    if (value.startsWith('//')) {
+      final rest = value.substring(2).replaceAll(RegExp(r'/+'), '/');
+      return '//$rest';
+    }
+    value = value.replaceAll(RegExp(r'/+'), '/');
+    return value;
   }
 
   static String _commonDirPrefix(List<String> dirs) {
     if (dirs.isEmpty) return '';
     if (dirs.length == 1) return dirs.first;
+    // Split carefully: keep leading empty only as a flag, drop bare "/" tokens
+    // that path.Context inserts for UNC-style //share paths.
     final split = dirs
-        .map((d) => _pathCtx.split(d).where((s) => s.isNotEmpty).toList())
+        .map((d) {
+          final parts = _pathCtx.split(d);
+          return parts.where((s) => s.isNotEmpty && s != '/').toList();
+        })
         .toList(growable: false);
     final first = split.first;
     var n = first.length;
@@ -235,26 +301,10 @@ class MediaDetailPage extends ConsumerWidget {
     }
     if (n == 0) return dirs.first;
     final joined = first.take(n).join('/');
-    // Preserve leading slash for absolute paths.
-    if (dirs.first.startsWith('/')) return '/$joined';
+    final sample = dirs.first;
+    if (sample.startsWith('//')) return '//$joined';
+    if (sample.startsWith('/')) return '/$joined';
     return joined;
-  }
-
-  static bool _looksLikeSeasonFolder(String name) {
-    final n = name.trim();
-    if (n.isEmpty) return false;
-    // S01 / S02.第二季 / Season 2 / Season02
-    if (RegExp(r'^S\d{1,2}([\s._\-]|$)', caseSensitive: false).hasMatch(n)) {
-      return true;
-    }
-    if (RegExp(r'^Season\s*\d+', caseSensitive: false).hasMatch(n)) {
-      return true;
-    }
-    // 第2季 / 第二季 / 第02季
-    if (RegExp(r'^第[0-9一二三四五六七八九十百零〇两]+季').hasMatch(n)) {
-      return true;
-    }
-    return false;
   }
 
   Widget _episodesSection(BuildContext context, WidgetRef ref, Media media) {
@@ -958,12 +1008,23 @@ class _DetailTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Material IconButton only — cupertino_native glass buttons paint outside
+    // their layout bounds on iOS and overlap the title text.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
       child: Row(
         children: [
-          _TopBarIconButton(icon: Icons.chevron_left_rounded, onTap: onBack),
-          const SizedBox(width: 4),
+          IconButton(
+            onPressed: onBack,
+            icon: const Icon(
+              Icons.chevron_left_rounded,
+              color: FilmlyPalette.textPrimary,
+              size: 28,
+            ),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          ),
           Expanded(
             child: Text(
               title,
@@ -983,8 +1044,8 @@ class _DetailTopBar extends StatelessWidget {
   }
 }
 
-class _TopBarIconButton extends StatelessWidget {
-  const _TopBarIconButton({
+class _ActionIconButton extends StatelessWidget {
+  const _ActionIconButton({
     super.key,
     required this.icon,
     required this.onTap,
@@ -997,28 +1058,9 @@ class _TopBarIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (PlatformCapabilities.isIOS) {
-      return SizedBox.square(
-        dimension: 36,
-        child: CNButton.icon(
-          customIcon: icon,
-          tint: tint ?? FilmlyPalette.textPrimary,
-          onPressed: onTap,
-          config: const CNButtonConfig(
-            style: CNButtonStyle.plain,
-            width: 36,
-            minHeight: 36,
-            padding: EdgeInsets.zero,
-            borderRadius: 18,
-            customIconSize: 22,
-            glassEffectUnionId: 'detail-top-actions',
-          ),
-        ),
-      );
-    }
     return IconButton(
       onPressed: onTap,
-      icon: Icon(icon, color: tint ?? FilmlyPalette.textPrimary, size: 24),
+      icon: Icon(icon, color: tint ?? FilmlyPalette.textPrimary, size: 22),
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.all(8),
       constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -1033,19 +1075,25 @@ class _CoverWithIntro extends StatelessWidget {
     required this.backdrop,
     required this.poster,
     required this.intro,
+    this.isMobile = false,
   });
 
   final String? backdrop;
   final String? poster;
   final Widget intro;
+  final bool isMobile;
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    // Baomihua uses a tall landscape banner; keep it dominant but bounded.
-    final coverHeight = (width / 1.9).clamp(260.0, 460.0);
-    // Intro rides up into the soft white zone under the faces.
-    final overlap = (coverHeight * 0.28).clamp(72.0, 130.0);
+    // Mobile: shorter cover so title/actions aren't crushed into the artwork.
+    final coverHeight = isMobile
+        ? (width / 1.55).clamp(180.0, 280.0)
+        : (width / 1.9).clamp(260.0, 460.0);
+    final overlap = isMobile
+        ? (coverHeight * 0.14).clamp(28.0, 48.0)
+        : (coverHeight * 0.28).clamp(72.0, 130.0);
+    final hPad = isMobile ? 16.0 : 36.0;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -1059,7 +1107,7 @@ class _CoverWithIntro extends StatelessWidget {
         Positioned(
           left: 0,
           right: 0,
-          top: coverHeight * 0.42,
+          top: coverHeight * (isMobile ? 0.35 : 0.42),
           bottom: 0,
           child: const IgnorePointer(
             child: DecoratedBox(
@@ -1082,7 +1130,7 @@ class _CoverWithIntro extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: EdgeInsets.fromLTRB(36, coverHeight - overlap, 36, 4),
+          padding: EdgeInsets.fromLTRB(hPad, coverHeight - overlap, hPad, 4),
           child: intro,
         ),
       ],
@@ -1149,6 +1197,7 @@ class _DetailIntro extends StatelessWidget {
     required this.onRestart,
     required this.onToggleFavorite,
     required this.onReMatch,
+    this.isMobile = false,
   });
 
   final Media media;
@@ -1159,6 +1208,7 @@ class _DetailIntro extends StatelessWidget {
   final VoidCallback? onRestart;
   final VoidCallback onToggleFavorite;
   final VoidCallback onReMatch;
+  final bool isMobile;
 
   @override
   Widget build(BuildContext context) {
@@ -1172,52 +1222,67 @@ class _DetailIntro extends StatelessWidget {
       ...media.genres.take(3),
     ].join('  ');
 
-    // Keep the primary action label short so tests and UI match Baomihua;
-    // resume position is shown as a separate line under the buttons.
     final playLabel = resumeProgress != null ? '继续播放' : '播放';
     final showRestart = resumeProgress != null || completed;
     final overview = media.overview?.trim() ?? '';
+    final titleStyle = TextStyle(
+      color: FilmlyPalette.textPrimary,
+      fontSize: isMobile ? 24 : 26,
+      fontWeight: FontWeight.w800,
+      letterSpacing: -0.4,
+      height: 1.15,
+    );
+
+    final actionButtons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActionIconButton(
+          key: const Key('detail_re-match_button'),
+          icon: Icons.auto_fix_high_rounded,
+          onTap: onReMatch,
+        ),
+        _ActionIconButton(
+          icon: media.isFavorite
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          onTap: onToggleFavorite,
+          tint: media.isFavorite ? FilmlyPalette.accent : null,
+        ),
+      ],
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Text(
-                media.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: FilmlyPalette.textPrimary,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.4,
-                  height: 1.15,
+        if (isMobile) ...[
+          Text(
+            media.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: titleStyle,
+          ),
+          const SizedBox(height: 4),
+          actionButtons,
+        ] else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  media.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: titleStyle,
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            _TopBarIconButton(
-              key: const Key('detail_re-match_button'),
-              icon: Icons.auto_fix_high_rounded,
-              onTap: onReMatch,
-            ),
-            _TopBarIconButton(
-              icon: media.isFavorite
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              onTap: onToggleFavorite,
-              tint: media.isFavorite ? FilmlyPalette.accent : null,
-            ),
-          ],
-        ),
+              const SizedBox(width: 8),
+              actionButtons,
+            ],
+          ),
         const SizedBox(height: 14),
-        // Play on the left; meta + clamped overview on the right (Baomihua).
         LayoutBuilder(
           builder: (context, constraints) {
-            final wide = constraints.maxWidth >= 560;
+            final wide = !isMobile && constraints.maxWidth >= 560;
             final playColumn = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1238,7 +1303,7 @@ class _DetailIntro extends StatelessWidget {
                 if (meta.isNotEmpty)
                   Text(
                     meta,
-                    maxLines: 1,
+                    maxLines: isMobile ? 2 : 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: FilmlyPalette.textSecondary,
@@ -1259,6 +1324,16 @@ class _DetailIntro extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   playColumn,
+                  if (resumeProgress != null && progressLabel != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '上次播放到 $progressLabel',
+                      style: const TextStyle(
+                        color: FilmlyPalette.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                   if (meta.isNotEmpty || overview.isNotEmpty) ...[
                     const SizedBox(height: 14),
                     infoColumn,

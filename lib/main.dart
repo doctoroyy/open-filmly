@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'core/platform/desktop_window.dart';
+import 'core/platform/platform_capabilities.dart';
 import 'core/platform/player_window.dart';
 import 'features/player/player_app.dart';
 
@@ -18,6 +19,18 @@ Future<void> main(List<String> args) async {
     FlutterSkillBinding.ensureInitialized();
   }
 
+  // Multi-window + window_manager are desktop-only. Calling them on iOS/Android
+  // hangs the first frame (white screen) because those plugins have no mobile
+  // engine wiring.
+  if (PlatformCapabilities.isDesktop) {
+    await _runDesktop(args);
+    return;
+  }
+
+  runApp(const ProviderScope(child: OpenFilmlyApp()));
+}
+
+Future<void> _runDesktop(List<String> args) async {
   // Same-process multi-window: each window has its own engine.
   final windowController = await WindowController.fromCurrentEngine();
   final businessId = PlayerWindowLauncher.businessIdFromArguments(

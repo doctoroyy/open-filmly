@@ -67,13 +67,18 @@ class LibraryAutoScanService {
     // (e.g. `S01.第一季` → title "S01"). Safe / idempotent.
     final repaired = await _repairSplitTvShows();
 
-    if (!config.autoScanOnStartup || config.selectedFolders.isEmpty) {
-      return AutoScanResult.skipped(
-        retitledItems: retitled + purged + fakeEps + repaired,
-      );
-    }
+    var scannedFiles = 0;
+    var importedItems = 0;
+    final didFolderScan =
+        config.autoScanOnStartup && config.selectedFolders.isNotEmpty;
 
-    final scanResult = await _scanner.scanFolders(config.selectedFolders);
+    // Local folder rescan is optional — SMB/WebDAV libraries often have no
+    // selectedFolders, but still need poster enrichment + title repair.
+    if (didFolderScan) {
+      final scanResult = await _scanner.scanFolders(config.selectedFolders);
+      scannedFiles = scanResult.scannedFiles;
+      importedItems = scanResult.importedItems;
+    }
 
     var enriched = 0;
     if (config.tmdbApiKey.isNotEmpty) {
@@ -91,12 +96,15 @@ class LibraryAutoScanService {
       await _repo.consolidateAllTvShows();
     }
 
+    final hygiene = retitled + purged + fakeEps + repaired;
+
     return AutoScanResult(
-      scannedFiles: scanResult.scannedFiles,
-      importedItems: scanResult.importedItems,
+      scannedFiles: scannedFiles,
+      importedItems: importedItems,
       enrichedItems: enriched,
-      retitledItems: retitled + purged + fakeEps + repaired,
-      skipped: false,
+      retitledItems: hygiene,
+      // "skipped" means no local-folder rescan ran (hygiene/enrich may still).
+      skipped: !didFolderScan,
     );
   }
 
@@ -191,6 +199,7 @@ class LibraryAutoScanService {
       if (episodes.isEmpty) continue;
 
       String? recoveredTitle;
+      String? recoveredFullPath;
       for (final episode in episodes) {
         final candidatePath = _logicalMediaPath(
           episode.fullPath ?? episode.path,
@@ -201,18 +210,25 @@ class LibraryAutoScanService {
         if (parsed.media.title.isEmpty) continue;
         if (_isWeakSeasonTitle(parsed.media.title)) continue;
         recoveredTitle = parsed.media.title;
+        recoveredFullPath = parsed.media.fullPath ?? parsed.media.path;
         break;
       }
-      if (recoveredTitle == null || recoveredTitle == show.title) continue;
+      if (recoveredTitle == null) continue;
+      if (recoveredTitle == show.title &&
+          !_looksLikeSeasonFullPath(show.fullPath ?? '') &&
+          !_isWeakSeasonTitle(show.title)) {
+        continue;
+      }
 
-      // Path is authoritative when the old parser left a season folder as the
-      // show root (fullPath like `…/S01.第一季`) or the title is a season token.
-      // That also corrects wrong TMDB matches such as "S01" → random other show.
+      // Path is authoritative when the old parser left a season/episode folder
+      // as the show root (`…/S01.第一季` or `…/S01E10`) or the title is a weak
+      // token. That also corrects wrong TMDB matches such as "S01" → other show.
       final pathLooksSplit = _looksLikeSeasonFullPath(show.fullPath ?? '');
       final needsRetitle =
           _isWeakSeasonTitle(show.title) ||
           pathLooksSplit ||
-          show.tmdbId == null;
+          show.tmdbId == null ||
+          recoveredTitle != show.title;
       if (!needsRetitle) continue;
 
       final dropStaleMatch = pathLooksSplit || _isWeakSeasonTitle(show.title);
@@ -223,7 +239,7 @@ class LibraryAutoScanService {
           year: show.year,
           type: show.type,
           path: show.path,
-          fullPath: show.fullPath,
+          fullPath: recoveredFullPath ?? show.fullPath,
           // Drop stale poster/rating when the filesystem says this row was a
           // mis-split season; a sibling with the real match will donate them
           // during consolidate, otherwise enrichment re-fetches.
@@ -248,16 +264,36 @@ class LibraryAutoScanService {
   static bool _isWeakSeasonTitle(String title) {
     final t = title.trim();
     if (t.isEmpty) return true;
+    // Bare season tokens OR bare episode tokens left as show titles.
+    if (RegExp(
+      r'^(?:s\d{1,2}(?:e\d{1,2})?|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      return true;
+    }
+    // "Game Of Thrones S05" leftovers from release-named season folders.
     return RegExp(
-      r'^(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      r'(?:^|[\s._\-])(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
       caseSensitive: false,
     ).hasMatch(t);
   }
 
   static bool _looksLikeSeasonFullPath(String path) {
     final name = path.split('/').where((s) => s.isNotEmpty).lastOrNull ?? '';
+    // Season packs OR per-episode containers used as the show root by old
+    // parsers: `…/S01.第一季` or `…/S01E10` or release-style
+    // `…/Game.Of.Thrones.S05.1080p.Bluray...`.
+    if (RegExp(
+      r'^(?:s\d{1,2}e\d{1,2}|s\d{1,2}(?:[.\-_\s].*)?|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(name)) {
+      return true;
+    }
     return RegExp(
-      r'^(?:s\d{1,2}(?:[.\-_\s].*)?|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      r'[\s._\-]s\d{1,2}(?!\s*e\s*\d)[\s._\-].*(?:'
+      r'\d{3,4}p|4k|uhd|bluray|blu-ray|web-?dl|webrip|hdtv|remux|'
+      r'x26[45]|h\.?26[45]|hevc|dts|ac3|10bit'
+      r')',
       caseSensitive: false,
     ).hasMatch(name);
   }

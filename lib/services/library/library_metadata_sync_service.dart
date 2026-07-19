@@ -49,61 +49,71 @@ class LibraryMetadataSyncService {
     var failed = 0;
     final ids = mediaIds.toSet().toList(growable: false);
 
-    for (final id in ids) {
-      final media = await _repo.getById(id);
-      if (media == null) {
-        failed++;
-        continue;
-      }
-
-      // Step 1: Try AI recognition to get a better search title
-      String? aiTitle;
-      String? aiYear;
-      if (geminiApiKey.isNotEmpty) {
-        final recognition = await _recognizer.recognize(
-          media.title,
-          filePath: media.fullPath ?? media.path,
-          geminiApiKey: geminiApiKey,
-        );
-        if (recognition != null && recognition.confidence > 0.6) {
-          aiTitle = recognition.cleanTitle;
-          aiYear = recognition.year;
+    for (var i = 0; i < ids.length; i++) {
+      final id = ids[i];
+      try {
+        final media = await _repo.getById(id);
+        if (media == null) {
+          failed++;
+          continue;
         }
-      }
 
-      // Step 2: Search TMDB (with AI title if available, fallback to raw)
-      final payload = await _tmdb.fetchMetadata(
-        media,
-        apiKey,
-        searchTitle: aiTitle,
-        searchYear: aiYear,
-      );
-      if (payload == null) {
-        failed++;
-        continue;
-      }
+        // Step 1: Try AI recognition to get a better search title
+        String? aiTitle;
+        String? aiYear;
+        if (geminiApiKey.isNotEmpty) {
+          final recognition = await _recognizer.recognize(
+            media.title,
+            filePath: media.fullPath ?? media.path,
+            geminiApiKey: geminiApiKey,
+          );
+          if (recognition != null && recognition.confidence > 0.6) {
+            aiTitle = recognition.cleanTitle;
+            aiYear = recognition.year;
+          }
+        }
 
-      await _repo.upsert(
-        media.copyWith(
-          title: payload.title,
-          year: payload.year,
-          type: payload.type,
-          posterPath: payload.posterPath,
-          rating: payload.rating,
-          detailsJson: payload.detailsJson,
-        ),
-      );
-      // Warm disk cache in the background — never block scrape / unit tests.
-      unawaited(
-        FilmlyImageCache.precacheUrls([
+        // Step 2: Search TMDB (with AI title if available, fallback to raw)
+        final payload = await _tmdb.fetchMetadata(
+          media,
+          apiKey,
+          searchTitle: aiTitle,
+          searchYear: aiYear,
+        );
+        if (payload == null) {
+          failed++;
+          continue;
+        }
+
+        await _repo.upsert(
+          media.copyWith(
+            title: payload.title,
+            year: payload.year,
+            type: payload.type,
+            posterPath: payload.posterPath,
+            rating: payload.rating,
+            detailsJson: payload.detailsJson,
+          ),
+        );
+        // Warm disk cache after scrape — sequential, not fire-and-forget, so we
+        // don't open dozens of concurrent sockets on iOS (Bad file descriptor).
+        await FilmlyImageCache.precacheUrls([
           payload.posterPath,
           FilmlyImageCache.networkUrl(
             payload.posterPath,
             size: TmdbImageSize.w500,
           ),
-        ]),
-      );
-      updated++;
+        ]);
+        updated++;
+      } catch (_) {
+        // One flaky TMDB/socket error must not abort the whole refresh.
+        failed++;
+      }
+
+      // Light throttle to stay under TMDB rate limits and iOS socket churn.
+      if (i + 1 < ids.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
     }
 
     // After metadata is attached, reunite seasons that share a TMDB id but

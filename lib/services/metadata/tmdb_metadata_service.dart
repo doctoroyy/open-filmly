@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -85,6 +87,36 @@ class TmdbMetadataService {
   final Uri baseUri;
   final String imageBaseUrl;
 
+  /// GET with retries for transient iOS socket failures (`Bad file descriptor`,
+  /// connection resets, etc.).
+  Future<http.Response> _get(Uri uri, {int maxAttempts = 3}) async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final response = await _client
+            .get(uri)
+            .timeout(const Duration(seconds: 20));
+        return response;
+      } on TimeoutException catch (e) {
+        lastError = e;
+      } on http.ClientException catch (e) {
+        lastError = e;
+      } on SocketException catch (e) {
+        lastError = e;
+      } on HttpException catch (e) {
+        lastError = e;
+      } on TlsException catch (e) {
+        lastError = e;
+      }
+      if (attempt < maxAttempts) {
+        await Future<void>.delayed(Duration(milliseconds: 250 * attempt));
+      }
+    }
+    // Preserve original exception type for callers.
+    // ignore: only_throw_errors
+    throw lastError ?? StateError('TMDB request failed: $uri');
+  }
+
   /// Fetch metadata from TMDB. If [searchTitle] is provided (e.g. from AI
   /// recognition), it's used instead of media.title for the TMDB query.
   Future<TmdbMetadataPayload?> fetchMetadata(
@@ -170,7 +202,7 @@ class TmdbMetadataService {
         }
       }
 
-      final response = await _client.get(_buildUri(endpoint, query));
+      final response = await _get(_buildUri(endpoint, query));
       if (response.statusCode != 200) continue;
 
       final decoded = jsonDecode(response.body);
@@ -198,7 +230,7 @@ class TmdbMetadataService {
       MediaType.unknown => '/movie/$id',
     };
 
-    final response = await _client.get(
+    final response = await _get(
       _buildUri(endpoint, {'api_key': apiKey, 'language': 'zh-CN'}),
     );
     if (response.statusCode != 200) return null;
@@ -216,7 +248,7 @@ class TmdbMetadataService {
     required String apiKey,
   }) async {
     final endpoint = '/tv/$tvId/season/$seasonNumber/episode/$episodeNumber';
-    final response = await _client.get(
+    final response = await _get(
       _buildUri(endpoint, {'api_key': apiKey, 'language': 'zh-CN'}),
     );
     if (response.statusCode != 200) return null;
@@ -235,7 +267,7 @@ class TmdbMetadataService {
     required String apiKey,
   }) async {
     final endpoint = '/tv/$tvId/season/$seasonNumber';
-    final response = await _client.get(
+    final response = await _get(
       _buildUri(endpoint, {'api_key': apiKey, 'language': 'zh-CN'}),
     );
     if (response.statusCode != 200) return const {};
@@ -274,7 +306,7 @@ class TmdbMetadataService {
     int limit = 12,
   }) async {
     final kind = type == MediaType.tv ? 'tv' : 'movie';
-    final response = await _client.get(
+    final response = await _get(
       _buildUri('/$kind/$tmdbId/credits', {
         'api_key': apiKey,
         'language': 'zh-CN',
@@ -435,7 +467,7 @@ class TmdbMetadataService {
         });
 
         try {
-          final response = await _client.get(uri);
+          final response = await _get(uri);
           if (response.statusCode != 200) continue;
 
           final decoded = jsonDecode(response.body);

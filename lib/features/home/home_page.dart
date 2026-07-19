@@ -69,10 +69,27 @@ class _HomePageState extends ConsumerState<HomePage> {
     setState(() => _refreshing = true);
     try {
       final config = await ref.read(configProvider.future);
-      await ref.read(libraryAutoScanProvider).run(config);
+      final result = await ref.read(libraryAutoScanProvider).run(config);
       invalidateLibraryViews(ref);
-    } catch (_) {
-      // best-effort
+      if (!mounted) return;
+      final parts = <String>[
+        if (result.importedItems > 0) '新增 ${result.importedItems}',
+        if (result.enrichedItems > 0) '匹配 ${result.enrichedItems}',
+        if (result.retitledItems > 0) '整理 ${result.retitledItems}',
+      ];
+      final message = parts.isEmpty
+          ? (config.tmdbApiKey.isEmpty
+                ? '已刷新（未配置 TMDB Key，无法自动匹配海报）'
+                : '已刷新，暂无需要匹配的条目')
+          : '刷新完成：${parts.join(' · ')}';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('刷新失败：$e')));
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }

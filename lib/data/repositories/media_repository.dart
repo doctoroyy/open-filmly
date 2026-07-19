@@ -235,8 +235,16 @@ class MediaRepository {
   bool _isWeakShowTitle(String title) {
     final t = title.trim();
     if (t.isEmpty) return true;
-    return RegExp(
+    // Bare season tokens.
+    if (RegExp(
       r'^(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(t)) {
+      return true;
+    }
+    // "Game Of Thrones S05" style leftovers from release-named season folders.
+    return RegExp(
+      r'(?:^|[\s._\-])(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
       caseSensitive: false,
     ).hasMatch(t);
   }
@@ -396,10 +404,19 @@ class MediaRepository {
     return rightRating.compareTo(leftRating);
   }
 
-  String _normalizedShowTitle(String title) => title.toLowerCase().replaceAll(
-    RegExp(r'[^\u4e00-\u9fff\u3400-\u4dbfa-z0-9]+'),
-    '',
-  );
+  /// Normalizes a show title for consolidation. Trailing season tokens are
+  /// stripped so "Game Of Thrones S01" and "Game Of Thrones S05" merge.
+  String _normalizedShowTitle(String title) {
+    var t = title.trim().toLowerCase();
+    t = t.replaceAll(
+      RegExp(
+        r'[\s._\-]*(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)\s*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    return t.replaceAll(RegExp(r'[^\u4e00-\u9fff\u3400-\u4dbfa-z0-9]+'), '');
+  }
 
   String _sourceScope(Media media) {
     final raw = media.detailsJson;

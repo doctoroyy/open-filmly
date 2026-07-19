@@ -709,15 +709,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   void _scheduleHideControls() {
     _hideTimer?.cancel();
-    if (_anySidePanelOpen) return; // keep chrome while drawer is open
+    if (_anySidePanelOpen || _optionSheetVisible) {
+      // Keep chrome while a drawer / sheet is open.
+      return;
+    }
     _hideTimer = Timer(_controlsHideDelay, () {
-      if (mounted &&
-          _playing &&
-          !_dragging &&
-          _error == null &&
-          !_anySidePanelOpen) {
-        setState(() => _controlsVisible = false);
+      if (!mounted ||
+          _dragging ||
+          _error != null ||
+          _anySidePanelOpen ||
+          _optionSheetVisible ||
+          _opening) {
+        return;
       }
+      // Don't require _playing — on mobile VLC may report paused while still
+      // watching; chrome should still auto-dismiss.
+      setState(() => _controlsVisible = false);
     });
   }
 
@@ -1081,7 +1088,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               if (_toast != null) _toastOverlay(),
               if (_autoNextSeconds > 0) _autoNextOverlay(),
               _controlsOverlay(context),
-              // Desktop titlebar drag is part of _baomihuaChrome (title row).
+              // Desktop drawers live inside baomihua chrome; mobile uses sheets.
+              if (PlatformCapabilities.isDesktop) ...[
+                if (_episodes.isNotEmpty) _episodeSidePanel(),
+                _audioSidePanel(),
+                _subtitleSidePanel(),
+              ],
             ],
           ),
         ),
@@ -1396,7 +1408,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
         ),
-        // Right drawers (Baomihua): episodes / audio / subtitle.
+        // Episode drawer only on desktop chrome stack (audio/subs too).
         if (_episodes.isNotEmpty) _episodeSidePanel(),
         _audioSidePanel(),
         _subtitleSidePanel(),
@@ -1414,24 +1426,278 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _scheduleHideControls();
   }
 
-  void _openAudioPanel() {
-    setState(() {
-      _audioPanelOpen = true;
-      _subtitlePanelOpen = false;
-      _episodePanelOpen = false;
-      _controlsVisible = true;
-      _hideTimer?.cancel();
-    });
+  Future<void> _openAudioPanel() async {
+    if (PlatformCapabilities.isDesktop) {
+      setState(() {
+        _audioPanelOpen = true;
+        _subtitlePanelOpen = false;
+        _episodePanelOpen = false;
+        _controlsVisible = true;
+        _hideTimer?.cancel();
+      });
+      return;
+    }
+    await _showMobileAudioSheet();
   }
 
-  void _openSubtitlePanel() {
+  Future<void> _openSubtitlePanel() async {
+    if (PlatformCapabilities.isDesktop) {
+      setState(() {
+        _subtitlePanelOpen = true;
+        _audioPanelOpen = false;
+        _episodePanelOpen = false;
+        _controlsVisible = true;
+        _hideTimer?.cancel();
+      });
+      return;
+    }
+    await _showMobileSubtitleSheet();
+  }
+
+  Future<void> _showMobileAudioSheet() async {
+    _hideTimer?.cancel();
     setState(() {
-      _subtitlePanelOpen = true;
-      _audioPanelOpen = false;
-      _episodePanelOpen = false;
       _controlsVisible = true;
-      _hideTimer?.cancel();
+      _optionSheetVisible = true;
     });
+    final tracks = _playback.audioTracks;
+    final current = _playback.currentAudioTrack;
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF1A1B23),
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        builder: (ctx) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 4, 12, 12),
+                    child: Text(
+                      '音轨',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (tracks.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text(
+                        '未检测到可切换的音轨',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(ctx).height * 0.45,
+                      ),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final track in tracks)
+                            ListTile(
+                              title: Text(
+                                _audioTrackLabel(track),
+                                style: TextStyle(
+                                  color: track.id == current.id
+                                      ? Colors.white
+                                      : Colors.white70,
+                                  fontWeight: track.id == current.id
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                ),
+                              ),
+                              trailing: track.id == current.id
+                                  ? const Icon(
+                                      Icons.check_rounded,
+                                      color: Colors.white,
+                                    )
+                                  : null,
+                              onTap: () {
+                                unawaited(_playback.setAudioTrack(track));
+                                Navigator.of(ctx).pop();
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _optionSheetVisible = false);
+        _scheduleHideControls();
+      }
+    }
+  }
+
+  Future<void> _showMobileSubtitleSheet() async {
+    _hideTimer?.cancel();
+    setState(() {
+      _controlsVisible = true;
+      _optionSheetVisible = true;
+    });
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF1A1B23),
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        builder: (ctx) {
+          final embedded = _playback.subtitleTracks;
+          final current = _playback.currentSubtitleTrack;
+          final offSelected = current.id == '-1' || current.id.isEmpty;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 4, 8),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '字幕',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            Navigator.of(ctx).pop();
+                            await _pickAndAddSubtitle();
+                          },
+                          child: const Text('+ 手动添加'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(ctx).height * 0.5,
+                    ),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        ListTile(
+                          title: Text(
+                            '关闭字幕',
+                            style: TextStyle(
+                              color: offSelected
+                                  ? Colors.white
+                                  : Colors.white70,
+                              fontWeight: offSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                          trailing: offSelected
+                              ? const Icon(
+                                  Icons.check_rounded,
+                                  color: Colors.white,
+                                )
+                              : null,
+                          onTap: () {
+                            unawaited(
+                              _playback.setSubtitleTrack(
+                                PlaybackSubtitleTrack.no(),
+                              ),
+                            );
+                            Navigator.of(ctx).pop();
+                          },
+                        ),
+                        for (final track in embedded)
+                          if (track.id != '-1')
+                            ListTile(
+                              title: Text(
+                                _subtitleTrackLabel(track),
+                                style: TextStyle(
+                                  color: track.id == current.id
+                                      ? Colors.white
+                                      : Colors.white70,
+                                  fontWeight: track.id == current.id
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                ),
+                              ),
+                              trailing: track.id == current.id
+                                  ? const Icon(
+                                      Icons.check_rounded,
+                                      color: Colors.white,
+                                    )
+                                  : null,
+                              onTap: () {
+                                unawaited(_playback.setSubtitleTrack(track));
+                                Navigator.of(ctx).pop();
+                              },
+                            ),
+                        for (final sub in _externalSubs)
+                          ListTile(
+                            title: Text(
+                              sub.label,
+                              style: TextStyle(
+                                color: current.uri && current.id == sub.uri
+                                    ? Colors.white
+                                    : Colors.white70,
+                              ),
+                            ),
+                            trailing: current.uri && current.id == sub.uri
+                                ? const Icon(
+                                    Icons.check_rounded,
+                                    color: Colors.white,
+                                  )
+                                : null,
+                            onTap: () {
+                              unawaited(
+                                _playback.setSubtitleTrack(
+                                  PlaybackSubtitleTrack.uri(
+                                    sub.uri,
+                                    title: sub.label,
+                                    language: sub.languageHint,
+                                  ),
+                                ),
+                              );
+                              Navigator.of(ctx).pop();
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _optionSheetVisible = false);
+        _scheduleHideControls();
+      }
+    }
   }
 
   Widget _episodeSidePanel() {
@@ -1973,36 +2239,66 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _mobileChrome(BuildContext context) {
-    return AnimatedOpacity(
-      opacity: _controlsVisible ? 1 : 0,
-      duration: const Duration(milliseconds: 220),
-      child: IgnorePointer(
-        ignoring: !_controlsVisible,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.55),
-                Colors.transparent,
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.75),
-              ],
-              stops: const [0, 0.25, 0.65, 1],
-            ),
-          ),
-          child: SafeArea(
-            child: Column(
-              children: [
-                _mobileTopBar(context),
-                const Spacer(),
-                _mobileBottomBar(context),
-              ],
+    // Use a Stack so the middle of the screen stays tappable to dismiss
+    // chrome. A full-screen Column was swallowing taps and blocked auto-hide.
+    return Stack(
+      children: [
+        IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 220),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.75),
+                  ],
+                  stops: const [0, 0.25, 0.65, 1],
+                ),
+              ),
             ),
           ),
         ),
-      ),
+        // Tap empty video area to show/hide chrome (sits under bars).
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _toggleControls,
+            onDoubleTap: _togglePlay,
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 220),
+            child: IgnorePointer(
+              ignoring: !_controlsVisible,
+              child: SafeArea(bottom: false, child: _mobileTopBar(context)),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 220),
+            child: IgnorePointer(
+              ignoring: !_controlsVisible,
+              child: SafeArea(top: false, child: _mobileBottomBar(context)),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2138,14 +2434,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                         Icons.graphic_eq_rounded,
                         color: Colors.white70,
                       ),
-                      onPressed: _openAudioPanel,
+                      onPressed: () => unawaited(_openAudioPanel()),
                     ),
                     IconButton(
                       icon: const Icon(
                         Icons.subtitles_rounded,
                         color: Colors.white70,
                       ),
-                      onPressed: _openSubtitlePanel,
+                      onPressed: () => unawaited(_openSubtitlePanel()),
                     ),
                   ],
                 ),

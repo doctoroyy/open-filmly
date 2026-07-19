@@ -102,6 +102,32 @@ class MediaLibraryEntryFactory {
     caseSensitive: false,
   );
 
+  /// Release-style per-season packs such as
+  /// `Game.Of.Thrones.S05.1080p.Bluray.AC3.x265.10bit`. These sit under a show
+  /// pack root and must NOT become separate library titles.
+  static final _releaseStyleSeasonFolderPattern = RegExp(
+    r'[\s._\-]s\d{1,2}(?!\s*e\s*\d)[\s._\-].*(?:'
+    r'\d{3,4}p|4k|uhd|bluray|blu-ray|web-?dl|webrip|hdtv|remux|'
+    r'x26[45]|h\.?26[45]|hevc|avc|dts|ac3|eac3|aac|truehd|atmos|'
+    r'10bit|8bit|bdrip|brrip'
+    r')',
+    caseSensitive: false,
+  );
+
+  /// Library root / media-type folder names that must never become a show title.
+  static final _libraryRootNamePattern = RegExp(
+    r'^(?:电视剧|电影|动漫|综艺|纪录片|剧集|影视|动画片|'
+    r'tv|tvs|shows?|series|movies?|films?|anime|media|videos?|娱乐)$',
+    caseSensitive: false,
+  );
+
+  /// Per-episode container folders used by Chinese pack layouts
+  /// (`…/异星灾变.第1季/S01E10/file.mkv`). These are NOT show roots.
+  static final _episodeFolderPattern = RegExp(
+    r'^s\d{1,2}e\d{1,2}$',
+    caseSensitive: false,
+  );
+
   /// Pattern to extract the show title from a filename before the S01E01 tag.
   /// Requires a non-empty title prefix so bare `S01E01.Pilot` does not match.
   static final _showTitleFromFilenamePattern = RegExp(
@@ -738,19 +764,21 @@ class MediaLibraryEntryFactory {
   }
 
   static String _tvShowDirectory(String filePath) {
-    // Walk up from the file to find the show directory (parent of Season folder
-    // or parent of the file if no season folder exists).
-    final dir = path.dirname(filePath);
-    final dirName = path.basename(dir);
-    if (_isSeasonFolderName(dirName)) {
-      return path.dirname(dir);
+    // Walk up past episode containers (S01E10) and season folders (S01 /
+    // Season 1 / 第一季) to the real show pack directory.
+    var dir = path.dirname(filePath);
+    for (var guard = 0; guard < 6; guard++) {
+      final dirName = path.basename(dir);
+      if (_isEpisodeFolderName(dirName) || _isSeasonFolderName(dirName)) {
+        final parent = path.dirname(dir);
+        if (parent == dir || parent.isEmpty) break;
+        dir = parent;
+        continue;
+      }
+      break;
     }
     // Handle folders like "怪奇物语 第一季" — the show dir is the same folder
-    // but with the season suffix stripped.
-    final stripped = _stripSeasonSuffix(dirName);
-    if (stripped != dirName && stripped.isNotEmpty) {
-      return dir; // This folder IS the show (just named with season)
-    }
+    // (named with a season suffix that will be stripped for the title).
     return dir;
   }
 
@@ -759,16 +787,25 @@ class MediaLibraryEntryFactory {
         .split('/')
         .where((s) => s.isNotEmpty)
         .toList(growable: false);
-    for (var i = 0; i < segments.length; i++) {
-      if (_isSeasonFolderName(segments[i]) && i > 0) {
-        return segments.sublist(0, i).join('/');
+    // Drop the filename, then skip trailing season/episode containers.
+    var end = segments.length;
+    if (end > 0 && isVideoPath(segments.last)) {
+      end -= 1;
+    }
+    while (end > 0) {
+      final name = segments[end - 1];
+      if (_isEpisodeFolderName(name) || _isSeasonFolderName(name)) {
+        end -= 1;
+        continue;
       }
+      break;
     }
-    // Fallback: parent of file
-    if (segments.length >= 2) {
-      return segments.sublist(0, segments.length - 1).join('/');
+    if (end <= 0) {
+      return segments.length >= 2
+          ? segments.sublist(0, segments.length - 1).join('/')
+          : logicalPath;
     }
-    return logicalPath;
+    return segments.sublist(0, end).join('/');
   }
 
   /// Whether [name] is a pure season container directory.
@@ -776,9 +813,16 @@ class MediaLibraryEntryFactory {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return false;
     if (_seasonPattern.hasMatch(trimmed)) return true;
+    // Release-style season packs: Show.Name.S05.1080p.Bluray...
+    if (_releaseStyleSeasonFolderPattern.hasMatch(trimmed)) return true;
     // After stripping season markers nothing meaningful remains → season only.
     final stripped = _stripSeasonSuffix(trimmed);
     return stripped.isEmpty || _seasonOnlyTitlePattern.hasMatch(stripped);
+  }
+
+  /// Whether [name] is a per-episode container like `S01E10`.
+  static bool _isEpisodeFolderName(String name) {
+    return _episodeFolderPattern.hasMatch(name.trim());
   }
 
   static String _logicalPath(String rawPath) {
@@ -839,20 +883,30 @@ class MediaLibraryEntryFactory {
         .where((segment) => segment.isNotEmpty)
         .toList(growable: false);
 
-    // Strategy 1: Find a pure season folder (S01.第一季 / Season 1 / 第一季) —
-    // the parent of that folder is the show root.
+    // Strategy 1: Find a pure season / episode-container folder
+    // (S01 / S01E10 / Season 1 / 第一季) — the nearest usable parent is the show.
     for (var i = 0; i < segmentList.length; i++) {
-      if (!_isSeasonFolderName(segmentList[i]) || i == 0) continue;
-      final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[i - 1]));
-      if (_isUsableShowTitle(candidate)) return candidate;
+      final seg = segmentList[i];
+      if ((!_isSeasonFolderName(seg) && !_isEpisodeFolderName(seg)) || i == 0) {
+        continue;
+      }
+      // Walk up past stacked containers (…/Show/S01/S01E01/file).
+      for (var j = i - 1; j >= 0; j--) {
+        if (_isSeasonFolderName(segmentList[j]) ||
+            _isEpisodeFolderName(segmentList[j])) {
+          continue;
+        }
+        final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[j]));
+        if (_isUsableShowTitle(candidate)) return candidate;
+      }
     }
 
     // Strategy 2: Parent folder carries a season suffix
-    // ("怪奇物语 第一季") — strip it. If that empties the name, walk higher.
+    // ("怪奇物语 第一季" / "异星灾变.第1季" / "良医1-2季") — strip it.
     if (segmentList.length >= 2) {
       for (var offset = 2; offset <= segmentList.length; offset++) {
         final dir = segmentList[segmentList.length - offset];
-        if (_isSeasonFolderName(dir)) continue;
+        if (_isSeasonFolderName(dir) || _isEpisodeFolderName(dir)) continue;
         final stripped = _stripSeasonSuffix(dir);
         final candidate = _cleanTitle(stripped);
         if (_isUsableShowTitle(candidate)) return candidate;
@@ -866,19 +920,34 @@ class MediaLibraryEntryFactory {
       if (_isUsableShowTitle(candidate)) return candidate;
     }
 
-    // Fallback: nearest non-season parent folder.
+    // Fallback: nearest non-season / non-episode parent folder.
     for (var i = segmentList.length - 2; i >= 0; i--) {
+      if (_isSeasonFolderName(segmentList[i]) ||
+          _isEpisodeFolderName(segmentList[i])) {
+        continue;
+      }
       final candidate = _cleanTitle(_stripSeasonSuffix(segmentList[i]));
       if (_isUsableShowTitle(candidate)) return candidate;
     }
     final fallbackTitle = _cleanTitle(fallback);
-    return _isUsableShowTitle(fallbackTitle) ? fallbackTitle : fallbackTitle;
+    return fallbackTitle;
   }
 
   static bool _isUsableShowTitle(String title) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) return false;
     if (_seasonOnlyTitlePattern.hasMatch(trimmed)) return false;
+    // Reject bare episode tokens used as folder names (S01E10).
+    if (_episodeFolderPattern.hasMatch(trimmed)) return false;
+    // Reject media-library root folders ("电视剧", "Movies", …).
+    if (_libraryRootNamePattern.hasMatch(trimmed)) return false;
+    // Reject titles that still end with a leftover season token after cleanup.
+    if (RegExp(
+      r'(?:^|[\s._\-])(?:s\d{1,2}|season\s*\d+|第[一二三四五六七八九十百\d]+季)$',
+      caseSensitive: false,
+    ).hasMatch(trimmed)) {
+      return false;
+    }
     // Reject titles that are only punctuation / digits left after cleanup.
     if (RegExp(r'^[\d\s.\-_]+$').hasMatch(trimmed)) return false;
     return true;
@@ -890,6 +959,7 @@ class MediaLibraryEntryFactory {
   /// - "S01.第一季" style pure season folders (becomes empty)
   /// - "1-4季", "1-10 季", "全4季" collection markers
   /// - "Show 第一季 (2015)" (year parentheses do not block stripping)
+  /// - "Game.Of.Thrones.S05.1080p.Bluray..." (season before release tags)
   static String _stripSeasonSuffix(String name) {
     var result = name.trim();
 
@@ -908,13 +978,32 @@ class MediaLibraryEntryFactory {
     result = result.replaceAll(RegExp(r'\s*[\d\-~]+季\s*$'), '');
     result = result.replaceAll(RegExp(r'\s*全[一二三四五六七八九十百\d]+\s*季\s*$'), '');
 
+    // Season token embedded before release tags:
+    // "Game.Of.Thrones.S05.1080p.Bluray.AC3.x265.10bit" → "Game.Of.Thrones"
+    // Negative lookahead avoids eating S01E02 episode tokens.
+    result = result.replaceAll(
+      RegExp(
+        r'[\s._\-]+('
+        r'第[一二三四五六七八九十百\d]+季'
+        r'|season\s*\d+'
+        r'|s\d{1,2}(?!\s*e\s*\d)'
+        r')(?=[\s._\-]*(?:'
+        r'\d{3,4}p|4k|uhd|bluray|blu-ray|web-?dl|webrip|hdtv|remux|encode|'
+        r'x26[45]|h\.?26[45]|hevc|avc|dts|ac3|eac3|aac|truehd|atmos|'
+        r'10bit|8bit|bdrip|brrip|proper|repack|extended'
+        r'|$))',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
     // Trailing single-season markers, with optional leading separators.
     result = result.replaceAll(
       RegExp(
         r'[\s._\-]*('
         r'第[一二三四五六七八九十百\d]+季'
         r'|season\s*\d+'
-        r'|s\d{1,2}'
+        r'|s\d{1,2}(?!\s*e\s*\d)'
         r')\s*$',
         caseSensitive: false,
       ),
@@ -938,6 +1027,12 @@ class MediaLibraryEntryFactory {
   static String _cleanTitle(String raw) {
     var title = raw.replaceAll(RegExp(r'[._]+'), ' ');
     title = title.replaceAll(_episodePattern, '');
+    // Bare season tokens left after release-name cleanup (e.g. "Show S05").
+    title = title.replaceAll(
+      RegExp(r'\b(?:s\d{1,2}|season\s*\d+)\b', caseSensitive: false),
+      '',
+    );
+    title = title.replaceAll(RegExp(r'第[一二三四五六七八九十百\d]+季'), '');
     title = title.replaceAll(_yearPattern, '');
     title = title.replaceAll(RegExp(r'[\(\)\[\]-]'), ' ');
     title = title.replaceAll(_cleanupPattern, '');

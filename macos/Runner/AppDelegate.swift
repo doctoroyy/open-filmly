@@ -215,8 +215,12 @@ final class VlcPlayerNativeView: NSView, VLCMediaPlayerDelegate {
       "live-caching": 3000,
       "sout-mux-caching": 1500,
       "avcodec-hw": "videotoolbox",
-      "sub-autodetect-file": true,
+      // Sidecars are attached by Flutter after GBK/GB18030 → UTF-8 conversion.
+      // Letting VLC auto-load the original GBK file with `subsdec-encoding=UTF-8`
+      // produces mojibake and can hitch the renderer.
+      "sub-autodetect-file": false,
       "subsdec-encoding": "UTF-8",
+      "subsdec-autodetect-utf8": true,
     ])
 
 #if DEBUG
