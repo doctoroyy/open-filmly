@@ -95,11 +95,11 @@ class SmbProxyServer {
         start = requestedRange.start;
         end = requestedRange.end;
         statusCode = 206;
-      } else if (request.method.toUpperCase() == 'GET' &&
-          total > initialResponseBytes) {
-        end = initialResponseBytes - 1;
-        statusCode = 206;
       }
+      // Do NOT force a partial 206 when the client omits Range. MKV containers
+      // often need end-of-file cues; a truncated startup slice makes VLC report
+      // "cannot decode or read the media". Clients that want partial content
+      // must send Range themselves (VLC does for seeks).
 
       if (hasRange && total == 0) return _rangeNotSatisfiable(total);
       if (total > 0 && (start < 0 || start >= total || start > end)) {

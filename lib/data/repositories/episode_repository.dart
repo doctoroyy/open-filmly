@@ -144,15 +144,20 @@ class EpisodeRepository {
   /// Prefer a real playable file over stale generated rows and macOS
   /// AppleDouble sidecars when older library versions produced duplicates.
   static int _quality(Episode episode) {
-    final source = episode.fullPath ?? episode.path;
+    final path = episode.path;
+    final full = episode.fullPath ?? '';
+    final source = full.isNotEmpty ? full : path;
     final name = p.basename(source);
     if (name.startsWith('._') || name.startsWith('.')) return -100;
+    // Synthetic ids left by older default-episode injection.
+    if (path.startsWith('tv:') || full.startsWith('tv:')) return -50;
 
     var score = 0;
     if (_videoExtensions.contains(p.extension(source).toLowerCase())) {
       score += 20;
     }
-    if (episode.fullPath != null && episode.fullPath!.isNotEmpty) score += 2;
+    if (path.startsWith('smb://') || path.startsWith('/')) score += 5;
+    if (full.isNotEmpty) score += 2;
     return score;
   }
 }

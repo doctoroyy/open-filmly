@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
@@ -66,9 +67,28 @@ class PlaybackSourceResolver {
   Future<PlaybackSource> resolve(Media media) async {
     final smbSource = MediaLibraryEntryFactory.smbSourceFor(media);
     if (smbSource != null) {
+      final playPath = _normalizeSmbPlayPath(smbSource.path);
+
+      // Prefer a mounted local path when the same share is already on disk
+      // (common on macOS Finder mounts). Avoids HTTP-proxy + MKV index issues.
+      final localPath = _localMountPathIfExists(smbSource, playPath);
+      if (localPath != null) {
+        final matched = await ExternalSubtitleFinder.findFor(localPath);
+        return PlaybackSource(
+          localPath,
+          subtitles: [
+            for (final sub in matched)
+              PlaybackSubtitleSource(
+                uri: sub.uri,
+                title: sub.label,
+                language: sub.languageHint,
+              ),
+          ],
+        );
+      }
+
       await _ensureSmbConnected(smbSource);
       await _proxy.start();
-      final playPath = _normalizeSmbPlayPath(smbSource.path);
       final subtitles = await _findSmbSubtitles(playPath);
       return PlaybackSource(
         _proxy.urlFor(playPath, displayName: p.basename(playPath)),
@@ -189,6 +209,42 @@ class PlaybackSourceResolver {
       }
     }
     return trimmed.startsWith('/') ? trimmed : '/$trimmed';
+  }
+
+  /// Maps an SMB path onto a local Finder/OS mount when present, e.g.
+  /// `/wd-downloads/foo.mkv` → `/Volumes/wd-downloads/foo.mkv`.
+  static String? _localMountPathIfExists(SmbMediaSource source, String playPath) {
+    final candidates = <String>[];
+    final normalized = playPath.startsWith('/') ? playPath : '/$playPath';
+    final share = source.share.trim();
+
+    if (share.isNotEmpty) {
+      final sharePrefix = '/$share';
+      if (normalized.toLowerCase().startsWith(sharePrefix.toLowerCase())) {
+        final rest = normalized.substring(sharePrefix.length);
+        candidates.add('/Volumes/$share$rest');
+      } else {
+        candidates.add('/Volumes/$share$normalized');
+      }
+    }
+
+    // Path already includes the share as its first segment.
+    final parts = normalized
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isNotEmpty) {
+      candidates.add('/Volumes/${parts.join('/')}');
+    }
+
+    for (final candidate in candidates) {
+      try {
+        if (File(candidate).existsSync()) return candidate;
+      } catch (_) {
+        // Ignore unreadable mounts.
+      }
+    }
+    return null;
   }
 
   Future<List<PlaybackSubtitleSource>> _findSmbSubtitles(

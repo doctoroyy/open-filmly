@@ -89,18 +89,16 @@ void main() {
     expect(bytes, equals(data));
   });
 
-  test('large no Range GET returns a bounded startup slice', () async {
+  test('large no Range GET returns full body (MKV-safe)', () async {
     final res = await request(url);
-    expect(res.statusCode, 206);
-    expect(
-      res.headers.value(HttpHeaders.contentRangeHeader),
-      'bytes 0-127/1000',
-    );
-    expect(res.headers.value(HttpHeaders.contentLengthHeader), '128');
+    expect(res.statusCode, 200);
+    expect(res.headers.value(HttpHeaders.contentRangeHeader), isNull);
+    expect(res.headers.value(HttpHeaders.contentLengthHeader), '1000');
+    expect(res.headers.value(HttpHeaders.acceptRangesHeader), 'bytes');
     final bytes = await _collect(res);
-    expect(bytes, equals(data.sublist(0, 128)));
+    expect(bytes, equals(data));
     expect(source.readCalls.single.start, 0);
-    expect(source.readCalls.single.endInclusive, 127);
+    expect(source.readCalls.single.endInclusive, 999);
   });
 
   test('Range bytes=0-99 → 206 partial content', () async {
