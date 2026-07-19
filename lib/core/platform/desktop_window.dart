@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'platform_capabilities.dart';
+import 'window_channel.dart';
 
 abstract final class DesktopWindow {
   static Future<void> initialize() async {
@@ -29,6 +30,11 @@ abstract final class DesktopWindow {
 
   static Future<void> toggleMaximize() async {
     if (!PlatformCapabilities.isDesktop) return;
+    // Prefer native zoom on macOS so it matches the traffic-light green button.
+    if (PlatformCapabilities.isMacOS) {
+      await WindowChannel.maximize();
+      return;
+    }
     if (await windowManager.isMaximized()) {
       await windowManager.unmaximize();
     } else {
@@ -36,8 +42,15 @@ abstract final class DesktopWindow {
     }
   }
 
+  /// Toggles fullscreen. On macOS this must use the native AppKit
+  /// `toggleFullScreen` channel — `window_manager.setFullScreen` fights the
+  /// hidden title bar and often does nothing when the user double-clicks video.
   static Future<void> toggleFullScreen() async {
     if (!PlatformCapabilities.isDesktop) return;
+    if (PlatformCapabilities.isMacOS) {
+      await WindowChannel.toggleFullScreen();
+      return;
+    }
     await windowManager.setFullScreen(!(await windowManager.isFullScreen()));
   }
 

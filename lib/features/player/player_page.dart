@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../core/platform/desktop_window.dart';
 import '../../core/platform/platform_capabilities.dart';
+import '../../core/platform/window_channel.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/playback_progress.dart';
 import '../../data/repositories/playback_progress_repository.dart';
@@ -68,7 +69,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   static const _nativeTopControlsReserve = 82.0;
   static const _nativeBottomControlsReserve = 138.0;
   static const _nativeBottomSheetReserve = 430.0;
-  static const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+  /// Quick presets shown as chips; continuous speed is adjusted via slider.
+  static const _speedPresets = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+  static const _minRate = 0.25;
+  static const _maxRate = 4.0;
+  static const _rateStep = 0.1;
   static const _accent = Color(0xFF2F6BFF);
 
   late final PlaybackService _playback;
@@ -468,9 +473,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Future<void> _setRate(double rate) async {
-    await _playback.setRate(rate);
-    setState(() => _rate = rate);
-    _showToast('${rate.toString().replaceAll(RegExp(r'\.0$'), '')}x');
+    final clamped = double.parse(
+      rate.clamp(_minRate, _maxRate).toStringAsFixed(2),
+    );
+    await _playback.setRate(clamped);
+    setState(() => _rate = clamped);
+    _showToast(_formatRate(clamped));
+  }
+
+  Future<void> _nudgeRate(double delta) async {
+    await _setRate(_rate + delta);
+    _showControls();
+  }
+
+  String _formatRate(double rate) {
+    final text = rate.toStringAsFixed(rate == rate.roundToDouble() ? 0 : 2);
+    return '${text.replaceAll(RegExp(r'\.00$'), '')}x';
   }
 
   Future<void> _setVolume(double volume) async {
@@ -625,17 +643,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.bracketLeft) {
-      final idx = _speedOptions.indexOf(_rate);
-      final next = idx > 0 ? _speedOptions[idx - 1] : _speedOptions.first;
-      unawaited(_setRate(next));
+      unawaited(_nudgeRate(-_rateStep));
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.bracketRight) {
-      final idx = _speedOptions.indexOf(_rate);
-      final next = idx >= 0 && idx < _speedOptions.length - 1
-          ? _speedOptions[idx + 1]
-          : _speedOptions.last;
-      unawaited(_setRate(next));
+      unawaited(_nudgeRate(_rateStep));
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
@@ -666,55 +678,65 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   nativeOverlayInsets: _nativeOverlayInsets,
                 ),
               ),
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 1,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _toggleControls,
-                        onDoubleTap: () => _skip(-_skipStep),
+              // Desktop (VLC / nPlayer): whole surface single-click toggles
+              // chrome, double-click toggles fullscreen. Mobile keeps the
+              // left/center/right seek + play zones.
+              if (PlatformCapabilities.isDesktop)
+                Positioned.fill(
+                  child: GestureDetector(
+                    key: const Key('player_desktop_gesture'),
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onDoubleTap: () =>
+                        unawaited(DesktopWindow.toggleFullScreen()),
+                  ),
+                )
+              else
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 1,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _toggleControls,
+                          onDoubleTap: () => _skip(-_skipStep),
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: GestureDetector(
-                        key: const Key('player_center_gesture'),
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _toggleControls,
-                        onDoubleTap: () {
-                          if (PlatformCapabilities.isMobile) {
-                            _togglePlay();
-                          } else {
-                            DesktopWindow.toggleFullScreen();
-                          }
-                        },
+                      Expanded(
+                        flex: 2,
+                        child: GestureDetector(
+                          key: const Key('player_center_gesture'),
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _toggleControls,
+                          onDoubleTap: _togglePlay,
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      flex: 1,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _toggleControls,
-                        onDoubleTap: () => _skip(_skipStep),
+                      Expanded(
+                        flex: 1,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _toggleControls,
+                          onDoubleTap: () => _skip(_skipStep),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               if (_buffering || _opening) _bufferingOverlay(),
               if (_error != null) _errorOverlay(),
               if (_toast != null) _toastOverlay(),
               if (_autoNextSeconds > 0) _autoNextOverlay(),
               _controlsOverlay(context),
               if (PlatformCapabilities.isDesktop)
-                const Positioned(
+                Positioned(
                   top: 0,
-                  left: 76,
-                  right: 76,
-                  height: 28,
-                  child: DragToMoveArea(child: SizedBox.expand()),
+                  left: PlatformCapabilities.isMacOS
+                      ? WindowChromeMetrics.macOSTrafficLightReservedWidth
+                      : 0,
+                  right: 0,
+                  height: WindowChromeMetrics.macOSTitlebarHeight,
+                  child: const DragToMoveArea(child: SizedBox.expand()),
                 ),
             ],
           ),
@@ -899,8 +921,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
           child: SafeArea(
-            child: Column(
-              children: [_topBar(context), const Spacer(), _bottomBar(context)],
+            // SafeArea alone does not reserve macOS traffic-light space when
+            // the title bar is hidden — pad the top bar explicitly.
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: PlatformCapabilities.isMacOS
+                    ? WindowChromeMetrics.macOSTitlebarHeight - 10
+                    : 0,
+              ),
+              child: Column(
+                children: [
+                  _topBar(context),
+                  const Spacer(),
+                  _bottomBar(context),
+                ],
+              ),
             ),
           ),
         ),
@@ -909,8 +944,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _topBar(BuildContext context) {
+    final leadingInset = PlatformCapabilities.isMacOS
+        ? WindowChromeMetrics.macOSTrafficLightReservedWidth
+        : 12.0;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.fromLTRB(leadingInset, 4, 12, 8),
       child: Row(
         children: [
           IconButton(
@@ -1107,22 +1145,33 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           Row(
             children: [
               Expanded(
-                child: Row(children: [_volumeControl(), _speedButton()]),
+                child: Row(
+                  children: [
+                    _volumeControl(),
+                    Builder(
+                      builder: (buttonContext) => _speedButton(buttonContext),
+                    ),
+                  ],
+                ),
               ),
               _centerCluster(),
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    _trackButton(
-                      icon: Icons.graphic_eq_rounded,
-                      tooltip: '音轨',
-                      onTap: _showAudioTrackSheet,
+                    Builder(
+                      builder: (buttonContext) => _trackButton(
+                        icon: Icons.graphic_eq_rounded,
+                        tooltip: '音轨',
+                        onTap: () => _showAudioTracks(buttonContext),
+                      ),
                     ),
-                    _trackButton(
-                      icon: Icons.subtitles_rounded,
-                      tooltip: '字幕',
-                      onTap: _showSubtitleTrackSheet,
+                    Builder(
+                      builder: (buttonContext) => _trackButton(
+                        icon: Icons.subtitles_rounded,
+                        tooltip: '字幕',
+                        onTap: () => _showSubtitleTracks(buttonContext),
+                      ),
                     ),
                   ],
                 ),
@@ -1136,7 +1185,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Widget _volumeControl() {
     return SizedBox(
-      width: 160,
+      width: PlatformCapabilities.isDesktop ? 180 : 160,
       child: Row(
         children: [
           GestureDetector(
@@ -1169,15 +1218,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _speedButton() {
+  Widget _speedButton(BuildContext buttonContext) {
     return TextButton(
-      onPressed: _showSpeedSheet,
+      onPressed: () => _showSpeedControl(buttonContext),
       style: TextButton.styleFrom(
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       ),
       child: Text(
-        '${_rate.toString().replaceAll(RegExp(r'\.0$'), '')}x',
+        _formatRate(_rate),
         style: const TextStyle(
           color: Colors.white,
           fontSize: 14,
@@ -1199,127 +1248,516 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  // --- Bottom sheets ------------------------------------------------------
+  // --- Desktop popovers / mobile sheets ----------------------------------
 
-  void _showSpeedSheet() {
-    _hideTimer?.cancel();
-    setState(() => _optionSheetVisible = true);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1A1B23),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _optionSheet(
-        title: '播放速度',
-        children: _speedOptions
-            .map((rate) {
-              final label =
-                  '${rate.toString().replaceAll(RegExp(r'\.0$'), '')}x';
-              return _optionTile(
-                label: rate == 1.0 ? '正常 (1x)' : label,
-                selected: _rate == rate,
-                onTap: () {
-                  _setRate(rate);
-                  Navigator.of(context).pop();
-                },
-              );
-            })
-            .toList(growable: false),
-      ),
-    ).whenComplete(_finishOptionSheet);
+  RelativeRect _menuRect(BuildContext buttonContext) {
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    final overlay =
+        Overlay.of(buttonContext).context.findRenderObject() as RenderBox?;
+    if (box == null || overlay == null) {
+      return RelativeRect.fromLTRB(
+        24,
+        MediaQuery.sizeOf(buttonContext).height - 320,
+        24,
+        24,
+      );
+    }
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
+    return RelativeRect.fromRect(
+      Rect.fromLTWH(origin.dx, origin.dy, box.size.width, box.size.height),
+      Offset.zero & overlay.size,
+    );
   }
 
-  void _showAudioTrackSheet() {
+  Future<void> _showSpeedControl(BuildContext buttonContext) async {
     _hideTimer?.cancel();
+    if (PlatformCapabilities.isDesktop) {
+      await _showDesktopSpeedPopover(buttonContext);
+    } else {
+      await _showMobileSpeedSheet();
+    }
+    _scheduleHideControls();
+  }
+
+  Future<void> _showDesktopSpeedPopover(BuildContext buttonContext) async {
     setState(() => _optionSheetVisible = true);
+    final rate = ValueNotifier<double>(_rate);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.transparent,
+        builder: (dialogContext) {
+          final rect = _menuRect(buttonContext);
+          final size = MediaQuery.sizeOf(dialogContext);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: () => Navigator.of(dialogContext).pop(),
+                  behavior: HitTestBehavior.opaque,
+                  child: const ColoredBox(color: Colors.transparent),
+                ),
+              ),
+              Positioned(
+                left: rect.left.clamp(12.0, size.width - 300),
+                bottom: size.height - rect.top + 8,
+                child: Material(
+                  color: const Color(0xFF1E1F28),
+                  elevation: 12,
+                  borderRadius: BorderRadius.circular(12),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 280),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                      child: ValueListenableBuilder<double>(
+                        valueListenable: rate,
+                        builder: (context, value, _) {
+                          return Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  const Text(
+                                    '播放速度',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    _formatRate(value),
+                                    style: const TextStyle(
+                                      color: _accent,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    tooltip: '减速',
+                                    onPressed: () {
+                                      final next = (value - _rateStep).clamp(
+                                        _minRate,
+                                        _maxRate,
+                                      );
+                                      rate.value = next;
+                                      unawaited(_setRate(next));
+                                    },
+                                    icon: const Icon(
+                                      Icons.remove_rounded,
+                                      color: Colors.white70,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: SliderTheme(
+                                      data: SliderTheme.of(context).copyWith(
+                                        trackHeight: 3,
+                                        thumbShape:
+                                            const RoundSliderThumbShape(
+                                              enabledThumbRadius: 6,
+                                            ),
+                                        activeTrackColor: _accent,
+                                        inactiveTrackColor: Colors.white24,
+                                        thumbColor: Colors.white,
+                                      ),
+                                      child: Slider(
+                                        value: value.clamp(_minRate, _maxRate),
+                                        min: _minRate,
+                                        max: _maxRate,
+                                        // Continuous free adjustment (VLC/nPlayer).
+                                        onChanged: (v) {
+                                          rate.value = v;
+                                        },
+                                        onChangeEnd: (v) {
+                                          unawaited(_setRate(v));
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: '加速',
+                                    onPressed: () {
+                                      final next = (value + _rateStep).clamp(
+                                        _minRate,
+                                        _maxRate,
+                                      );
+                                      rate.value = next;
+                                      unawaited(_setRate(next));
+                                    },
+                                    icon: const Icon(
+                                      Icons.add_rounded,
+                                      color: Colors.white70,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  for (final preset in _speedPresets)
+                                    ChoiceChip(
+                                      label: Text(_formatRate(preset)),
+                                      selected: (value - preset).abs() < 0.01,
+                                      onSelected: (_) {
+                                        rate.value = preset;
+                                        unawaited(_setRate(preset));
+                                      },
+                                      selectedColor: _accent.withValues(
+                                        alpha: 0.35,
+                                      ),
+                                      labelStyle: TextStyle(
+                                        color:
+                                            (value - preset).abs() < 0.01
+                                            ? Colors.white
+                                            : Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                      backgroundColor: Colors.white10,
+                                      side: BorderSide.none,
+                                      visualDensity: VisualDensity.compact,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                ],
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () {
+                                    rate.value = 1.0;
+                                    unawaited(_setRate(1.0));
+                                  },
+                                  child: const Text(
+                                    '重置 1x',
+                                    style: TextStyle(color: Colors.white54),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      rate.dispose();
+      if (mounted) setState(() => _optionSheetVisible = false);
+    }
+  }
+
+  Future<void> _showMobileSpeedSheet() async {
+    setState(() => _optionSheetVisible = true);
+    final rate = ValueNotifier<double>(_rate);
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF1A1B23),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (context) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: ValueListenableBuilder<double>(
+                valueListenable: rate,
+                builder: (context, value, _) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '播放速度  ${_formatRate(value)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Slider(
+                        value: value.clamp(_minRate, _maxRate),
+                        min: _minRate,
+                        max: _maxRate,
+                        onChanged: (v) => rate.value = v,
+                        onChangeEnd: (v) => unawaited(_setRate(v)),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          for (final preset in _speedPresets)
+                            ActionChip(
+                              label: Text(_formatRate(preset)),
+                              onPressed: () {
+                                rate.value = preset;
+                                unawaited(_setRate(preset));
+                              },
+                            ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      rate.dispose();
+      if (mounted) setState(() => _optionSheetVisible = false);
+    }
+  }
+
+  Future<void> _showAudioTracks(BuildContext buttonContext) async {
+    _hideTimer?.cancel();
     final tracks = _playback.audioTracks;
     final current = _playback.currentAudioTrack;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1A1B23),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _optionSheet(
+    if (PlatformCapabilities.isDesktop) {
+      await _showDesktopTrackMenu(
+        buttonContext: buttonContext,
         title: '音轨',
-        children: tracks.isEmpty
-            ? [_emptyTracksHint('未检测到可切换的音轨')]
-            : tracks
-                  .map((track) {
-                    return _optionTile(
-                      label: _audioTrackLabel(track),
-                      selected: track.id == current.id,
-                      onTap: () {
-                        _playback.setAudioTrack(track);
-                        Navigator.of(context).pop();
-                      },
-                    );
-                  })
-                  .toList(growable: false),
-      ),
-    ).whenComplete(_finishOptionSheet);
-  }
-
-  void _showSubtitleTrackSheet() {
-    _hideTimer?.cancel();
-    setState(() => _optionSheetVisible = true);
-    final embedded = _playback.subtitleTracks;
-    final current = _playback.currentSubtitleTrack;
-    final children = <Widget>[];
-
-    if (embedded.isEmpty && _externalSubs.isEmpty) {
-      children.add(
-        _emptyTracksHint(_externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…'),
+        entries: tracks.isEmpty
+            ? const [('__empty__', '未检测到可切换的音轨')]
+            : [
+                for (final track in tracks)
+                  (track.id, _audioTrackLabel(track)),
+              ],
+        selectedId: current.id,
+        onSelected: (id) {
+          final match = tracks.where((t) => t.id == id);
+          if (match.isNotEmpty) unawaited(_playback.setAudioTrack(match.first));
+        },
       );
     } else {
+      setState(() => _optionSheetVisible = true);
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF1A1B23),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (context) => _optionSheet(
+          title: '音轨',
+          children: tracks.isEmpty
+              ? [_emptyTracksHint('未检测到可切换的音轨')]
+              : tracks
+                    .map((track) {
+                      return _optionTile(
+                        label: _audioTrackLabel(track),
+                        selected: track.id == current.id,
+                        onTap: () {
+                          unawaited(_playback.setAudioTrack(track));
+                          Navigator.of(context).pop();
+                        },
+                      );
+                    })
+                    .toList(growable: false),
+        ),
+      );
+      if (mounted) setState(() => _optionSheetVisible = false);
+    }
+    _scheduleHideControls();
+  }
+
+  Future<void> _showSubtitleTracks(BuildContext buttonContext) async {
+    _hideTimer?.cancel();
+    final embedded = _playback.subtitleTracks;
+    final current = _playback.currentSubtitleTrack;
+
+    final entries = <(String, String)>[];
+    if (embedded.isEmpty && _externalSubs.isEmpty) {
+      entries.add((
+        '__empty__',
+        _externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…',
+      ));
+    } else {
       for (final track in embedded) {
-        children.add(
-          _optionTile(
-            label: _subtitleTrackLabel(track),
-            selected: track.id == current.id,
-            onTap: () {
-              _playback.setSubtitleTrack(track);
-              Navigator.of(context).pop();
-            },
-          ),
-        );
+        entries.add((track.id, _subtitleTrackLabel(track)));
       }
+      // Dedupe external paths (same file can be discovered twice).
+      final seen = <String>{};
       for (final sub in _externalSubs) {
-        final uri = sub.uri;
-        final selected = current.uri && current.id == uri;
-        children.add(
-          _optionTile(
-            label: sub.label,
-            selected: selected,
-            onTap: () {
-              _playback.setSubtitleTrack(
-                PlaybackSubtitleTrack.uri(
-                  uri,
-                  title: sub.label,
-                  language: sub.languageHint,
-                ),
-              );
-              Navigator.of(context).pop();
-            },
-          ),
-        );
+        if (!seen.add(sub.uri)) continue;
+        entries.add((sub.uri, sub.label));
       }
     }
 
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF1A1B23),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _optionSheet(title: '字幕', children: children),
-    ).whenComplete(_finishOptionSheet);
+    if (PlatformCapabilities.isDesktop) {
+      await _showDesktopTrackMenu(
+        buttonContext: buttonContext,
+        title: '字幕',
+        entries: entries,
+        selectedId: current.id,
+        onSelected: (id) {
+          if (id == '__empty__') return;
+          final embeddedMatch = embedded.where((t) => t.id == id);
+          if (embeddedMatch.isNotEmpty) {
+            unawaited(_playback.setSubtitleTrack(embeddedMatch.first));
+            return;
+          }
+          final external = _externalSubs.where((s) => s.uri == id);
+          if (external.isNotEmpty) {
+            final sub = external.first;
+            unawaited(
+              _playback.setSubtitleTrack(
+                PlaybackSubtitleTrack.uri(
+                  sub.uri,
+                  title: sub.label,
+                  language: sub.languageHint,
+                ),
+              ),
+            );
+          }
+        },
+      );
+    } else {
+      setState(() => _optionSheetVisible = true);
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: const Color(0xFF1A1B23),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (context) {
+          final children = <Widget>[];
+          if (embedded.isEmpty && _externalSubs.isEmpty) {
+            children.add(
+              _emptyTracksHint(
+                _externalSubsLoaded ? '未检测到字幕（内嵌或同目录外挂）' : '正在扫描字幕…',
+              ),
+            );
+          } else {
+            for (final track in embedded) {
+              children.add(
+                _optionTile(
+                  label: _subtitleTrackLabel(track),
+                  selected: track.id == current.id,
+                  onTap: () {
+                    unawaited(_playback.setSubtitleTrack(track));
+                    Navigator.of(context).pop();
+                  },
+                ),
+              );
+            }
+            final seen = <String>{};
+            for (final sub in _externalSubs) {
+              if (!seen.add(sub.uri)) continue;
+              final selected = current.uri && current.id == sub.uri;
+              children.add(
+                _optionTile(
+                  label: sub.label,
+                  selected: selected,
+                  onTap: () {
+                    unawaited(
+                      _playback.setSubtitleTrack(
+                        PlaybackSubtitleTrack.uri(
+                          sub.uri,
+                          title: sub.label,
+                          language: sub.languageHint,
+                        ),
+                      ),
+                    );
+                    Navigator.of(context).pop();
+                  },
+                ),
+              );
+            }
+          }
+          return _optionSheet(title: '字幕', children: children);
+        },
+      );
+      if (mounted) setState(() => _optionSheetVisible = false);
+    }
+    _scheduleHideControls();
   }
 
-  void _finishOptionSheet() {
-    if (mounted) setState(() => _optionSheetVisible = false);
-    _scheduleHideControls();
+  Future<void> _showDesktopTrackMenu({
+    required BuildContext buttonContext,
+    required String title,
+    required List<(String, String)> entries,
+    required String selectedId,
+    required void Function(String id) onSelected,
+  }) async {
+    setState(() => _optionSheetVisible = true);
+    try {
+      final selected = await showMenu<String>(
+        context: buttonContext,
+        position: _menuRect(buttonContext),
+        color: const Color(0xFF1E1F28),
+        elevation: 12,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        items: [
+          PopupMenuItem<String>(
+            enabled: false,
+            height: 36,
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const PopupMenuDivider(height: 8),
+          for (final entry in entries)
+            if (entry.$1 == '__empty__')
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text(
+                  entry.$2,
+                  style: const TextStyle(color: Colors.white54),
+                ),
+              )
+            else
+              PopupMenuItem<String>(
+                value: entry.$1,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.$2,
+                        style: TextStyle(
+                          color: entry.$1 == selectedId
+                              ? const Color(0xFF66A3FF)
+                              : Colors.white,
+                          fontWeight: entry.$1 == selectedId
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    if (entry.$1 == selectedId)
+                      const Icon(
+                        Icons.check_rounded,
+                        size: 18,
+                        color: Color(0xFF66A3FF),
+                      ),
+                  ],
+                ),
+              ),
+        ],
+      );
+      if (selected != null) onSelected(selected);
+    } finally {
+      if (mounted) setState(() => _optionSheetVisible = false);
+    }
   }
 
   Widget _optionSheet({required String title, required List<Widget> children}) {
