@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/formatters/rating_formatter.dart';
+import '../../core/platform/open_player.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/media.dart';
@@ -217,9 +218,9 @@ class MediaDetailPage extends ConsumerWidget {
           ? progress.position
           : null;
       if (!context.mounted) return;
-      context.push(
-        '/player',
-        extra: PlayerArgs(
+      await openPlayer(
+        context,
+        PlayerArgs(
           uri: source.uri,
           title: '${show.title} - ${episode.displayLabel}',
           mediaId: episode.id,
@@ -249,9 +250,9 @@ class MediaDetailPage extends ConsumerWidget {
           .read(playbackSourceResolverProvider)
           .resolve(media);
       if (!context.mounted) return;
-      context.push(
-        '/player',
-        extra: PlayerArgs(
+      await openPlayer(
+        context,
+        PlayerArgs(
           uri: source.uri,
           title: media.title,
           mediaId: media.id,

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/platform/open_player.dart';
 import '../../core/router/app_router.dart';
 
 import '../../data/models/continue_watching_item.dart';
@@ -42,9 +43,9 @@ class _HomePageState extends ConsumerState<HomePage> {
           .read(playbackSourceResolverProvider)
           .resolve(media);
       if (!mounted) return;
-      context.push(
-        '/player',
-        extra: PlayerArgs(
+      await openPlayer(
+        context,
+        PlayerArgs(
           uri: source.uri,
           title: media.title,
           mediaId: media.id,

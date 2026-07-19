@@ -17,7 +17,9 @@ class AppDelegate: FlutterAppDelegate {
     )
     
     windowChannel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
-      guard let window = self?.mainFlutterWindow else {
+      // Prefer the key window so an independent player process/window
+      // receives fullscreen / zoom, not a stale main library window.
+      guard let window = NSApp.keyWindow ?? self?.mainFlutterWindow else {
         result(FlutterError(code: "UNAVAILABLE", message: "Window is not available", details: nil))
         return
       }

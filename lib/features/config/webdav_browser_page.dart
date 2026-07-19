@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/platform/open_player.dart';
 import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/library/media_library_entry_factory.dart';
@@ -163,9 +164,9 @@ class _WebDavBrowserPageState extends ConsumerState<WebDavBrowserPage> {
               ),
             )
             .toList(growable: false);
-    context.push(
-      '/player',
-      extra: PlayerArgs(
+    await openPlayer(
+      context,
+      PlayerArgs(
         uri: url,
         title: entry.name,
         httpHeaders: (headers != null && headers.isNotEmpty) ? headers : null,

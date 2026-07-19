@@ -21,7 +21,7 @@ import '../../services/playback/playback_source_resolver.dart';
 import '../../services/playback/subtitle_preference.dart';
 import '../../services/playback/vlc_video_view.dart';
 
-/// Arguments passed to [PlayerPage] via go_router's `extra`.
+/// Arguments passed to [PlayerPage] via go_router's `extra` or a player window.
 class PlayerArgs {
   const PlayerArgs({
     required this.uri,
@@ -49,13 +49,58 @@ class PlayerArgs {
   /// Parent TV show id — enables prev/next episode + auto-play next.
   final String? showId;
   final String? showTitle;
+
+  Map<String, dynamic> toJson() => {
+    'uri': uri,
+    'title': title,
+    'mediaId': mediaId,
+    'startAtMs': startAt?.inMilliseconds,
+    'httpHeaders': httpHeaders,
+    'subtitles': [
+      for (final s in subtitles)
+        {'uri': s.uri, 'title': s.title, 'language': s.language},
+    ],
+    'showId': showId,
+    'showTitle': showTitle,
+  };
+
+  factory PlayerArgs.fromJson(Map<String, dynamic> json) {
+    final startMs = json['startAtMs'];
+    final headers = json['httpHeaders'];
+    final subs = json['subtitles'];
+    return PlayerArgs(
+      uri: json['uri']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      mediaId: json['mediaId']?.toString(),
+      startAt: startMs is int ? Duration(milliseconds: startMs) : null,
+      httpHeaders: headers is Map
+          ? headers.map((k, v) => MapEntry(k.toString(), v.toString()))
+          : null,
+      subtitles: subs is List
+          ? [
+              for (final item in subs)
+                if (item is Map)
+                  PlaybackSubtitleSource(
+                    uri: item['uri']?.toString() ?? '',
+                    title: item['title']?.toString() ?? '',
+                    language: item['language']?.toString(),
+                  ),
+            ]
+          : const [],
+      showId: json['showId']?.toString(),
+      showTitle: json['showTitle']?.toString(),
+    );
+  }
 }
 
 /// Full-screen player backed by native VLCKit with a NetEase-style control layer.
 class PlayerPage extends ConsumerStatefulWidget {
-  const PlayerPage({super.key, required this.args});
+  const PlayerPage({super.key, required this.args, this.onClose});
 
   final PlayerArgs args;
+
+  /// When set (standalone player window), invoked instead of Navigator.pop.
+  final VoidCallback? onClose;
 
   @override
   ConsumerState<PlayerPage> createState() => _PlayerPageState();
@@ -485,7 +530,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _cancelAutoNext();
     await _persistProgress(force: true);
     if (!mounted) return;
-    context.pop();
+    final onClose = widget.onClose;
+    if (onClose != null) {
+      onClose();
+      return;
+    }
+    if (context.canPop()) {
+      context.pop();
+    }
   }
 
   // --- Control interactions ----------------------------------------------
@@ -807,16 +859,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               if (_toast != null) _toastOverlay(),
               if (_autoNextSeconds > 0) _autoNextOverlay(),
               _controlsOverlay(context),
-              if (PlatformCapabilities.isDesktop)
-                Positioned(
-                  top: 0,
-                  left: PlatformCapabilities.isMacOS
-                      ? WindowChromeMetrics.macOSTrafficLightReservedWidth
-                      : 0,
-                  right: 0,
-                  height: WindowChromeMetrics.macOSTitlebarHeight,
-                  child: const DragToMoveArea(child: SizedBox.expand()),
-                ),
+              // Desktop titlebar drag is part of _baomihuaChrome (title row).
             ],
           ),
         ),
@@ -1008,84 +1051,122 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     return _mobileChrome(context);
   }
 
-  /// NetEase Baomihua desktop chrome clone: no back button, centered title,
-  /// top-right rate + pin, bottom progress + vol/speed/quality + play + tools.
+  /// NetEase Baomihua desktop chrome: title lives **on the titlebar row**
+  /// (same line as traffic lights), rate + pin on the right, no back button.
   Widget _baomihuaChrome(BuildContext context) {
     final rateLabel = _formatTransferRate();
-    return AnimatedOpacity(
-      opacity: _controlsVisible ? 1 : 0,
-      duration: const Duration(milliseconds: 180),
-      child: IgnorePointer(
-        ignoring: !_controlsVisible,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.55),
-                Colors.transparent,
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.72),
-              ],
-              stops: const [0, 0.22, 0.68, 1],
+    final titlebarH = WindowChromeMetrics.macOSTitlebarHeight;
+    return Stack(
+      children: [
+        // Gradient only when chrome is visible.
+        IgnorePointer(
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.55),
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.72),
+                  ],
+                  stops: const [0, 0.22, 0.68, 1],
+                ),
+              ),
             ),
           ),
-          child: Column(
-            children: [
-              SizedBox(height: WindowChromeMetrics.macOSTitlebarHeight),
-              // Top: [drag]  Title  rate  pin
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 120), // balance traffic lights / pin
-                    Expanded(
-                      child: Text(
-                        _title,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _chromeFg,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 0.2,
-                        ),
+        ),
+        // Titlebar row — always participates in hit-testing for drag / pin,
+        // even when the rest of the chrome is auto-hidden (Baomihua keeps the
+        // titlebar usable).
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: titlebarH,
+          child: DragToMoveArea(
+            child: AnimatedOpacity(
+              opacity: _controlsVisible ? 1 : 0.0,
+              duration: const Duration(milliseconds: 180),
+              child: IgnorePointer(
+                ignoring: !_controlsVisible,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Row(
+                    children: [
+                      // Traffic-light clearance (system draws buttons here).
+                      SizedBox(
+                        width: WindowChromeMetrics.macOSTrafficLightReservedWidth,
                       ),
-                    ),
-                    if (rateLabel.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 10),
+                      Expanded(
                         child: Text(
-                          rateLabel,
+                          _title,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: _chromeDim,
-                            fontSize: 12,
+                            color: _chromeFg,
+                            fontSize: 13,
                             fontWeight: FontWeight.w500,
+                            letterSpacing: 0.1,
                           ),
                         ),
                       ),
-                    IconButton(
-                      tooltip: _alwaysOnTop ? '取消置顶' : '窗口置顶',
-                      onPressed: () => unawaited(_toggleAlwaysOnTop()),
-                      icon: Icon(
-                        _alwaysOnTop
-                            ? Icons.push_pin_rounded
-                            : Icons.push_pin_outlined,
-                        color: _alwaysOnTop ? Colors.white : _chromeDim,
-                        size: 18,
+                      if (rateLabel.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Text(
+                            rateLabel,
+                            style: const TextStyle(
+                              color: _chromeDim,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      IconButton(
+                        tooltip: _alwaysOnTop ? '取消置顶' : '窗口置顶',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 28,
+                        ),
+                        onPressed: () => unawaited(_toggleAlwaysOnTop()),
+                        icon: Icon(
+                          _alwaysOnTop
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined,
+                          color: _alwaysOnTop ? Colors.white : _chromeDim,
+                          size: 16,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-              const Spacer(),
-              _baomihuaBottomBar(context),
-            ],
+            ),
           ),
         ),
-      ),
+        // Bottom bar
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: AnimatedOpacity(
+            opacity: _controlsVisible ? 1 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: IgnorePointer(
+              ignoring: !_controlsVisible,
+              child: _baomihuaBottomBar(context),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

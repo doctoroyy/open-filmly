@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:smb_connect/smb_connect.dart';
 
+import '../../core/platform/open_player.dart';
 import '../../data/models/app_config.dart';
 import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
@@ -283,7 +284,7 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
     }
   }
 
-  void _onTap(SmbFile entry) {
+  Future<void> _onTap(SmbFile entry) async {
     // At the share-list level, every entry is a share (its DIRECTORY attribute
     // may be unset when opened via file()), so always enter it.
     // Also, due to Samba quirks, some actual directories may be missing the
@@ -311,9 +312,9 @@ class _SmbBrowserPageState extends ConsumerState<SmbBrowserPage> {
                 ),
               )
               .toList(growable: false);
-      context.push(
-        '/player',
-        extra: PlayerArgs(uri: url, title: entry.name, subtitles: subtitles),
+      await openPlayer(
+        context,
+        PlayerArgs(uri: url, title: entry.name, subtitles: subtitles),
       );
     }
   }
