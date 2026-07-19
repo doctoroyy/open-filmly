@@ -1,10 +1,16 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/image/filmly_image_cache.dart';
 import '../../data/models/app_config.dart';
 import '../../providers/data_providers.dart';
+import '../../services/data/database_transfer_service.dart';
 import '../../widgets/filmly_design.dart';
 
 /// Apple-styled settings page grouped into: library scan, metadata APIs,
@@ -31,6 +37,7 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
   bool _saving = false;
   bool _scanning = false;
   bool _clearingCache = false;
+  bool _transferring = false;
   bool _autoScan = true;
 
   @override
@@ -152,6 +159,102 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
     } finally {
       if (mounted) setState(() => _clearingCache = false);
     }
+  }
+
+  Future<void> _exportDatabase() async {
+    if (_transferring) return;
+    final location = await getSaveLocation(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Open Filmly 数据库', extensions: ['sqlite']),
+      ],
+      suggestedName: 'open_filmly-backup.sqlite',
+      confirmButtonText: '导出',
+    );
+    final path = location?.path;
+    if (path == null || path.isEmpty || !mounted) return;
+
+    setState(() => _transferring = true);
+    try {
+      final file = await DatabaseTransferService(
+        ref.read(databaseProvider),
+      ).exportToPath(path);
+      _showSnack('已导出数据库：${p.basename(file.path)}');
+    } catch (e) {
+      _showSnack('导出失败：$e');
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  Future<void> _importDatabase() async {
+    if (_transferring) return;
+    final stagedPath = await _stagedMigrationPath();
+    final selected = stagedPath == null
+        ? await openFile(
+            acceptedTypeGroups: const [
+              XTypeGroup(
+                label: 'Open Filmly 数据库',
+                extensions: ['sqlite', 'db'],
+              ),
+            ],
+            confirmButtonText: '选择',
+          )
+        : null;
+    final path = stagedPath ?? selected?.path;
+    if (path == null || path.isEmpty || !mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入媒体库数据？'),
+        content: Text(
+          stagedPath == null
+              ? '将把 ${p.basename(path)} 合并到当前设备。当前数据不会被删除，同一媒体的收藏会保留，播放进度取较新的记录。'
+              : '检测到从电脑放入的 Open Filmly 数据库，将合并导入当前设备。当前数据不会被删除。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('开始导入'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _transferring = true);
+    try {
+      final documents = await getApplicationDocumentsDirectory();
+      final backupPath = p.join(
+        documents.path,
+        'open_filmly-before-import-${DateTime.now().millisecondsSinceEpoch}.sqlite',
+      );
+      final transfer = DatabaseTransferService(ref.read(databaseProvider));
+      await transfer.exportToPath(backupPath);
+      final result = await transfer.importFromPath(path);
+      if (stagedPath != null) await File(stagedPath).delete();
+
+      _filled = false;
+      ref.invalidate(configProvider);
+      invalidateLibraryViews(ref);
+      _showSnack(
+        '导入完成：媒体 ${result.mediaRows} 条，剧集 ${result.episodeRows} 条；当前数据备份已保存在 App 文档目录。',
+      );
+    } catch (e) {
+      _showSnack('导入失败：$e');
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
+  Future<String?> _stagedMigrationPath() async {
+    final documents = await getApplicationDocumentsDirectory();
+    final file = File(p.join(documents.path, 'open_filmly-macos.sqlite'));
+    return await file.exists() ? file.path : null;
   }
 
   void _showSnack(String message) {
@@ -278,6 +381,36 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
                   busy: _clearingCache,
                   buttonLabel: '清除',
                   onTap: _clearImageCache,
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _section(
+              title: '数据迁移',
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 14),
+                  child: Text(
+                    '覆盖安装不会自动复制其他设备的数据。导出数据库后，可通过 AirDrop、文件共享或“文件”App 放到另一台设备再导入。导入前会自动备份当前设备数据。',
+                    style: TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 12,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+                FilmlyGlassButton(
+                  label: _transferring ? '处理中…' : '导入数据库',
+                  icon: _transferring ? null : Icons.file_download_outlined,
+                  leading: _transferring ? _spinner() : null,
+                  onTap: _transferring ? null : _importDatabase,
+                ),
+                const SizedBox(height: 10),
+                FilmlyGlassButton(
+                  label: _transferring ? '处理中…' : '导出数据库',
+                  icon: _transferring ? null : Icons.file_upload_outlined,
+                  leading: _transferring ? _spinner() : null,
+                  onTap: _transferring ? null : _exportDatabase,
                 ),
               ],
             ),
