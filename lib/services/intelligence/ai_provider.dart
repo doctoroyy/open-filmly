@@ -1,4 +1,5 @@
 import 'ai_worker_client.dart';
+import 'ai_worker_manager.dart';
 
 class ProviderTranscriptSegment {
   const ProviderTranscriptSegment({
@@ -66,11 +67,19 @@ abstract class AiProvider {
     const AiProviderUnavailable('Translation adapter is not configured'),
   );
 
-  Future<List<double>> embed({
-    required String text,
-    required String model,
+  Future<List<double>> embed({required String text, required String model}) =>
+      Future.error(
+        const AiProviderUnavailable('Embedding adapter is not configured'),
+      );
+
+  Future<List<String>> sampleFrames({
+    required String path,
+    required String outputDirectory,
+    required int durationMs,
+    int count = 12,
+    void Function(double progress)? onProgress,
   }) => Future.error(
-    const AiProviderUnavailable('Embedding adapter is not configured'),
+    const AiProviderUnavailable('Frame sampling adapter is not configured'),
   );
 }
 
@@ -98,29 +107,28 @@ class LocalWorkerProvider implements AiProvider {
     required String model,
     void Function(double progress)? onProgress,
   }) async {
-    final result = await _client.request(
-      'transcribe',
-      {
-        'path': path,
-        'language': language,
-        'model': model,
-        'modelDirectory': modelDirectory,
-      },
-      onProgress: onProgress,
-    );
+    final result = await _client.request('transcribe', {
+      'path': path,
+      'language': language,
+      'model': model,
+      'modelDirectory': modelDirectory,
+    }, onProgress: onProgress);
     final rawSegments = result['segments'];
     final segments = rawSegments is List
-        ? rawSegments.whereType<Map>().map((raw) {
-            final map = Map<String, dynamic>.from(raw);
-            return ProviderTranscriptSegment(
-              startMs: (map['startMs'] as num?)?.round() ?? 0,
-              endMs: (map['endMs'] as num?)?.round() ?? 0,
-              text: map['text']?.toString() ?? '',
-              language: map['language']?.toString() ?? language,
-              confidence: (map['confidence'] as num?)?.toDouble(),
-              speaker: map['speaker']?.toString(),
-            );
-          }).toList(growable: false)
+        ? rawSegments
+              .whereType<Map>()
+              .map((raw) {
+                final map = Map<String, dynamic>.from(raw);
+                return ProviderTranscriptSegment(
+                  startMs: (map['startMs'] as num?)?.round() ?? 0,
+                  endMs: (map['endMs'] as num?)?.round() ?? 0,
+                  text: map['text']?.toString() ?? '',
+                  language: map['language']?.toString() ?? language,
+                  confidence: (map['confidence'] as num?)?.toDouble(),
+                  speaker: map['speaker']?.toString(),
+                );
+              })
+              .toList(growable: false)
         : const <ProviderTranscriptSegment>[];
     return TranscriptionResult(
       language: result['language']?.toString() ?? language,
@@ -136,16 +144,12 @@ class LocalWorkerProvider implements AiProvider {
     required String model,
     void Function(double progress)? onProgress,
   }) async {
-    final result = await _client.request(
-      'translate',
-      {
-        'texts': texts,
-        'sourceLanguage': sourceLanguage,
-        'targetLanguage': targetLanguage,
-        'model': model,
-      },
-      onProgress: onProgress,
-    );
+    final result = await _client.request('translate', {
+      'texts': texts,
+      'sourceLanguage': sourceLanguage,
+      'targetLanguage': targetLanguage,
+      'model': model,
+    }, onProgress: onProgress);
     final rawTexts = result['texts'];
     return TranslationResult(
       language: result['language']?.toString() ?? targetLanguage,
@@ -156,11 +160,156 @@ class LocalWorkerProvider implements AiProvider {
   }
 
   @override
-  Future<List<double>> embed({required String text, required String model}) async {
-    final result = await _client.request('embed', {'text': text, 'model': model});
+  Future<List<double>> embed({
+    required String text,
+    required String model,
+  }) async {
+    final result = await _client.request('embed', {
+      'text': text,
+      'model': model,
+    });
     final vector = result['vector'];
     return vector is List
-        ? vector.whereType<num>().map((value) => value.toDouble()).toList(growable: false)
+        ? vector
+              .whereType<num>()
+              .map((value) => value.toDouble())
+              .toList(growable: false)
         : const [];
+  }
+
+  @override
+  Future<List<String>> sampleFrames({
+    required String path,
+    required String outputDirectory,
+    required int durationMs,
+    int count = 12,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await _client.request('sample_frames', {
+      'path': path,
+      'outputDirectory': outputDirectory,
+      'durationMs': durationMs,
+      'count': count,
+    }, onProgress: onProgress);
+    final paths = result['paths'];
+    return paths is List
+        ? paths.map((value) => value.toString()).toList(growable: false)
+        : const [];
+  }
+}
+
+/// Provider variant used by the application runtime. It obtains the shared
+/// worker client lazily and retries once after a worker-side transport error.
+class ManagedLocalWorkerProvider implements AiProvider {
+  ManagedLocalWorkerProvider(this._manager, {this.modelDirectory = ''});
+
+  final AiWorkerManager _manager;
+  final String modelDirectory;
+
+  @override
+  String get id => 'local-worker';
+
+  @override
+  Future<Map<String, dynamic>> probe(
+    String path, {
+    void Function(double progress)? onProgress,
+  }) => _manager.request('probe', {'path': path}, onProgress: onProgress);
+
+  @override
+  Future<TranscriptionResult> transcribe({
+    required String path,
+    required String language,
+    required String model,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await _manager.request('transcribe', {
+      'path': path,
+      'language': language,
+      'model': model,
+      'modelDirectory': modelDirectory,
+    }, onProgress: onProgress);
+    return TranscriptionResult(
+      language: result['language']?.toString() ?? language,
+      segments: _segments(result['segments'], language),
+    );
+  }
+
+  @override
+  Future<TranslationResult> translate({
+    required List<String> texts,
+    required String sourceLanguage,
+    required String targetLanguage,
+    required String model,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await _manager.request('translate', {
+      'texts': texts,
+      'sourceLanguage': sourceLanguage,
+      'targetLanguage': targetLanguage,
+      'model': model,
+    }, onProgress: onProgress);
+    final rawTexts = result['texts'];
+    return TranslationResult(
+      language: result['language']?.toString() ?? targetLanguage,
+      texts: rawTexts is List
+          ? rawTexts.map((value) => value.toString()).toList(growable: false)
+          : const [],
+    );
+  }
+
+  @override
+  Future<List<double>> embed({
+    required String text,
+    required String model,
+  }) async {
+    final result = await _manager.request('embed', {
+      'text': text,
+      'model': model,
+    });
+    final vector = result['vector'];
+    return vector is List
+        ? vector
+              .whereType<num>()
+              .map((value) => value.toDouble())
+              .toList(growable: false)
+        : const [];
+  }
+
+  @override
+  Future<List<String>> sampleFrames({
+    required String path,
+    required String outputDirectory,
+    required int durationMs,
+    int count = 12,
+    void Function(double progress)? onProgress,
+  }) async {
+    final result = await _manager.request('sample_frames', {
+      'path': path,
+      'outputDirectory': outputDirectory,
+      'durationMs': durationMs,
+      'count': count,
+    }, onProgress: onProgress);
+    final paths = result['paths'];
+    return paths is List
+        ? paths.map((value) => value.toString()).toList(growable: false)
+        : const [];
+  }
+
+  List<ProviderTranscriptSegment> _segments(Object? raw, String language) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((value) {
+          final map = Map<String, dynamic>.from(value);
+          return ProviderTranscriptSegment(
+            startMs: (map['startMs'] as num?)?.round() ?? 0,
+            endMs: (map['endMs'] as num?)?.round() ?? 0,
+            text: map['text']?.toString() ?? '',
+            language: map['language']?.toString() ?? language,
+            confidence: (map['confidence'] as num?)?.toDouble(),
+            speaker: map['speaker']?.toString(),
+          );
+        })
+        .toList(growable: false);
   }
 }

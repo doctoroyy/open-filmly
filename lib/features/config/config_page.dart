@@ -46,6 +46,7 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
   bool _clearingCache = false;
   bool _transferring = false;
   bool _aiWorking = false;
+  bool _aiBundleWorking = false;
   bool _autoScan = true;
   bool _aiAllowRemoteText = false;
   bool _aiMemoryEnabled = true;
@@ -231,6 +232,59 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
       _showSnack('AI 转录失败：$error');
     } finally {
       if (mounted) setState(() => _aiWorking = false);
+    }
+  }
+
+  Future<void> _exportAiBundle() async {
+    if (_aiBundleWorking) return;
+    final path = await getDirectoryPath(confirmButtonText: '选择导出位置');
+    if (path == null || path.isEmpty || !mounted) return;
+    setState(() => _aiBundleWorking = true);
+    try {
+      final bundle = Directory(p.join(path, 'open-filmly-intelligence-bundle'));
+      await ref
+          .read(intelligenceBundleServiceProvider)
+          .exportToDirectory(bundle);
+      _showSnack('AI 索引已导出到 ${p.basename(bundle.path)}');
+    } catch (error) {
+      _showSnack('AI 索引导出失败：$error');
+    } finally {
+      if (mounted) setState(() => _aiBundleWorking = false);
+    }
+  }
+
+  Future<void> _importAiBundle() async {
+    if (_aiBundleWorking) return;
+    final path = await getDirectoryPath(confirmButtonText: '选择 bundle');
+    if (path == null || path.isEmpty || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入 AI 索引？'),
+        content: const Text('只会合并转录、观看记忆和 AI 媒体身份，不会覆盖媒体库、收藏或播放进度。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _aiBundleWorking = true);
+    try {
+      await ref
+          .read(intelligenceBundleServiceProvider)
+          .importFromDirectory(Directory(path));
+      _showSnack('AI 索引导入完成');
+    } catch (error) {
+      _showSnack('AI 索引导入失败：$error');
+    } finally {
+      if (mounted) setState(() => _aiBundleWorking = false);
     }
   }
 
@@ -498,6 +552,26 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
                   icon: _aiWorking ? null : Icons.subtitles_outlined,
                   leading: _aiWorking ? _spinner() : null,
                   onTap: _aiWorking ? null : _generateAiSubtitle,
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilmlyGlassButton(
+                        label: _aiBundleWorking ? '处理中…' : '导出 AI 索引',
+                        icon: Icons.upload_outlined,
+                        onTap: _aiBundleWorking ? null : _exportAiBundle,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilmlyGlassButton(
+                        label: _aiBundleWorking ? '处理中…' : '导入 AI 索引',
+                        icon: Icons.download_outlined,
+                        onTap: _aiBundleWorking ? null : _importAiBundle,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

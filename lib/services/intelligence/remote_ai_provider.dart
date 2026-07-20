@@ -26,7 +26,9 @@ class RemoteAiProvider implements AiProvider {
     required String model,
     void Function(double progress)? onProgress,
   }) => Future.error(
-    const AiProviderUnavailable('Remote transcription adapter is not configured'),
+    const AiProviderUnavailable(
+      'Remote transcription adapter is not configured',
+    ),
   );
 
   @override
@@ -43,6 +45,19 @@ class RemoteAiProvider implements AiProvider {
   @override
   Future<List<double>> embed({required String text, required String model}) =>
       Future.error(
-        const AiProviderUnavailable('Remote embedding adapter is not configured'),
+        const AiProviderUnavailable(
+          'Remote embedding adapter is not configured',
+        ),
       );
+
+  @override
+  Future<List<String>> sampleFrames({
+    required String path,
+    required String outputDirectory,
+    required int durationMs,
+    int count = 12,
+    void Function(double progress)? onProgress,
+  }) => Future.error(
+    const AiProviderUnavailable('Remote frame sampling is not supported'),
+  );
 }

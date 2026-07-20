@@ -1,6 +1,9 @@
 import '../../data/intelligence/intelligence_asset_repository.dart';
+import '../../data/intelligence/content_segment_repository.dart';
 import '../../data/intelligence/intelligence_search_repository.dart';
 import '../../data/repositories/media_repository.dart';
+import 'ai_provider.dart';
+import 'embedding_index_service.dart';
 
 class AskFilmlyResult {
   const AskFilmlyResult({
@@ -35,11 +38,17 @@ class SemanticSearchService {
     required this.mediaRepository,
     required this.assets,
     required this.transcriptSearch,
+    this.contentSegments,
+    this.embeddingSearch,
+    this.embeddingModel = 'all-MiniLM-L6-v2',
   });
 
   final MediaRepository mediaRepository;
   final IntelligenceAssetRepository assets;
   final IntelligenceSearchRepository transcriptSearch;
+  final ContentSegmentRepository? contentSegments;
+  final EmbeddingIndexService? embeddingSearch;
+  final String embeddingModel;
 
   Future<List<AskFilmlyResult>> search(String query, {int limit = 24}) async {
     final normalized = query.trim();
@@ -81,6 +90,70 @@ class SemanticSearchService {
           score: 2 + hit.score,
         ),
       );
+    }
+
+    final segmentRepository = contentSegments;
+    if (segmentRepository != null) {
+      final indexedScenes = await segmentRepository.search(
+        normalized,
+        limit: limit,
+      );
+      for (final hit in indexedScenes) {
+        final asset = await assets.getById(hit.assetId);
+        if (asset == null) continue;
+        final mediaItem = asset.mediaId == null
+            ? null
+            : await mediaRepository.getById(asset.mediaId!);
+        output.add(
+          AskFilmlyResult(
+            title: mediaItem?.title ?? _fileTitle(asset.canonicalUri),
+            year: mediaItem?.year,
+            mediaId: asset.mediaId,
+            uri: asset.canonicalUri,
+            assetId: hit.assetId,
+            startMs: hit.startMs,
+            endMs: hit.endMs,
+            snippet: hit.summary,
+            reason: '场景摘要匹配',
+            score: 1.5 + hit.score,
+          ),
+        );
+      }
+    }
+
+    final embeddingRepository = embeddingSearch;
+    if (embeddingRepository != null) {
+      try {
+        final embeddingHits = await embeddingRepository.search(
+          normalized,
+          model: embeddingModel,
+          limit: limit,
+        );
+        for (final hit in embeddingHits) {
+          final asset = await assets.getById(hit.assetId);
+          if (asset == null) continue;
+          final mediaItem = asset.mediaId == null
+              ? null
+              : await mediaRepository.getById(asset.mediaId!);
+          output.add(
+            AskFilmlyResult(
+              title: mediaItem?.title ?? _fileTitle(asset.canonicalUri),
+              year: mediaItem?.year,
+              mediaId: asset.mediaId,
+              uri: asset.canonicalUri,
+              assetId: hit.assetId,
+              startMs: hit.startMs,
+              endMs: hit.endMs,
+              snippet: hit.snippet,
+              reason: '语义向量匹配',
+              score: 2.5 + hit.score,
+            ),
+          );
+        }
+      } on AiProviderUnavailable {
+        // Full-text search remains available when the optional embedding
+        // provider or local model is not installed.
+      }
     }
 
     output.sort((a, b) => b.score.compareTo(a.score));

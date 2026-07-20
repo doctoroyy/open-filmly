@@ -5,12 +5,48 @@ import 'package:open_filmly/data/intelligence/ai_job_repository.dart';
 import 'package:open_filmly/data/intelligence/intelligence_asset_repository.dart';
 import 'package:open_filmly/data/intelligence/intelligence_database.dart';
 import 'package:open_filmly/data/intelligence/intelligence_models.dart';
+import 'package:open_filmly/data/intelligence/content_segment_repository.dart';
 import 'package:open_filmly/services/intelligence/ai_provider.dart';
 import 'package:open_filmly/services/intelligence/ai_job_service.dart';
+import 'package:open_filmly/services/intelligence/ai_job_scheduler.dart';
 import 'package:open_filmly/services/intelligence/media_intelligence_service.dart';
 import 'package:open_filmly/services/intelligence/transcript_service.dart';
+import 'package:open_filmly/services/intelligence/scene_index_service.dart';
 
 void main() {
+  test(
+    'runs transcription through the persistent scheduler and resolves the asset path',
+    () async {
+      final database = IntelligenceDatabase.inMemory();
+      addTearDown(database.close);
+      final file = await File(
+        '${Directory.systemTemp.path}/filmly-ai-scheduled.mkv',
+      ).writeAsString('fixture');
+      addTearDown(() async => file.delete());
+      final jobs = AiJobRepository(database);
+      final scheduler = AiJobScheduler(jobs);
+      addTearDown(scheduler.stop);
+      final provider = FakeAiProvider();
+      final service = MediaIntelligenceService(
+        assets: IntelligenceAssetRepository(database),
+        jobs: jobs,
+        jobService: AiJobService(jobs),
+        transcripts: TranscriptService(database),
+        provider: provider,
+        scheduler: scheduler,
+      );
+
+      final job = await service.transcribeLocalFile(
+        path: file.path,
+        model: 'tiny',
+        language: 'en',
+      );
+
+      expect(job.status, AiJobStatus.succeeded);
+      expect(provider.lastPath, file.path);
+    },
+  );
+
   test(
     'runs local transcription into the independent intelligence database',
     () async {
@@ -90,6 +126,51 @@ void main() {
       expect(provider.translationCalls, 1);
     },
   );
+
+  test('dispatches probe, frame sampling, and scene indexing jobs', () async {
+    final database = IntelligenceDatabase.inMemory();
+    addTearDown(database.close);
+    final file = await File(
+      '${Directory.systemTemp.path}/filmly-ai-runtime-tasks.mkv',
+    ).writeAsString('fixture');
+    addTearDown(() async => file.delete());
+    final jobs = AiJobRepository(database);
+    final transcripts = TranscriptService(database);
+    final service = MediaIntelligenceService(
+      assets: IntelligenceAssetRepository(database),
+      jobs: jobs,
+      jobService: AiJobService(jobs),
+      transcripts: transcripts,
+      provider: FakeAiProvider(),
+      sceneIndex: SceneIndexService(
+        transcripts,
+        ContentSegmentRepository(database),
+      ),
+    );
+    final transcribed = await service.transcribeLocalFile(
+      path: file.path,
+      model: 'tiny',
+      language: 'en',
+    );
+
+    final probe = await service.probeAsset(assetId: transcribed.assetId);
+    final frames = await service.sampleFramesAsset(
+      assetId: transcribed.assetId,
+      outputDirectory: Directory.systemTemp.path,
+      durationMs: 1000,
+      count: 2,
+    );
+    final scenes = await service.indexScenesAsset(assetId: transcribed.assetId);
+
+    expect(probe.status, AiJobStatus.succeeded);
+    expect(frames.status, AiJobStatus.succeeded);
+    expect(scenes.status, AiJobStatus.succeeded);
+    expect(probe.checkpoint, contains('format'));
+    expect(frames.checkpoint, contains('frame-0001.jpg'));
+    expect(scenes.checkpoint, contains('sceneCount'));
+    final sceneRows = await database.select(database.contentSegments).get();
+    expect(sceneRows.single.screenshotPath, contains('frame-0001.jpg'));
+  });
 }
 
 class FakeAiProvider implements AiProvider {
@@ -103,7 +184,19 @@ class FakeAiProvider implements AiProvider {
   Future<Map<String, dynamic>> probe(
     String path, {
     void Function(double progress)? onProgress,
-  }) async => {};
+  }) async => {'format': 'fixture'};
+
+  @override
+  Future<List<String>> sampleFrames({
+    required String path,
+    required String outputDirectory,
+    required int durationMs,
+    int count = 12,
+    void Function(double progress)? onProgress,
+  }) async => [
+    '$outputDirectory/frame-0001.jpg',
+    '$outputDirectory/frame-0002.jpg',
+  ];
 
   @override
   Future<TranscriptionResult> transcribe({

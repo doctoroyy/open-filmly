@@ -36,11 +36,14 @@ class _CompanionSheetState extends ConsumerState<CompanionSheet> {
     if (question.isEmpty) return;
     setState(() => _loading = true);
     try {
-      final response = await ref.read(mediaContextServiceProvider).answer(
-        assetId: widget.assetId,
-        question: question,
-        positionMs: widget.positionMs,
-      );
+      final response = await ref
+          .read(mediaContextServiceProvider)
+          .answer(
+            assetId: widget.assetId,
+            question: question,
+            positionMs: widget.positionMs,
+            title: widget.title,
+          );
       if (mounted) setState(() => _response = response);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -56,7 +59,10 @@ class _CompanionSheetState extends ConsumerState<CompanionSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('AI Companion · ${widget.title}', style: const TextStyle(fontWeight: FontWeight.w700)),
+            Text(
+              'AI Companion · ${widget.title}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _controller,
@@ -67,7 +73,11 @@ class _CompanionSheetState extends ConsumerState<CompanionSheet> {
                 suffixIcon: IconButton(
                   onPressed: _loading ? null : _ask,
                   icon: _loading
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.send_rounded),
                 ),
               ),

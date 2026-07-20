@@ -83,9 +83,7 @@ class AiWorkerClient {
     final pending = _PendingRequest(onProgress);
     _pending[id] = pending;
     unawaited(
-      _transport.send(
-        jsonEncode({'id': id, 'method': method, 'input': input}),
-      ),
+      _transport.send(jsonEncode({'id': id, 'method': method, 'input': input})),
     );
     return pending.completer.future;
   }
@@ -93,13 +91,19 @@ class AiWorkerClient {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    await _subscription.cancel();
     final error = const AiWorkerException('Worker client is closed');
     for (final pending in _pending.values) {
       pending.completer.completeError(error);
     }
     _pending.clear();
-    await _transport.close();
+    // Close the transport first so a process-backed stream can finish its
+    // onDone callback. Cancelling the client subscription before closing the
+    // source can otherwise leave some broadcast transports waiting forever.
+    await _subscription.cancel();
+    // Transport shutdown can wait for its source stream to finish. The
+    // client subscription is already detached, so shutdown is safe to finish
+    // asynchronously and must not block task recovery.
+    unawaited(_transport.close());
   }
 
   void _handleLine(String line) {

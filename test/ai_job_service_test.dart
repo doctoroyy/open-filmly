@@ -24,13 +24,11 @@ void main() {
     final service = AiJobService(repository);
     final progress = <double>[];
 
-    final completed = await service.runNext(
-      (current, onProgress) async {
-        expect(current.id, job.id);
-        await onProgress(0.5);
-        progress.add(0.5);
-      },
-    );
+    final completed = await service.runNext((current, onProgress) async {
+      expect(current.id, job.id);
+      await onProgress(0.5);
+      progress.add(0.5);
+    });
 
     expect(completed?.status, AiJobStatus.succeeded);
     expect(progress, [0.5]);
@@ -50,6 +48,28 @@ void main() {
     });
 
     expect(completed?.status, AiJobStatus.failed);
-    expect((await repository.getById(job.id))?.error, contains('worker unavailable'));
+    expect(
+      (await repository.getById(job.id))?.error,
+      contains('worker unavailable'),
+    );
+  });
+
+  test('pauses, resumes, and retries a persisted job', () async {
+    final job = await repository.enqueue(
+      assetId: 'asset-1',
+      taskType: AiTaskType.transcribe,
+      model: 'tiny',
+    );
+    final service = AiJobService(repository);
+
+    await service.pause(job.id);
+    expect((await repository.getById(job.id))?.status, AiJobStatus.paused);
+    await service.resume(job.id);
+    expect((await repository.getById(job.id))?.status, AiJobStatus.queued);
+    await service.runJob(job.id, (_, _) async {
+      throw StateError('temporary');
+    });
+    await service.retry(job.id);
+    expect((await repository.getById(job.id))?.status, AiJobStatus.queued);
   });
 }

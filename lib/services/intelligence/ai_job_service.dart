@@ -50,4 +50,10 @@ class AiJobService {
   Future<void> recoverAfterRestart() => _repository.resetInterrupted();
 
   Future<void> cancel(String jobId) => _repository.cancel(jobId);
+
+  Future<void> pause(String jobId) => _repository.pause(jobId);
+
+  Future<void> resume(String jobId) => _repository.resume(jobId);
+
+  Future<void> retry(String jobId) => _repository.retry(jobId);
 }

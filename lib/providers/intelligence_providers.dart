@@ -7,8 +7,10 @@ import 'package:path/path.dart' as p;
 import '../data/intelligence/agent_run_repository.dart';
 import '../data/intelligence/ai_job_repository.dart';
 import '../data/intelligence/intelligence_asset_repository.dart';
+import '../data/intelligence/content_segment_repository.dart';
 import '../data/intelligence/intelligence_database.dart';
 import '../data/intelligence/intelligence_search_repository.dart';
+import '../data/intelligence/embedding_repository.dart';
 import '../data/intelligence/smart_collection_repository.dart';
 import '../data/intelligence/watch_event_repository.dart';
 import '../providers/data_providers.dart';
@@ -18,11 +20,17 @@ import '../services/intelligence/media_agent_service.dart';
 import '../services/intelligence/ai_job_service.dart';
 import '../services/intelligence/ai_provider.dart';
 import '../services/intelligence/ai_worker_client.dart';
+import '../services/intelligence/ai_worker_manager.dart';
+import '../services/intelligence/ai_chat_provider.dart';
+import '../services/intelligence/intelligence_bundle_service.dart';
 import '../services/intelligence/media_intelligence_service.dart';
 import '../services/intelligence/personal_memory_service.dart';
 import '../services/intelligence/semantic_search_service.dart';
+import '../services/intelligence/embedding_index_service.dart';
 import '../services/intelligence/subtitle_generation_service.dart';
 import '../services/intelligence/transcript_service.dart';
+import '../services/intelligence/scene_index_service.dart';
+import '../services/intelligence/ai_job_scheduler.dart';
 
 final intelligenceDatabaseProvider = Provider<IntelligenceDatabase>((ref) {
   final database = IntelligenceDatabase();
@@ -34,14 +42,31 @@ final aiJobRepositoryProvider = Provider<AiJobRepository>(
   (ref) => AiJobRepository(ref.watch(intelligenceDatabaseProvider)),
 );
 
-final localAiProviderProvider = FutureProvider<AiProvider?>((ref) async {
+final aiJobSchedulerProvider = Provider<AiJobScheduler>((ref) {
+  final scheduler = AiJobScheduler(ref.watch(aiJobRepositoryProvider));
+  ref.onDispose(() => unawaited(scheduler.stop()));
+  return scheduler;
+});
+
+final aiWorkerManagerProvider = FutureProvider<AiWorkerManager?>((ref) async {
   final config = await ref.watch(configProvider.future);
   final executable = config.aiWorkerPath.trim();
   if (executable.isEmpty) return null;
-  final transport = await ProcessWorkerTransport.start(executable);
-  final client = AiWorkerClient(transport);
-  ref.onDispose(() => unawaited(client.close()));
-  return LocalWorkerProvider(client, modelDirectory: config.aiModelDirectory);
+  final manager = AiWorkerManager(
+    startTransport: () => ProcessWorkerTransport.start(executable),
+  );
+  ref.onDispose(() => unawaited(manager.close()));
+  return manager;
+});
+
+final localAiProviderProvider = FutureProvider<AiProvider?>((ref) async {
+  final config = await ref.watch(configProvider.future);
+  final manager = await ref.watch(aiWorkerManagerProvider.future);
+  if (manager == null) return null;
+  return ManagedLocalWorkerProvider(
+    manager,
+    modelDirectory: config.aiModelDirectory,
+  );
 });
 
 final mediaIntelligenceServiceProvider =
@@ -57,6 +82,8 @@ final mediaIntelligenceServiceProvider =
         jobService: jobService,
         transcripts: ref.watch(transcriptServiceProvider),
         provider: provider,
+        sceneIndex: ref.watch(sceneIndexServiceProvider),
+        scheduler: ref.watch(aiJobSchedulerProvider),
       );
     });
 
@@ -66,11 +93,35 @@ final intelligenceAssetRepositoryProvider =
           IntelligenceAssetRepository(ref.watch(intelligenceDatabaseProvider)),
     );
 
+final intelligenceBundleServiceProvider = Provider<IntelligenceBundleService>(
+  (ref) => IntelligenceBundleService(ref.watch(intelligenceDatabaseProvider)),
+);
+
 final intelligenceSearchRepositoryProvider =
     Provider<IntelligenceSearchRepository>(
       (ref) =>
           IntelligenceSearchRepository(ref.watch(intelligenceDatabaseProvider)),
     );
+
+final contentSegmentRepositoryProvider = Provider<ContentSegmentRepository>(
+  (ref) => ContentSegmentRepository(ref.watch(intelligenceDatabaseProvider)),
+);
+
+final embeddingRepositoryProvider = Provider<EmbeddingRepository>(
+  (ref) => EmbeddingRepository(ref.watch(intelligenceDatabaseProvider)),
+);
+
+final embeddingIndexServiceProvider = FutureProvider<EmbeddingIndexService?>((
+  ref,
+) async {
+  final provider = await ref.watch(localAiProviderProvider.future);
+  if (provider == null) return null;
+  return EmbeddingIndexService(
+    provider: provider,
+    embeddings: ref.watch(embeddingRepositoryProvider),
+    transcripts: ref.watch(transcriptServiceProvider),
+  );
+});
 
 final watchEventRepositoryProvider = Provider<WatchEventRepository>(
   (ref) => WatchEventRepository(ref.watch(intelligenceDatabaseProvider)),
@@ -103,6 +154,8 @@ final semanticSearchServiceProvider = Provider<SemanticSearchService>((ref) {
     mediaRepository: ref.watch(mediaRepositoryProvider),
     assets: ref.watch(intelligenceAssetRepositoryProvider),
     transcriptSearch: ref.watch(intelligenceSearchRepositoryProvider),
+    contentSegments: ref.watch(contentSegmentRepositoryProvider),
+    embeddingSearch: ref.watch(embeddingIndexServiceProvider).asData?.value,
   );
 });
 
@@ -118,9 +171,27 @@ final transcriptServiceProvider = Provider<TranscriptService>(
   (ref) => TranscriptService(ref.watch(intelligenceDatabaseProvider)),
 );
 
-final mediaContextServiceProvider = Provider<MediaContextService>(
-  (ref) => MediaContextService(ref.watch(transcriptServiceProvider)),
+final sceneIndexServiceProvider = Provider<SceneIndexService>(
+  (ref) => SceneIndexService(
+    ref.watch(transcriptServiceProvider),
+    ref.watch(contentSegmentRepositoryProvider),
+  ),
 );
+
+final mediaContextServiceProvider = Provider<MediaContextService>((ref) {
+  final config = ref.watch(configProvider).asData?.value;
+  final endpoint = config?.aiRemoteEndpoint.trim() ?? '';
+  final chatProvider = config?.aiAllowRemoteText == true && endpoint.isNotEmpty
+      ? HttpAiChatProvider(
+          endpoint: endpoint,
+          apiKey: config?.geminiApiKey ?? '',
+        )
+      : null;
+  return MediaContextService(
+    ref.watch(transcriptServiceProvider),
+    chatProvider: chatProvider,
+  );
+});
 
 final subtitleGenerationServiceProvider = Provider<SubtitleGenerationService>(
   (ref) => SubtitleGenerationService(ref.watch(transcriptServiceProvider)),

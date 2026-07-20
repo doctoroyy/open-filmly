@@ -133,6 +133,47 @@ class AiJobRepository {
     );
   }
 
+  Future<void> pause(String id) async {
+    await _update(
+      id,
+      AiJobsCompanion(
+        status: const Value('paused'),
+        updatedAt: Value(DateTime.now().toIso8601String()),
+      ),
+    );
+  }
+
+  Future<void> resume(String id) async {
+    final current = await getById(id);
+    if (current == null ||
+        (current.status != AiJobStatus.paused &&
+            current.status != AiJobStatus.retryWait)) {
+      return;
+    }
+    await _update(
+      id,
+      AiJobsCompanion(
+        status: const Value('queued'),
+        error: const Value(null),
+        updatedAt: Value(DateTime.now().toIso8601String()),
+      ),
+    );
+  }
+
+  Future<void> retry(String id) async {
+    final current = await getById(id);
+    if (current == null || current.status != AiJobStatus.failed) return;
+    await _update(
+      id,
+      AiJobsCompanion(
+        status: const Value('queued'),
+        progress: const Value(0),
+        error: const Value(null),
+        updatedAt: Value(DateTime.now().toIso8601String()),
+      ),
+    );
+  }
+
   Future<void> resetInterrupted() async {
     await (_database.update(
       _database.aiJobs,

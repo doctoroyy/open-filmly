@@ -1,6 +1,8 @@
 enum AiJobStatus {
   queued,
   running,
+  paused,
+  retryWait,
   succeeded,
   failed,
   cancelled;
