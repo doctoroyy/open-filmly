@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import '../../data/models/episode.dart';
 import '../../data/models/playback_progress.dart';
 import '../../data/repositories/playback_progress_repository.dart';
 import '../../providers/data_providers.dart';
+import '../../providers/intelligence_providers.dart';
 import '../../services/library/media_library_entry_factory.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/metadata/tmdb_metadata_service.dart';
@@ -23,6 +25,10 @@ import '../../services/playback/playback_service.dart';
 import '../../services/playback/playback_source_resolver.dart';
 import '../../services/playback/subtitle_preference.dart';
 import '../../services/playback/vlc_video_view.dart';
+import '../../services/intelligence/media_identity_service.dart';
+import '../../services/intelligence/intelligence_storage.dart';
+import '../../data/intelligence/watch_event_repository.dart';
+import '../../features/intelligence/companion_sheet.dart';
 
 /// Host handle so the window chrome can stop VLC **before** the NSWindow is
 /// torn down (otherwise audio keeps playing in the background).
@@ -144,6 +150,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   late String _uri;
   late String _title;
   String? _mediaId;
+  String? _memoryAssetId;
   Map<String, String>? _httpHeaders;
   late List<PlaybackSubtitleSource> _networkSubtitles;
 
@@ -165,6 +172,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Duration _lastPersistedPosition = Duration.zero;
   bool _completed = false;
   bool _playing = false;
+  bool? _lastMemoryPlaying;
   bool _buffering = true;
   bool _controlsVisible = true;
   bool _optionSheetVisible = false;
@@ -415,6 +423,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       _cancelAutoNext();
     });
     try {
+      await _resolveMemoryAsset();
       await _playback.open(_uri, startAt: startAt, httpHeaders: _httpHeaders);
       if (!mounted) return;
       // Keep [_opening] true until playback actually starts (or buffering
@@ -535,6 +544,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             languageHint: subtitle.language,
           ),
       ];
+      final generated = await _findGeneratedSubtitle();
+      if (generated != null) found.add(generated);
       if (!mounted) return;
       setState(() {
         _externalSubs = found;
@@ -543,6 +554,139 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       await _applyPreferredSubtitle();
     } catch (_) {
       if (mounted) setState(() => _externalSubsLoaded = true);
+    }
+  }
+
+  Future<ExternalSubtitleFile?> _findGeneratedSubtitle() async {
+    final localPath = _localPathForAiSubtitle(_uri);
+    if (localPath == null) return null;
+    try {
+      final identity = await MediaIdentityService.fromFile(path: localPath);
+      final segments = await ref
+          .read(transcriptServiceProvider)
+          .getByAsset(identity.identityKey);
+      if (segments.isEmpty) return null;
+      final config = await ref.read(configProvider.future);
+      final targetLanguage = config.aiTargetLanguage.trim();
+      final translated =
+          targetLanguage.isNotEmpty &&
+          segments.any(
+            (segment) => segment.translatedText?.trim().isNotEmpty == true,
+          );
+      final sourceLanguage = segments
+          .map((segment) => segment.language.trim())
+          .firstWhere(
+            (language) => language.isNotEmpty,
+            orElse: () => 'source',
+          );
+      final language = translated ? targetLanguage : sourceLanguage;
+      final directory = config.aiIndexDirectory.trim().isEmpty
+          ? Directory(
+              '${(await defaultIntelligenceDirectory()).path}/subtitles',
+            )
+          : Directory(p.join(config.aiIndexDirectory.trim(), 'subtitles'));
+      final artifact = await ref
+          .read(subtitleGenerationServiceProvider)
+          .writeSrt(
+            assetId: identity.identityKey,
+            directory: directory,
+            language: language,
+            translated: translated,
+          );
+      return ExternalSubtitleFile(
+        path: artifact.file.path,
+        label: translated
+            ? 'AI 字幕 · $targetLanguage'
+            : 'AI 转录 · $sourceLanguage',
+        languageHint: language,
+      );
+    } catch (_) {
+      // AI subtitles are an optional enhancement and must never block playback.
+      return null;
+    }
+  }
+
+  Future<void> _openCompanion() async {
+    final localPath = _localPathForAiSubtitle(_uri);
+    if (localPath == null) {
+      _showToast('AI Companion 当前只支持本地媒体');
+      return;
+    }
+    try {
+      final identity = await MediaIdentityService.fromFile(path: localPath);
+      final segments = await ref
+          .read(transcriptServiceProvider)
+          .getByAsset(identity.identityKey);
+      if (segments.isEmpty) {
+        _showToast('这部媒体还没有完成 AI 转录');
+        return;
+      }
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => CompanionSheet(
+          assetId: identity.identityKey,
+          positionMs: _position.inMilliseconds,
+          title: _title,
+        ),
+      );
+    } catch (error) {
+      _showToast('无法打开 AI Companion：$error');
+    }
+  }
+
+  String? _localPathForAiSubtitle(String uri) {
+    final parsed = Uri.tryParse(uri);
+    if (parsed?.scheme == 'file') return parsed!.toFilePath();
+    if (parsed?.hasScheme == true) return null;
+    if (uri.trim().isEmpty) return null;
+    return uri;
+  }
+
+  Future<void> _resolveMemoryAsset() async {
+    final localPath = _localPathForAiSubtitle(_uri);
+    if (localPath == null) {
+      _memoryAssetId = _mediaId ?? _uri;
+      return;
+    }
+    try {
+      final identity = await MediaIdentityService.fromFile(path: localPath);
+      _memoryAssetId = identity.identityKey;
+    } catch (_) {
+      _memoryAssetId = _mediaId ?? localPath;
+    }
+  }
+
+  void _recordMemoryEvent(
+    WatchEventKind kind, {
+    Map<String, dynamic> payload = const {},
+  }) {
+    unawaited(_recordMemoryEventAsync(kind, payload: payload));
+  }
+
+  Future<void> _recordMemoryEventAsync(
+    WatchEventKind kind, {
+    required Map<String, dynamic> payload,
+  }) async {
+    final config = ref.read(configProvider).asData?.value;
+    if (config?.aiMemoryEnabled == false) return;
+    final assetId = _memoryAssetId ?? _mediaId ?? (_isNetworkUri ? null : _uri);
+    if (assetId == null || assetId.isEmpty) return;
+    try {
+      await ref
+          .read(personalMemoryServiceProvider)
+          .record(
+            assetId: assetId,
+            kind: kind,
+            positionMs: _position.inMilliseconds,
+            durationMs: _duration.inMilliseconds > 0
+                ? _duration.inMilliseconds
+                : null,
+            payload: payload,
+          );
+    } catch (_) {
+      // Viewing memory is optional and must never affect playback.
     }
   }
 
@@ -567,6 +711,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     });
     _playingSub = _playback.player.stream.playing.listen((playing) {
       if (!mounted) return;
+      final previous = _lastMemoryPlaying;
+      _lastMemoryPlaying = playing;
+      if (previous == null && playing) {
+        _recordMemoryEvent(WatchEventKind.play);
+      } else if (previous != null && previous != playing) {
+        _recordMemoryEvent(
+          playing ? WatchEventKind.play : WatchEventKind.pause,
+        );
+      }
       setState(() => _playing = playing);
       if (playing) {
         _markMediaReady();
@@ -598,6 +751,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _completedSub = _playback.player.stream.completed.listen((completed) {
       _completed = completed;
       if (completed) {
+        _recordMemoryEvent(WatchEventKind.completed);
         unawaited(_persistProgress(force: true));
         if (_hasNextEpisode) {
           _startAutoNextCountdown();
@@ -682,6 +836,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
     _lastPersistedPosition = snapshot.position;
     await repo.save(snapshot);
+    if (!snapshot.completed) _recordMemoryEvent(WatchEventKind.progress);
     if (mounted) _invalidateProgress(mediaId);
   }
 
@@ -693,6 +848,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Future<void> _handleBack() async {
     _cancelAutoNext();
+    if (!_completed) _recordMemoryEvent(WatchEventKind.abandon);
     await _persistProgress(force: true);
     if (!mounted) return;
     final onClose = widget.onClose;
@@ -775,6 +931,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               : target);
     await _playback.seek(clamped);
     setState(() => _position = clamped);
+    _recordMemoryEvent(
+      WatchEventKind.skip,
+      payload: {'deltaMs': delta.inMilliseconds},
+    );
     final secs = delta.inSeconds.abs();
     _showToast(delta.isNegative ? '−${secs}s' : '+${secs}s');
     _showControls();
@@ -891,6 +1051,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         _httpHeaders = source.httpHeaders;
         _networkSubtitles = source.subtitles;
         _mediaId = episode.id;
+        _memoryAssetId = null;
+        _lastMemoryPlaying = null;
         _title =
             '${widget.args.showTitle ?? show.title} - ${episode.displayLabel}';
         _episodeIndex = targetIndex;
@@ -2192,6 +2354,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                 ),
               ),
               IconButton(
+                tooltip: 'AI Companion',
+                onPressed: () => unawaited(_openCompanion()),
+                icon: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: _chromeDim,
+                  size: 20,
+                ),
+              ),
+              IconButton(
                 tooltip: '字幕',
                 onPressed: _openSubtitlePanel,
                 icon: Icon(
@@ -2375,6 +2546,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               Expanded(
                 child: Row(
                   children: [
+                    IconButton(
+                      icon: const Icon(
+                        Icons.auto_awesome_rounded,
+                        color: Colors.white70,
+                      ),
+                      tooltip: 'AI Companion',
+                      onPressed: () => unawaited(_openCompanion()),
+                    ),
                     IconButton(
                       onPressed: () => unawaited(_toggleMute()),
                       icon: Icon(

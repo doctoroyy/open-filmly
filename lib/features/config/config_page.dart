@@ -11,6 +11,8 @@ import '../../core/image/filmly_image_cache.dart';
 import '../../data/models/app_config.dart';
 import '../../providers/data_providers.dart';
 import '../../services/data/database_transfer_service.dart';
+import '../../data/intelligence/intelligence_models.dart';
+import '../../providers/intelligence_providers.dart';
 import '../../widgets/filmly_design.dart';
 
 /// Apple-styled settings page grouped into: library scan, metadata APIs,
@@ -31,6 +33,11 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
   final _tmdb = TextEditingController();
   final _gemini = TextEditingController();
   final _folders = TextEditingController();
+  final _aiWorker = TextEditingController();
+  final _aiModelDirectory = TextEditingController();
+  final _aiIndexDirectory = TextEditingController();
+  final _aiModel = TextEditingController();
+  final _aiTargetLanguage = TextEditingController();
 
   bool _filled = false;
   bool _obscurePass = true;
@@ -38,7 +45,10 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
   bool _scanning = false;
   bool _clearingCache = false;
   bool _transferring = false;
+  bool _aiWorking = false;
   bool _autoScan = true;
+  bool _aiAllowRemoteText = false;
+  bool _aiMemoryEnabled = true;
 
   @override
   void dispose() {
@@ -51,6 +61,11 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
       _tmdb,
       _gemini,
       _folders,
+      _aiWorker,
+      _aiModelDirectory,
+      _aiIndexDirectory,
+      _aiModel,
+      _aiTargetLanguage,
     ]) {
       c.dispose();
     }
@@ -67,6 +82,13 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
     _tmdb.text = c.tmdbApiKey;
     _gemini.text = c.geminiApiKey;
     _folders.text = c.selectedFolders.join('\n');
+    _aiWorker.text = c.aiWorkerPath;
+    _aiModelDirectory.text = c.aiModelDirectory;
+    _aiIndexDirectory.text = c.aiIndexDirectory;
+    _aiModel.text = c.aiModel;
+    _aiTargetLanguage.text = c.aiTargetLanguage;
+    _aiAllowRemoteText = c.aiAllowRemoteText;
+    _aiMemoryEnabled = c.aiMemoryEnabled;
     _autoScan = c.autoScanOnStartup;
     _filled = true;
   }
@@ -88,6 +110,15 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
       selectedFolders: folders,
       tmdbApiKey: _tmdb.text.trim(),
       geminiApiKey: _gemini.text.trim(),
+      aiWorkerPath: _aiWorker.text.trim(),
+      aiModelDirectory: _aiModelDirectory.text.trim(),
+      aiIndexDirectory: _aiIndexDirectory.text.trim(),
+      aiModel: _aiModel.text.trim().isEmpty ? 'tiny' : _aiModel.text.trim(),
+      aiTargetLanguage: _aiTargetLanguage.text.trim().isEmpty
+          ? 'zh-CN'
+          : _aiTargetLanguage.text.trim(),
+      aiAllowRemoteText: _aiAllowRemoteText,
+      aiMemoryEnabled: _aiMemoryEnabled,
       autoScanOnStartup: _autoScan,
     );
   }
@@ -158,6 +189,48 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
       _showSnack('清除缓存失败：$e');
     } finally {
       if (mounted) setState(() => _clearingCache = false);
+    }
+  }
+
+  Future<void> _generateAiSubtitle() async {
+    if (_aiWorking) return;
+    const videoGroup = XTypeGroup(
+      label: '视频文件',
+      extensions: ['mkv', 'mp4', 'mov', 'm4v', 'avi', 'webm', 'ts', 'm2ts'],
+    );
+    final selected = await openFile(acceptedTypeGroups: const [videoGroup]);
+    if (selected == null || !mounted) return;
+    final config = ref.read(configProvider).asData?.value ?? const AppConfig();
+    if (config.aiWorkerPath.trim().isEmpty) {
+      _showSnack('请先填写本地 Worker 路径');
+      return;
+    }
+
+    setState(() => _aiWorking = true);
+    try {
+      final service = await ref.read(mediaIntelligenceServiceProvider.future);
+      if (service == null) throw StateError('本地 AI Worker 未配置');
+      final result = await service.generateSubtitlesForLocalFile(
+        path: selected.path,
+        model: config.aiModel,
+        sourceLanguage: 'auto',
+        targetLanguage: config.aiTargetLanguage,
+        outputDirectory: config.aiIndexDirectory.trim().isEmpty
+            ? null
+            : Directory(p.join(config.aiIndexDirectory.trim(), 'subtitles')),
+        force: true,
+      );
+      _showSnack(
+        result.translationJob?.status == AiJobStatus.failed
+            ? 'AI 转录完成，翻译不可用，已生成原语言 SRT/VTT 字幕'
+            : result.translated
+            ? 'AI 字幕已生成（SRT/VTT），可在播放器字幕菜单中选择'
+            : 'AI 转录完成，已生成原语言 SRT/VTT 字幕',
+      );
+    } catch (error) {
+      _showSnack('AI 转录失败：$error');
+    } finally {
+      if (mounted) setState(() => _aiWorking = false);
     }
   }
 
@@ -369,6 +442,63 @@ class _ConfigPageState extends ConsumerState<ConfigPage> {
                 ),
                 _field(_domain, '域 / 工作组（可选）', hint: 'WORKGROUP'),
                 _field(_share, '默认共享（可选）'),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _section(
+              title: 'AI 媒体理解',
+              children: [
+                _field(
+                  _aiWorker,
+                  '本地 Worker 路径（可选）',
+                  hint: '/Applications/Open Filmly.app/.../ai-worker',
+                ),
+                _field(
+                  _aiModelDirectory,
+                  '本地模型目录（可选）',
+                  hint: '/Users/你/Models',
+                ),
+                _field(_aiModel, '默认模型', hint: 'tiny'),
+                _field(_aiTargetLanguage, '字幕目标语言', hint: 'zh-CN'),
+                _field(_aiIndexDirectory, 'AI 索引目录（可选）', hint: '留空使用应用支持目录'),
+                _toggleRow(
+                  title: '允许云端处理文本片段',
+                  subtitle: '默认关闭；不会自动上传视频文件',
+                  value: _aiAllowRemoteText,
+                  onChanged: (value) =>
+                      setState(() => _aiAllowRemoteText = value),
+                ),
+                _toggleRow(
+                  title: '记录本地观看记忆',
+                  subtitle: '用于观看回顾和本地推荐；关闭后不再写入观看事件',
+                  value: _aiMemoryEnabled,
+                  onChanged: (value) =>
+                      setState(() => _aiMemoryEnabled = value),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(
+                    'AI 索引与媒体库数据库分开保存，删除或重建 AI 索引不会影响媒体、收藏和播放进度。',
+                    style: TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 12,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+                FilmlyGlassButton(
+                  label: _saving ? '保存中…' : '保存 AI 设置',
+                  icon: _saving ? null : Icons.auto_awesome_outlined,
+                  leading: _saving ? _spinner() : null,
+                  onTap: _saving ? null : _save,
+                ),
+                const SizedBox(height: 10),
+                FilmlyGlassButton(
+                  label: _aiWorking ? 'AI 转录中…' : '选择视频生成 AI 字幕',
+                  icon: _aiWorking ? null : Icons.subtitles_outlined,
+                  leading: _aiWorking ? _spinner() : null,
+                  onTap: _aiWorking ? null : _generateAiSubtitle,
+                ),
               ],
             ),
             const SizedBox(height: 24),

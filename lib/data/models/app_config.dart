@@ -14,6 +14,16 @@ class AppConfig {
     this.selectedFolders = const [],
     this.tmdbApiKey = '',
     this.geminiApiKey = '',
+    this.aiExecutionMode = 'local',
+    this.aiWorkerPath = '',
+    this.aiModelDirectory = '',
+    this.aiModel = 'tiny',
+    this.aiTargetLanguage = 'zh-CN',
+    this.aiAllowRemoteText = false,
+    this.aiIndexDirectory = '',
+    this.aiRemoteProvider = '',
+    this.aiRemoteEndpoint = '',
+    this.aiMemoryEnabled = true,
     this.autoScanOnStartup = true,
     this.webdavUrl = '',
     this.webdavUsername = '',
@@ -32,6 +42,16 @@ class AppConfig {
   final List<String> selectedFolders;
   final String tmdbApiKey;
   final String geminiApiKey;
+  final String aiExecutionMode;
+  final String aiWorkerPath;
+  final String aiModelDirectory;
+  final String aiModel;
+  final String aiTargetLanguage;
+  final bool aiAllowRemoteText;
+  final String aiIndexDirectory;
+  final String aiRemoteProvider;
+  final String aiRemoteEndpoint;
+  final bool aiMemoryEnabled;
   final bool autoScanOnStartup;
   final String webdavUrl;
   final String webdavUsername;
@@ -107,6 +127,24 @@ class AppConfig {
           : const [],
       tmdbApiKey: pick(['tmdbApiKey', 'tmdbApi']),
       geminiApiKey: pick(['geminiApiKey', 'geminiApi']),
+      aiExecutionMode: pick(['aiExecutionMode']).isEmpty
+          ? 'local'
+          : pick(['aiExecutionMode']),
+      aiWorkerPath: pick(['aiWorkerPath']),
+      aiModelDirectory: pick(['aiModelDirectory']),
+      aiModel: pick(['aiModel']).isEmpty ? 'tiny' : pick(['aiModel']),
+      aiTargetLanguage: pick(['aiTargetLanguage']).isEmpty
+          ? 'zh-CN'
+          : pick(['aiTargetLanguage']),
+      aiAllowRemoteText: json['aiAllowRemoteText'] is bool
+          ? json['aiAllowRemoteText'] as bool
+          : false,
+      aiIndexDirectory: pick(['aiIndexDirectory']),
+      aiRemoteProvider: pick(['aiRemoteProvider']),
+      aiRemoteEndpoint: pick(['aiRemoteEndpoint']),
+      aiMemoryEnabled: json['aiMemoryEnabled'] is bool
+          ? json['aiMemoryEnabled'] as bool
+          : true,
       autoScanOnStartup: autoScan is bool ? autoScan : true,
       webdavUrl: pick(['webdavUrl', 'webdavHost']),
       webdavUsername: pick(['webdavUsername']),
@@ -127,6 +165,16 @@ class AppConfig {
     'selectedFolders': selectedFolders,
     'tmdbApiKey': tmdbApiKey,
     'geminiApiKey': geminiApiKey,
+    'aiExecutionMode': aiExecutionMode,
+    'aiWorkerPath': aiWorkerPath,
+    'aiModelDirectory': aiModelDirectory,
+    'aiModel': aiModel,
+    'aiTargetLanguage': aiTargetLanguage,
+    'aiAllowRemoteText': aiAllowRemoteText,
+    'aiIndexDirectory': aiIndexDirectory,
+    'aiRemoteProvider': aiRemoteProvider,
+    'aiRemoteEndpoint': aiRemoteEndpoint,
+    'aiMemoryEnabled': aiMemoryEnabled,
     'autoScanOnStartup': autoScanOnStartup,
     'webdavUrl': webdavUrl,
     'webdavUsername': webdavUsername,
@@ -148,6 +196,16 @@ class AppConfig {
     List<String>? selectedFolders,
     String? tmdbApiKey,
     String? geminiApiKey,
+    String? aiExecutionMode,
+    String? aiWorkerPath,
+    String? aiModelDirectory,
+    String? aiModel,
+    String? aiTargetLanguage,
+    bool? aiAllowRemoteText,
+    String? aiIndexDirectory,
+    String? aiRemoteProvider,
+    String? aiRemoteEndpoint,
+    bool? aiMemoryEnabled,
     bool? autoScanOnStartup,
     String? webdavUrl,
     String? webdavUsername,
@@ -166,6 +224,16 @@ class AppConfig {
       selectedFolders: selectedFolders ?? this.selectedFolders,
       tmdbApiKey: tmdbApiKey ?? this.tmdbApiKey,
       geminiApiKey: geminiApiKey ?? this.geminiApiKey,
+      aiExecutionMode: aiExecutionMode ?? this.aiExecutionMode,
+      aiWorkerPath: aiWorkerPath ?? this.aiWorkerPath,
+      aiModelDirectory: aiModelDirectory ?? this.aiModelDirectory,
+      aiModel: aiModel ?? this.aiModel,
+      aiTargetLanguage: aiTargetLanguage ?? this.aiTargetLanguage,
+      aiAllowRemoteText: aiAllowRemoteText ?? this.aiAllowRemoteText,
+      aiIndexDirectory: aiIndexDirectory ?? this.aiIndexDirectory,
+      aiRemoteProvider: aiRemoteProvider ?? this.aiRemoteProvider,
+      aiRemoteEndpoint: aiRemoteEndpoint ?? this.aiRemoteEndpoint,
+      aiMemoryEnabled: aiMemoryEnabled ?? this.aiMemoryEnabled,
       autoScanOnStartup: autoScanOnStartup ?? this.autoScanOnStartup,
       webdavUrl: webdavUrl ?? this.webdavUrl,
       webdavUsername: webdavUsername ?? this.webdavUsername,

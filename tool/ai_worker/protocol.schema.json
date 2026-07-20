@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Open Filmly AI Worker JSONL protocol",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["id", "method", "input"],
+      "properties": {
+        "id": {"type": "string"},
+        "method": {
+          "enum": ["probe", "transcribe", "translate", "embed", "sample_frames"]
+        },
+        "input": {"type": "object"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"enum": ["progress", "result", "error"]},
+        "progress": {"type": "number", "minimum": 0, "maximum": 1},
+        "result": {"type": "object"},
+        "error": {"type": "object"}
+      }
+    }
+  ]
+}

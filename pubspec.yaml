@@ -14,6 +14,7 @@ dependencies:
   flutter_riverpod: ^3.3.1
   go_router: ^17.2.3
   http: ^1.6.0
+  crypto: ^3.0.6
   charset: ^2.0.1
   path: ^1.9.1
   path_provider: ^2.1.5

@@ -16,6 +16,8 @@ import '../../providers/data_providers.dart';
 import '../../providers/smb_providers.dart';
 import '../../services/library/media_library_entry_factory.dart';
 import '../../services/metadata/tmdb_metadata_service.dart';
+import '../../data/intelligence/watch_event_repository.dart';
+import '../../providers/intelligence_providers.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/filmly_error_state.dart';
 import '../player/player_page.dart';
@@ -356,9 +358,21 @@ class MediaDetailPage extends ConsumerWidget {
   }
 
   Future<void> _toggleFavorite(WidgetRef ref, Media media) async {
-    await ref
-        .read(mediaRepositoryProvider)
-        .setFavorite(media.id, !media.isFavorite);
+    final next = !media.isFavorite;
+    await ref.read(mediaRepositoryProvider).setFavorite(media.id, next);
+    if (next) {
+      final config = ref.read(configProvider).asData?.value;
+      if (config?.aiMemoryEnabled != false) {
+        await ref
+            .read(personalMemoryServiceProvider)
+            .record(
+              assetId: media.id,
+              kind: WatchEventKind.favorite,
+              positionMs: 0,
+              payload: {'title': media.title},
+            );
+      }
+    }
     ref.invalidate(mediaByIdProvider(media.id));
     ref.invalidate(favoritesProvider);
   }

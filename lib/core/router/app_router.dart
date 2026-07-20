@@ -13,6 +13,9 @@ import '../../features/config/webdav_browser_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/home/me_page.dart';
 import '../../features/home/search_page.dart';
+import '../../features/intelligence/ask_filmly_page.dart';
+import '../../features/intelligence/media_agent_page.dart';
+import '../../features/intelligence/personal_memory_page.dart';
 import '../../features/library/favorites_page.dart';
 import '../../features/library/library_page.dart';
 import '../../features/library/media_detail_page.dart';
@@ -92,6 +95,11 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         GoRoute(
           path: '/search',
           pageBuilder: (context, state) => _tabPage(state, const SearchPage()),
+        ),
+        GoRoute(
+          path: '/ask',
+          pageBuilder: (context, state) =>
+              _fadePage(state, const AskFilmlyPage()),
         ),
         GoRoute(
           path: '/me',
@@ -215,6 +223,16 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         GoRoute(
           path: '/config',
           pageBuilder: (context, state) => _fadePage(state, const ConfigPage()),
+        ),
+        GoRoute(
+          path: '/memory',
+          pageBuilder: (context, state) =>
+              _fadePage(state, const PersonalMemoryPage()),
+        ),
+        GoRoute(
+          path: '/agent',
+          pageBuilder: (context, state) =>
+              _fadePage(state, const MediaAgentPage()),
         ),
       ],
     ),

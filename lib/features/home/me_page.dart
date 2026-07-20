@@ -47,6 +47,18 @@ class MePage extends StatelessWidget {
                 label: '设置',
                 onTap: () => context.push('/config'),
               ),
+              _tile(
+                context,
+                icon: Icons.auto_awesome_rounded,
+                label: 'Personal Film Memory',
+                onTap: () => context.push('/memory'),
+              ),
+              _tile(
+                context,
+                icon: Icons.smart_toy_outlined,
+                label: 'Media Agent',
+                onTap: () => context.push('/agent'),
+              ),
             ],
           ),
           const SizedBox(height: 18),

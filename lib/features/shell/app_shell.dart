@@ -101,9 +101,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         location.startsWith('/emby')) {
       return 1;
     }
-    if (location.startsWith('/search')) return 2;
+    if (location.startsWith('/search') || location.startsWith('/ask')) return 2;
     if (location.startsWith('/me') ||
         location.startsWith('/config') ||
+        location.startsWith('/memory') ||
+        location.startsWith('/agent') ||
         location.startsWith('/favorites') ||
         location.startsWith('/anime') ||
         location.startsWith('/variety') ||
@@ -127,6 +129,10 @@ class _AppShellState extends ConsumerState<AppShell> {
             const _OpenSearchIntent(),
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             const _OpenSearchIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true):
+            const _OpenAskFilmlyIntent(),
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            const _OpenAskFilmlyIntent(),
         const SingleActivator(LogicalKeyboardKey.comma, meta: true):
             const _OpenSettingsIntent(),
         const SingleActivator(LogicalKeyboardKey.comma, control: true):
@@ -164,6 +170,12 @@ class _AppShellState extends ConsumerState<AppShell> {
           _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
             onInvoke: (_) {
               GlobalSearch.show(context);
+              return null;
+            },
+          ),
+          _OpenAskFilmlyIntent: CallbackAction<_OpenAskFilmlyIntent>(
+            onInvoke: (_) {
+              context.go('/ask');
               return null;
             },
           ),
@@ -207,6 +219,8 @@ class _AppShellState extends ConsumerState<AppShell> {
                 context,
               ).startsWith('/favorites');
               final sourcesSelected = _location(context).startsWith('/sources');
+              final memorySelected = _location(context).startsWith('/memory');
+              final agentSelected = _location(context).startsWith('/agent');
 
               return Scaffold(
                 extendBody: !useSidebar && PlatformCapabilities.isIOS,
@@ -224,8 +238,12 @@ class _AppShellState extends ConsumerState<AppShell> {
                                 onTapSettings: () => context.go('/config'),
                                 onTapFavorites: () => context.go('/favorites'),
                                 onTapSources: () => context.go('/sources'),
+                                onTapMemory: () => context.go('/memory'),
+                                onTapAgent: () => context.go('/agent'),
                                 favoritesSelected: favoritesSelected,
                                 sourcesSelected: sourcesSelected,
+                                memorySelected: memorySelected,
+                                agentSelected: agentSelected,
                               ),
                               const VerticalDivider(
                                 width: 1,
@@ -391,18 +409,26 @@ class _Sidebar extends StatelessWidget {
     required this.onTapSettings,
     required this.onTapFavorites,
     required this.onTapSources,
+    required this.onTapMemory,
+    required this.onTapAgent,
     required this.favoritesSelected,
     required this.sourcesSelected,
+    required this.memorySelected,
+    required this.agentSelected,
   });
 
   final int selectedIndex;
   final bool settingsSelected;
   final bool favoritesSelected;
   final bool sourcesSelected;
+  final bool memorySelected;
+  final bool agentSelected;
   final ValueChanged<int> onTapItem;
   final VoidCallback onTapSettings;
   final VoidCallback onTapFavorites;
   final VoidCallback onTapSources;
+  final VoidCallback onTapMemory;
+  final VoidCallback onTapAgent;
 
   @override
   Widget build(BuildContext context) {
@@ -514,7 +540,9 @@ class _Sidebar extends StatelessWidget {
                           i == selectedIndex &&
                           !settingsSelected &&
                           !favoritesSelected &&
-                          !sourcesSelected,
+                          !sourcesSelected &&
+                          !memorySelected &&
+                          !agentSelected,
                       onTap: () => onTapItem(i),
                     );
                   },
@@ -534,6 +562,20 @@ class _Sidebar extends StatelessWidget {
                       selected: favoritesSelected,
                       tooltip: '收藏',
                       onTap: onTapFavorites,
+                    ),
+                    _SidebarIconButton(
+                      key: const Key('sidebar_/memory'),
+                      icon: Icons.auto_awesome_rounded,
+                      selected: memorySelected,
+                      tooltip: '观看记忆',
+                      onTap: onTapMemory,
+                    ),
+                    _SidebarIconButton(
+                      key: const Key('sidebar_/agent'),
+                      icon: Icons.smart_toy_outlined,
+                      selected: agentSelected,
+                      tooltip: 'Media Agent',
+                      onTap: onTapAgent,
                     ),
                     _SidebarIconButton(
                       key: const Key('sidebar_/sources'),
@@ -682,6 +724,10 @@ class _NavItem {
 
 class _OpenSearchIntent extends Intent {
   const _OpenSearchIntent();
+}
+
+class _OpenAskFilmlyIntent extends Intent {
+  const _OpenAskFilmlyIntent();
 }
 
 class _OpenSettingsIntent extends Intent {
