@@ -40,7 +40,7 @@ void main() {
       await client.tap(key: 'agent_confirm_plan_button');
       await _waitFor(client, 'agent_execute_plan_button');
       await client.tap(key: 'agent_execute_plan_button');
-      await _waitForStatus(client, '已完成');
+      await _waitForStatus(client, 'Completed');
       await _saveScreenshot(client, '03-agent-complete');
     },
     timeout: const Timeout(Duration(seconds: 90)),

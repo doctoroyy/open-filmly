@@ -130,6 +130,7 @@ class MediaAgentPlan {
 class MediaAgentRun {
   const MediaAgentRun({
     required this.id,
+    this.conversationId,
     required this.operation,
     required this.status,
     required this.plan,
@@ -141,6 +142,7 @@ class MediaAgentRun {
   });
 
   final String id;
+  final String? conversationId;
   final MediaAgentOperation operation;
   final MediaAgentRunStatus status;
   final MediaAgentPlan plan;
@@ -194,4 +196,87 @@ class MediaAgentChatMessage {
   final String content;
   final MediaAgentPlan? plan;
   final DateTime timestamp;
+}
+
+/// A durable local conversation. Conversations are intentionally stored in the
+/// intelligence database so they can be removed independently of the core
+/// media library and playback data.
+class AgentConversation {
+  const AgentConversation({
+    required this.id,
+    required this.title,
+    required this.preview,
+    this.pinnedAt,
+    this.archivedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String title;
+  final String preview;
+  final DateTime? pinnedAt;
+  final DateTime? archivedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get isPinned => pinnedAt != null;
+  bool get isArchived => archivedAt != null;
+}
+
+enum AgentConversationRole {
+  user,
+  model,
+  system;
+
+  static AgentConversationRole fromName(String value) => values.firstWhere(
+    (item) => item.name == value,
+    orElse: () => AgentConversationRole.system,
+  );
+}
+
+enum AgentConversationMessageStatus {
+  complete,
+  failed,
+  cancelled;
+
+  static AgentConversationMessageStatus fromName(String value) =>
+      values.firstWhere(
+        (item) => item.name == value,
+        orElse: () => AgentConversationMessageStatus.complete,
+      );
+}
+
+class AgentConversationMessage {
+  const AgentConversationMessage({
+    required this.id,
+    required this.conversationId,
+    required this.sequence,
+    required this.role,
+    required this.content,
+    this.toolsUsed = const [],
+    this.planId,
+    required this.status,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String conversationId;
+  final int sequence;
+  final AgentConversationRole role;
+  final String content;
+  final List<String> toolsUsed;
+  final String? planId;
+  final AgentConversationMessageStatus status;
+  final DateTime createdAt;
+}
+
+/// The only persisted information sent back to a provider for a prior turn.
+/// Tool payloads and internal provider messages deliberately do not become
+/// part of this model context.
+class AgentModelContextMessage {
+  const AgentModelContextMessage({required this.role, required this.content});
+
+  final AgentConversationRole role;
+  final String content;
 }

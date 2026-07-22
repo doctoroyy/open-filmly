@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../data/intelligence/agent_run_repository.dart';
+import '../data/intelligence/agent_conversation_repository.dart';
 import '../data/intelligence/ai_job_repository.dart';
 import '../data/intelligence/intelligence_asset_repository.dart';
 import '../data/intelligence/intelligence_database.dart';
@@ -17,6 +18,7 @@ import '../services/intelligence/media_context_service.dart';
 import '../services/intelligence/media_agent_service.dart';
 import '../services/intelligence/agent_planner.dart';
 import '../services/intelligence/conversational_agent_engine.dart';
+import '../services/intelligence/agent_conversation_service.dart';
 import '../services/intelligence/ai_job_service.dart';
 import '../services/intelligence/ai_provider.dart';
 import '../services/intelligence/ai_worker_client.dart';
@@ -81,6 +83,12 @@ final watchEventRepositoryProvider = Provider<WatchEventRepository>(
 final agentRunRepositoryProvider = Provider<AgentRunRepository>(
   (ref) => AgentRunRepository(ref.watch(intelligenceDatabaseProvider)),
 );
+
+final agentConversationRepositoryProvider =
+    Provider<AgentConversationRepository>(
+      (ref) =>
+          AgentConversationRepository(ref.watch(intelligenceDatabaseProvider)),
+    );
 
 final smartCollectionRepositoryProvider = Provider<SmartCollectionRepository>(
   (ref) => SmartCollectionRepository(ref.watch(intelligenceDatabaseProvider)),
@@ -172,14 +180,33 @@ final mediaAgentServiceProvider = FutureProvider<MediaAgentService>((
   return service;
 });
 
-final conversationalAgentEngineProvider = FutureProvider<ConversationalAgentEngine?>((ref) async {
-  final config = await ref.watch(configProvider.future);
-  if (config.geminiApiKey.trim().isEmpty) return null;
-  final service = await ref.watch(mediaAgentServiceProvider.future);
-  return ConversationalAgentEngine(
-    apiKey: config.geminiApiKey,
-    mediaRepository: ref.watch(mediaRepositoryProvider),
-    progressRepository: ref.watch(playbackProgressRepositoryProvider),
-    agentService: service,
+final conversationalAgentEngineProvider =
+    FutureProvider<ConversationalAgentEngine?>((ref) async {
+      final config = await ref.watch(configProvider.future);
+      if (config.geminiApiKey.trim().isEmpty) return null;
+      final service = await ref.watch(mediaAgentServiceProvider.future);
+      return ConversationalAgentEngine(
+        apiKey: config.geminiApiKey,
+        mediaRepository: ref.watch(mediaRepositoryProvider),
+        progressRepository: ref.watch(playbackProgressRepositoryProvider),
+        agentService: service,
+      );
+    });
+
+/// Conversation persistence can be used without an AI key. The configured
+/// provider is only resolved when a person actually sends a turn.
+final agentConversationServiceProvider = Provider<AgentConversationService>((
+  ref,
+) {
+  return AgentConversationService(
+    conversations: ref.watch(agentConversationRepositoryProvider),
+    runs: ref.watch(agentRunRepositoryProvider),
+    responder: ({required userPrompt, required context}) async {
+      final engine = await ref.read(conversationalAgentEngineProvider.future);
+      if (engine == null) {
+        throw const AgentPlannerException('Gemini API Key 尚未配置');
+      }
+      return engine.sendUserMessage(userPrompt: userPrompt, context: context);
+    },
   );
 });

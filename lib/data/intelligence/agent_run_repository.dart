@@ -66,6 +66,17 @@ class AgentRunRepository {
     );
   }
 
+  Future<void> assignConversation(String id, String conversationId) {
+    return (_database.update(
+      _database.agentRuns,
+    )..where((item) => item.id.equals(id))).write(
+      AgentRunsCompanion(
+        conversationId: Value(conversationId),
+        updatedAt: Value(DateTime.now().toIso8601String()),
+      ),
+    );
+  }
+
   Future<void> recoverInterrupted() async {
     await (_database.update(_database.agentRuns)..where(
           (item) => item.status.equals(MediaAgentRunStatus.running.name),
@@ -88,6 +99,7 @@ class AgentRunRepository {
         : jsonDecode(row.resultJson!);
     return MediaAgentRun(
       id: row.id,
+      conversationId: row.conversationId,
       operation: MediaAgentOperation.fromName(row.operation),
       status: MediaAgentRunStatus.fromName(row.status),
       plan: plan,

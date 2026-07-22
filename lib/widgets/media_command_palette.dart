@@ -189,6 +189,10 @@ class _MediaCommandPaletteSheetState
     }
     if (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        _openAgent();
+        return KeyEventResult.handled;
+      }
       _activateSelectedResult();
       return KeyEventResult.handled;
     }
@@ -257,13 +261,13 @@ class _MediaCommandPaletteSheetState
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: FilmlyPalette.primary,
+              color: const Color(0xFFEAF1FF),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
-              Icons.auto_awesome_rounded,
+              Icons.search_rounded,
               size: 18,
-              color: Colors.white,
+              color: FilmlyPalette.accent,
             ),
           ),
           const SizedBox(width: 12),
@@ -284,7 +288,7 @@ class _MediaCommandPaletteSheetState
               decoration: const InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
-                hintText: 'Search scenes, dialogue, people, or a feeling…',
+                hintText: 'Search a title, scene, person, or line…',
                 hintStyle: TextStyle(
                   color: FilmlyPalette.textMuted,
                   fontSize: 17,
@@ -342,26 +346,24 @@ class _MediaCommandPaletteSheetState
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionLabel('START HERE'),
-          const SizedBox(height: 8),
-          _commandRow(
-            icon: Icons.manage_search_rounded,
-            title: 'Search your library',
-            subtitle: 'Find films, dialogue, scenes, and themes',
-            onTap: () => _focusNode.requestFocus(),
+          const _SectionLabel('SEARCH YOUR LIBRARY'),
+          const SizedBox(height: 9),
+          const Text(
+            'Type a title, a person, a line, or the moment you remember.',
+            style: TextStyle(
+              color: FilmlyPalette.textSecondary,
+              fontSize: 13,
+              height: 1.45,
+            ),
           ),
+          const SizedBox(height: 15),
           _commandRow(
-            key: const Key('media_command_palette_open_agent'),
-            icon: Icons.forum_outlined,
-            title: 'Open Media Agent',
-            subtitle: 'Plan library work and carry on a conversation',
+            key: const Key('media_command_palette_continue_conversation'),
+            icon: Icons.arrow_outward_rounded,
+            title: 'Continue in Filmly',
+            subtitle:
+                'Use a durable conversation for a question or a safe plan',
             onTap: _openAgent,
-          ),
-          _commandRow(
-            icon: Icons.travel_explore_rounded,
-            title: 'Browse Ask Filmly',
-            subtitle: 'Use the full search workspace',
-            onTap: _openAskFilmly,
           ),
         ],
       ),
@@ -394,8 +396,8 @@ class _MediaCommandPaletteSheetState
             padding: const EdgeInsets.only(top: 8),
             child: _commandRow(
               icon: Icons.forum_outlined,
-              title: 'Continue in Media Agent',
-              subtitle: 'Ask a follow-up or prepare a safe action plan',
+              title: 'Continue in Filmly',
+              subtitle: 'Ask a follow-up or prepare a safe plan',
               onTap: _openAgent,
             ),
           );
@@ -638,7 +640,7 @@ class _MediaCommandPaletteSheetState
       child: Row(
         children: [
           Text(
-            'ASK FILMLY',
+            'FILMLY COMMAND',
             style: TextStyle(
               color: FilmlyPalette.textMuted,
               fontSize: 10,
@@ -649,7 +651,7 @@ class _MediaCommandPaletteSheetState
           Spacer(),
           _KeyHint(label: '↵  Open'),
           SizedBox(width: 8),
-          _KeyHint(label: '⌘K  Toggle'),
+          _KeyHint(label: '⇧↵  Continue'),
         ],
       ),
     );

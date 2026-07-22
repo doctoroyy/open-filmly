@@ -238,6 +238,15 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
             MediaAgentPage(initialPrompt: state.uri.queryParameters['prompt']),
           ),
         ),
+        GoRoute(
+          path: '/agent/:conversationId',
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            MediaAgentPage(
+              conversationId: state.pathParameters['conversationId'],
+            ),
+          ),
+        ),
       ],
     ),
   ],

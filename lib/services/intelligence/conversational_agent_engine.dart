@@ -37,13 +37,13 @@ class ConversationalAgentEngine {
   final String model;
   final http.Client? client;
 
-  final List<Map<String, dynamic>> _history = [];
-
-  List<Map<String, dynamic>> get history => List.unmodifiable(_history);
-
-  void clearHistory() => _history.clear();
-
-  Future<ConversationalTurnResult> sendUserMessage(String userPrompt) async {
+  /// Executes exactly one turn for a caller-provided conversation. Keeping
+  /// context outside the engine prevents one open workspace from inheriting
+  /// messages from another after navigation or app restart.
+  Future<ConversationalTurnResult> sendUserMessage({
+    required String userPrompt,
+    List<AgentModelContextMessage> context = const [],
+  }) async {
     if (apiKey.trim().isEmpty) {
       throw const AgentPlannerException('尚未配置 Gemini API Key');
     }
@@ -52,7 +52,20 @@ class ConversationalAgentEngine {
       throw const AgentPlannerException('请输入有效的对话内容');
     }
 
-    _history.add({
+    final history = context
+        .where((message) => message.content.trim().isNotEmpty)
+        .map(
+          (message) => <String, dynamic>{
+            'role': message.role == AgentConversationRole.model
+                ? 'model'
+                : 'user',
+            'parts': [
+              {'text': message.content.trim()},
+            ],
+          },
+        )
+        .toList(growable: true);
+    history.add({
       'role': 'user',
       'parts': [
         {'text': input},
@@ -88,16 +101,11 @@ class ConversationalAgentEngine {
               },
             ],
           },
-          'contents': _history,
+          'contents': history,
           'tools': [
-            {
-              'functionDeclarations': AgentTools.declarations,
-            },
+            {'functionDeclarations': AgentTools.declarations},
           ],
-          'generationConfig': {
-            'temperature': 0.2,
-            'maxOutputTokens': 1024,
-          },
+          'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 1024},
         });
 
         final response = await requestClient
@@ -143,14 +151,11 @@ class ConversationalAgentEngine {
           );
           toolsUsed.add(toolName);
 
-          _history.add({
+          history.add({
             'role': 'model',
             'parts': [
               {
-                'functionCall': {
-                  'name': toolName,
-                  'args': toolArgs,
-                },
+                'functionCall': {'name': toolName, 'args': toolArgs},
               },
             ],
           });
@@ -175,14 +180,11 @@ class ConversationalAgentEngine {
             );
           }
 
-          _history.add({
+          history.add({
             'role': 'user',
             'parts': [
               {
-                'functionResponse': {
-                  'name': toolName,
-                  'response': toolResult,
-                },
+                'functionResponse': {'name': toolName, 'response': toolResult},
               },
             ],
           });
@@ -190,7 +192,7 @@ class ConversationalAgentEngine {
         }
 
         finalReply = textPart.trim();
-        _history.add({
+        history.add({
           'role': 'model',
           'parts': [
             {'text': finalReply},

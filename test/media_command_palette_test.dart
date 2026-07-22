@@ -60,8 +60,12 @@ void main() {
       find.byKey(const Key('media_command_palette_field')),
       findsOneWidget,
     );
-    expect(find.text('Search your library'), findsOneWidget);
-    expect(find.text('Open Media Agent'), findsOneWidget);
+    expect(find.text('SEARCH YOUR LIBRARY'), findsOneWidget);
+    expect(find.text('Continue in Filmly'), findsOneWidget);
+    expect(
+      find.byKey(const Key('media_command_palette_continue_conversation')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('shows semantic matches in a directly actionable result list', (

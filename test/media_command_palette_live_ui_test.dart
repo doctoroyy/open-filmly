@@ -49,7 +49,7 @@ void main() {
       // Leave the debug app on the workbench so a clean desktop capture can
       // inspect the final UI without FlutterSkill's interaction indicator.
       await client.tap(key: 'sidebar_/agent');
-      await _waitFor(client, 'agent_workbench_welcome');
+      await _waitFor(client, 'agent_request_input');
     },
     timeout: const Timeout(Duration(seconds: 45)),
     skip: enabled

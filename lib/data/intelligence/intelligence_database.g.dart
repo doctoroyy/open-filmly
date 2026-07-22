@@ -3751,6 +3751,17 @@ class $AgentRunsTable extends AgentRuns
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<String> conversationId = GeneratedColumn<String>(
+    'conversation_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _operationMeta = const VerificationMeta(
     'operation',
   );
@@ -3839,6 +3850,7 @@ class $AgentRunsTable extends AgentRuns
   @override
   List<GeneratedColumn> get $columns => [
     id,
+    conversationId,
     operation,
     status,
     planJson,
@@ -3864,6 +3876,15 @@ class $AgentRunsTable extends AgentRuns
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     } else if (isInserting) {
       context.missing(_idMeta);
+    }
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
     }
     if (data.containsKey('operation')) {
       context.handle(
@@ -3939,6 +3960,10 @@ class $AgentRunsTable extends AgentRuns
         DriftSqlType.string,
         data['${effectivePrefix}id'],
       )!,
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conversation_id'],
+      ),
       operation: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}operation'],
@@ -3982,6 +4007,7 @@ class $AgentRunsTable extends AgentRuns
 
 class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   final String id;
+  final String? conversationId;
   final String operation;
   final String status;
   final String planJson;
@@ -3992,6 +4018,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   final String updatedAt;
   const AgentRunRow({
     required this.id,
+    this.conversationId,
     required this.operation,
     required this.status,
     required this.planJson,
@@ -4005,6 +4032,9 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
+    if (!nullToAbsent || conversationId != null) {
+      map['conversation_id'] = Variable<String>(conversationId);
+    }
     map['operation'] = Variable<String>(operation);
     map['status'] = Variable<String>(status);
     map['plan_json'] = Variable<String>(planJson);
@@ -4023,6 +4053,9 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   AgentRunsCompanion toCompanion(bool nullToAbsent) {
     return AgentRunsCompanion(
       id: Value(id),
+      conversationId: conversationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(conversationId),
       operation: Value(operation),
       status: Value(status),
       planJson: Value(planJson),
@@ -4045,6 +4078,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return AgentRunRow(
       id: serializer.fromJson<String>(json['id']),
+      conversationId: serializer.fromJson<String?>(json['conversationId']),
       operation: serializer.fromJson<String>(json['operation']),
       status: serializer.fromJson<String>(json['status']),
       planJson: serializer.fromJson<String>(json['planJson']),
@@ -4060,6 +4094,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
+      'conversationId': serializer.toJson<String?>(conversationId),
       'operation': serializer.toJson<String>(operation),
       'status': serializer.toJson<String>(status),
       'planJson': serializer.toJson<String>(planJson),
@@ -4073,6 +4108,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
 
   AgentRunRow copyWith({
     String? id,
+    Value<String?> conversationId = const Value.absent(),
     String? operation,
     String? status,
     String? planJson,
@@ -4083,6 +4119,9 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
     String? updatedAt,
   }) => AgentRunRow(
     id: id ?? this.id,
+    conversationId: conversationId.present
+        ? conversationId.value
+        : this.conversationId,
     operation: operation ?? this.operation,
     status: status ?? this.status,
     planJson: planJson ?? this.planJson,
@@ -4095,6 +4134,9 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   AgentRunRow copyWithCompanion(AgentRunsCompanion data) {
     return AgentRunRow(
       id: data.id.present ? data.id.value : this.id,
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
       operation: data.operation.present ? data.operation.value : this.operation,
       status: data.status.present ? data.status.value : this.status,
       planJson: data.planJson.present ? data.planJson.value : this.planJson,
@@ -4114,6 +4156,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   String toString() {
     return (StringBuffer('AgentRunRow(')
           ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
           ..write('operation: $operation, ')
           ..write('status: $status, ')
           ..write('planJson: $planJson, ')
@@ -4129,6 +4172,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
   @override
   int get hashCode => Object.hash(
     id,
+    conversationId,
     operation,
     status,
     planJson,
@@ -4143,6 +4187,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
       identical(this, other) ||
       (other is AgentRunRow &&
           other.id == this.id &&
+          other.conversationId == this.conversationId &&
           other.operation == this.operation &&
           other.status == this.status &&
           other.planJson == this.planJson &&
@@ -4155,6 +4200,7 @@ class AgentRunRow extends DataClass implements Insertable<AgentRunRow> {
 
 class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   final Value<String> id;
+  final Value<String?> conversationId;
   final Value<String> operation;
   final Value<String> status;
   final Value<String> planJson;
@@ -4166,6 +4212,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   final Value<int> rowid;
   const AgentRunsCompanion({
     this.id = const Value.absent(),
+    this.conversationId = const Value.absent(),
     this.operation = const Value.absent(),
     this.status = const Value.absent(),
     this.planJson = const Value.absent(),
@@ -4178,6 +4225,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   });
   AgentRunsCompanion.insert({
     required String id,
+    this.conversationId = const Value.absent(),
     required String operation,
     this.status = const Value.absent(),
     required String planJson,
@@ -4195,6 +4243,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
        updatedAt = Value(updatedAt);
   static Insertable<AgentRunRow> custom({
     Expression<String>? id,
+    Expression<String>? conversationId,
     Expression<String>? operation,
     Expression<String>? status,
     Expression<String>? planJson,
@@ -4207,6 +4256,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (conversationId != null) 'conversation_id': conversationId,
       if (operation != null) 'operation': operation,
       if (status != null) 'status': status,
       if (planJson != null) 'plan_json': planJson,
@@ -4221,6 +4271,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
 
   AgentRunsCompanion copyWith({
     Value<String>? id,
+    Value<String?>? conversationId,
     Value<String>? operation,
     Value<String>? status,
     Value<String>? planJson,
@@ -4233,6 +4284,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   }) {
     return AgentRunsCompanion(
       id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
       operation: operation ?? this.operation,
       status: status ?? this.status,
       planJson: planJson ?? this.planJson,
@@ -4250,6 +4302,9 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
     final map = <String, Expression>{};
     if (id.present) {
       map['id'] = Variable<String>(id.value);
+    }
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<String>(conversationId.value);
     }
     if (operation.present) {
       map['operation'] = Variable<String>(operation.value);
@@ -4285,6 +4340,7 @@ class AgentRunsCompanion extends UpdateCompanion<AgentRunRow> {
   String toString() {
     return (StringBuffer('AgentRunsCompanion(')
           ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
           ..write('operation: $operation, ')
           ..write('status: $status, ')
           ..write('planJson: $planJson, ')
@@ -4711,6 +4767,1042 @@ class SmartCollectionsCompanion extends UpdateCompanion<SmartCollectionRow> {
   }
 }
 
+class $AgentConversationsTable extends AgentConversations
+    with TableInfo<$AgentConversationsTable, AgentConversationRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AgentConversationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _previewMeta = const VerificationMeta(
+    'preview',
+  );
+  @override
+  late final GeneratedColumn<String> preview = GeneratedColumn<String>(
+    'preview',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _pinnedAtMeta = const VerificationMeta(
+    'pinnedAt',
+  );
+  @override
+  late final GeneratedColumn<String> pinnedAt = GeneratedColumn<String>(
+    'pinned_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _archivedAtMeta = const VerificationMeta(
+    'archivedAt',
+  );
+  @override
+  late final GeneratedColumn<String> archivedAt = GeneratedColumn<String>(
+    'archived_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    title,
+    preview,
+    pinnedAt,
+    archivedAt,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'agent_conversations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AgentConversationRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('preview')) {
+      context.handle(
+        _previewMeta,
+        preview.isAcceptableOrUnknown(data['preview']!, _previewMeta),
+      );
+    }
+    if (data.containsKey('pinned_at')) {
+      context.handle(
+        _pinnedAtMeta,
+        pinnedAt.isAcceptableOrUnknown(data['pinned_at']!, _pinnedAtMeta),
+      );
+    }
+    if (data.containsKey('archived_at')) {
+      context.handle(
+        _archivedAtMeta,
+        archivedAt.isAcceptableOrUnknown(data['archived_at']!, _archivedAtMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AgentConversationRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AgentConversationRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      preview: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}preview'],
+      )!,
+      pinnedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pinned_at'],
+      ),
+      archivedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}archived_at'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $AgentConversationsTable createAlias(String alias) {
+    return $AgentConversationsTable(attachedDatabase, alias);
+  }
+}
+
+class AgentConversationRow extends DataClass
+    implements Insertable<AgentConversationRow> {
+  final String id;
+  final String title;
+  final String preview;
+  final String? pinnedAt;
+  final String? archivedAt;
+  final String createdAt;
+  final String updatedAt;
+  const AgentConversationRow({
+    required this.id,
+    required this.title,
+    required this.preview,
+    this.pinnedAt,
+    this.archivedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['title'] = Variable<String>(title);
+    map['preview'] = Variable<String>(preview);
+    if (!nullToAbsent || pinnedAt != null) {
+      map['pinned_at'] = Variable<String>(pinnedAt);
+    }
+    if (!nullToAbsent || archivedAt != null) {
+      map['archived_at'] = Variable<String>(archivedAt);
+    }
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  AgentConversationsCompanion toCompanion(bool nullToAbsent) {
+    return AgentConversationsCompanion(
+      id: Value(id),
+      title: Value(title),
+      preview: Value(preview),
+      pinnedAt: pinnedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pinnedAt),
+      archivedAt: archivedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(archivedAt),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory AgentConversationRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AgentConversationRow(
+      id: serializer.fromJson<String>(json['id']),
+      title: serializer.fromJson<String>(json['title']),
+      preview: serializer.fromJson<String>(json['preview']),
+      pinnedAt: serializer.fromJson<String?>(json['pinnedAt']),
+      archivedAt: serializer.fromJson<String?>(json['archivedAt']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'title': serializer.toJson<String>(title),
+      'preview': serializer.toJson<String>(preview),
+      'pinnedAt': serializer.toJson<String?>(pinnedAt),
+      'archivedAt': serializer.toJson<String?>(archivedAt),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  AgentConversationRow copyWith({
+    String? id,
+    String? title,
+    String? preview,
+    Value<String?> pinnedAt = const Value.absent(),
+    Value<String?> archivedAt = const Value.absent(),
+    String? createdAt,
+    String? updatedAt,
+  }) => AgentConversationRow(
+    id: id ?? this.id,
+    title: title ?? this.title,
+    preview: preview ?? this.preview,
+    pinnedAt: pinnedAt.present ? pinnedAt.value : this.pinnedAt,
+    archivedAt: archivedAt.present ? archivedAt.value : this.archivedAt,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  AgentConversationRow copyWithCompanion(AgentConversationsCompanion data) {
+    return AgentConversationRow(
+      id: data.id.present ? data.id.value : this.id,
+      title: data.title.present ? data.title.value : this.title,
+      preview: data.preview.present ? data.preview.value : this.preview,
+      pinnedAt: data.pinnedAt.present ? data.pinnedAt.value : this.pinnedAt,
+      archivedAt: data.archivedAt.present
+          ? data.archivedAt.value
+          : this.archivedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentConversationRow(')
+          ..write('id: $id, ')
+          ..write('title: $title, ')
+          ..write('preview: $preview, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('archivedAt: $archivedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    title,
+    preview,
+    pinnedAt,
+    archivedAt,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AgentConversationRow &&
+          other.id == this.id &&
+          other.title == this.title &&
+          other.preview == this.preview &&
+          other.pinnedAt == this.pinnedAt &&
+          other.archivedAt == this.archivedAt &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class AgentConversationsCompanion
+    extends UpdateCompanion<AgentConversationRow> {
+  final Value<String> id;
+  final Value<String> title;
+  final Value<String> preview;
+  final Value<String?> pinnedAt;
+  final Value<String?> archivedAt;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const AgentConversationsCompanion({
+    this.id = const Value.absent(),
+    this.title = const Value.absent(),
+    this.preview = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.archivedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AgentConversationsCompanion.insert({
+    required String id,
+    required String title,
+    this.preview = const Value.absent(),
+    this.pinnedAt = const Value.absent(),
+    this.archivedAt = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       title = Value(title),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<AgentConversationRow> custom({
+    Expression<String>? id,
+    Expression<String>? title,
+    Expression<String>? preview,
+    Expression<String>? pinnedAt,
+    Expression<String>? archivedAt,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (title != null) 'title': title,
+      if (preview != null) 'preview': preview,
+      if (pinnedAt != null) 'pinned_at': pinnedAt,
+      if (archivedAt != null) 'archived_at': archivedAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AgentConversationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? title,
+    Value<String>? preview,
+    Value<String?>? pinnedAt,
+    Value<String?>? archivedAt,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return AgentConversationsCompanion(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      preview: preview ?? this.preview,
+      pinnedAt: pinnedAt ?? this.pinnedAt,
+      archivedAt: archivedAt ?? this.archivedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (preview.present) {
+      map['preview'] = Variable<String>(preview.value);
+    }
+    if (pinnedAt.present) {
+      map['pinned_at'] = Variable<String>(pinnedAt.value);
+    }
+    if (archivedAt.present) {
+      map['archived_at'] = Variable<String>(archivedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentConversationsCompanion(')
+          ..write('id: $id, ')
+          ..write('title: $title, ')
+          ..write('preview: $preview, ')
+          ..write('pinnedAt: $pinnedAt, ')
+          ..write('archivedAt: $archivedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $AgentConversationMessagesTable extends AgentConversationMessages
+    with
+        TableInfo<
+          $AgentConversationMessagesTable,
+          AgentConversationMessageRow
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AgentConversationMessagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _conversationIdMeta = const VerificationMeta(
+    'conversationId',
+  );
+  @override
+  late final GeneratedColumn<String> conversationId = GeneratedColumn<String>(
+    'conversation_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sequenceMeta = const VerificationMeta(
+    'sequence',
+  );
+  @override
+  late final GeneratedColumn<int> sequence = GeneratedColumn<int>(
+    'sequence',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _roleMeta = const VerificationMeta('role');
+  @override
+  late final GeneratedColumn<String> role = GeneratedColumn<String>(
+    'role',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _contentMeta = const VerificationMeta(
+    'content',
+  );
+  @override
+  late final GeneratedColumn<String> content = GeneratedColumn<String>(
+    'content',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _toolsJsonMeta = const VerificationMeta(
+    'toolsJson',
+  );
+  @override
+  late final GeneratedColumn<String> toolsJson = GeneratedColumn<String>(
+    'tools_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _planIdMeta = const VerificationMeta('planId');
+  @override
+  late final GeneratedColumn<String> planId = GeneratedColumn<String>(
+    'plan_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('complete'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    conversationId,
+    sequence,
+    role,
+    content,
+    toolsJson,
+    planId,
+    status,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'agent_conversation_messages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AgentConversationMessageRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('conversation_id')) {
+      context.handle(
+        _conversationIdMeta,
+        conversationId.isAcceptableOrUnknown(
+          data['conversation_id']!,
+          _conversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_conversationIdMeta);
+    }
+    if (data.containsKey('sequence')) {
+      context.handle(
+        _sequenceMeta,
+        sequence.isAcceptableOrUnknown(data['sequence']!, _sequenceMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sequenceMeta);
+    }
+    if (data.containsKey('role')) {
+      context.handle(
+        _roleMeta,
+        role.isAcceptableOrUnknown(data['role']!, _roleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_roleMeta);
+    }
+    if (data.containsKey('content')) {
+      context.handle(
+        _contentMeta,
+        content.isAcceptableOrUnknown(data['content']!, _contentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_contentMeta);
+    }
+    if (data.containsKey('tools_json')) {
+      context.handle(
+        _toolsJsonMeta,
+        toolsJson.isAcceptableOrUnknown(data['tools_json']!, _toolsJsonMeta),
+      );
+    }
+    if (data.containsKey('plan_id')) {
+      context.handle(
+        _planIdMeta,
+        planId.isAcceptableOrUnknown(data['plan_id']!, _planIdMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AgentConversationMessageRow map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AgentConversationMessageRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      conversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}conversation_id'],
+      )!,
+      sequence: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sequence'],
+      )!,
+      role: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}role'],
+      )!,
+      content: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content'],
+      )!,
+      toolsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tools_json'],
+      ),
+      planId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_id'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $AgentConversationMessagesTable createAlias(String alias) {
+    return $AgentConversationMessagesTable(attachedDatabase, alias);
+  }
+}
+
+class AgentConversationMessageRow extends DataClass
+    implements Insertable<AgentConversationMessageRow> {
+  final String id;
+  final String conversationId;
+  final int sequence;
+  final String role;
+  final String content;
+  final String? toolsJson;
+  final String? planId;
+  final String status;
+  final String createdAt;
+  const AgentConversationMessageRow({
+    required this.id,
+    required this.conversationId,
+    required this.sequence,
+    required this.role,
+    required this.content,
+    this.toolsJson,
+    this.planId,
+    required this.status,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['conversation_id'] = Variable<String>(conversationId);
+    map['sequence'] = Variable<int>(sequence);
+    map['role'] = Variable<String>(role);
+    map['content'] = Variable<String>(content);
+    if (!nullToAbsent || toolsJson != null) {
+      map['tools_json'] = Variable<String>(toolsJson);
+    }
+    if (!nullToAbsent || planId != null) {
+      map['plan_id'] = Variable<String>(planId);
+    }
+    map['status'] = Variable<String>(status);
+    map['created_at'] = Variable<String>(createdAt);
+    return map;
+  }
+
+  AgentConversationMessagesCompanion toCompanion(bool nullToAbsent) {
+    return AgentConversationMessagesCompanion(
+      id: Value(id),
+      conversationId: Value(conversationId),
+      sequence: Value(sequence),
+      role: Value(role),
+      content: Value(content),
+      toolsJson: toolsJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(toolsJson),
+      planId: planId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(planId),
+      status: Value(status),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory AgentConversationMessageRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AgentConversationMessageRow(
+      id: serializer.fromJson<String>(json['id']),
+      conversationId: serializer.fromJson<String>(json['conversationId']),
+      sequence: serializer.fromJson<int>(json['sequence']),
+      role: serializer.fromJson<String>(json['role']),
+      content: serializer.fromJson<String>(json['content']),
+      toolsJson: serializer.fromJson<String?>(json['toolsJson']),
+      planId: serializer.fromJson<String?>(json['planId']),
+      status: serializer.fromJson<String>(json['status']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'conversationId': serializer.toJson<String>(conversationId),
+      'sequence': serializer.toJson<int>(sequence),
+      'role': serializer.toJson<String>(role),
+      'content': serializer.toJson<String>(content),
+      'toolsJson': serializer.toJson<String?>(toolsJson),
+      'planId': serializer.toJson<String?>(planId),
+      'status': serializer.toJson<String>(status),
+      'createdAt': serializer.toJson<String>(createdAt),
+    };
+  }
+
+  AgentConversationMessageRow copyWith({
+    String? id,
+    String? conversationId,
+    int? sequence,
+    String? role,
+    String? content,
+    Value<String?> toolsJson = const Value.absent(),
+    Value<String?> planId = const Value.absent(),
+    String? status,
+    String? createdAt,
+  }) => AgentConversationMessageRow(
+    id: id ?? this.id,
+    conversationId: conversationId ?? this.conversationId,
+    sequence: sequence ?? this.sequence,
+    role: role ?? this.role,
+    content: content ?? this.content,
+    toolsJson: toolsJson.present ? toolsJson.value : this.toolsJson,
+    planId: planId.present ? planId.value : this.planId,
+    status: status ?? this.status,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  AgentConversationMessageRow copyWithCompanion(
+    AgentConversationMessagesCompanion data,
+  ) {
+    return AgentConversationMessageRow(
+      id: data.id.present ? data.id.value : this.id,
+      conversationId: data.conversationId.present
+          ? data.conversationId.value
+          : this.conversationId,
+      sequence: data.sequence.present ? data.sequence.value : this.sequence,
+      role: data.role.present ? data.role.value : this.role,
+      content: data.content.present ? data.content.value : this.content,
+      toolsJson: data.toolsJson.present ? data.toolsJson.value : this.toolsJson,
+      planId: data.planId.present ? data.planId.value : this.planId,
+      status: data.status.present ? data.status.value : this.status,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentConversationMessageRow(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('sequence: $sequence, ')
+          ..write('role: $role, ')
+          ..write('content: $content, ')
+          ..write('toolsJson: $toolsJson, ')
+          ..write('planId: $planId, ')
+          ..write('status: $status, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    conversationId,
+    sequence,
+    role,
+    content,
+    toolsJson,
+    planId,
+    status,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AgentConversationMessageRow &&
+          other.id == this.id &&
+          other.conversationId == this.conversationId &&
+          other.sequence == this.sequence &&
+          other.role == this.role &&
+          other.content == this.content &&
+          other.toolsJson == this.toolsJson &&
+          other.planId == this.planId &&
+          other.status == this.status &&
+          other.createdAt == this.createdAt);
+}
+
+class AgentConversationMessagesCompanion
+    extends UpdateCompanion<AgentConversationMessageRow> {
+  final Value<String> id;
+  final Value<String> conversationId;
+  final Value<int> sequence;
+  final Value<String> role;
+  final Value<String> content;
+  final Value<String?> toolsJson;
+  final Value<String?> planId;
+  final Value<String> status;
+  final Value<String> createdAt;
+  final Value<int> rowid;
+  const AgentConversationMessagesCompanion({
+    this.id = const Value.absent(),
+    this.conversationId = const Value.absent(),
+    this.sequence = const Value.absent(),
+    this.role = const Value.absent(),
+    this.content = const Value.absent(),
+    this.toolsJson = const Value.absent(),
+    this.planId = const Value.absent(),
+    this.status = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AgentConversationMessagesCompanion.insert({
+    required String id,
+    required String conversationId,
+    required int sequence,
+    required String role,
+    required String content,
+    this.toolsJson = const Value.absent(),
+    this.planId = const Value.absent(),
+    this.status = const Value.absent(),
+    required String createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       conversationId = Value(conversationId),
+       sequence = Value(sequence),
+       role = Value(role),
+       content = Value(content),
+       createdAt = Value(createdAt);
+  static Insertable<AgentConversationMessageRow> custom({
+    Expression<String>? id,
+    Expression<String>? conversationId,
+    Expression<int>? sequence,
+    Expression<String>? role,
+    Expression<String>? content,
+    Expression<String>? toolsJson,
+    Expression<String>? planId,
+    Expression<String>? status,
+    Expression<String>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (sequence != null) 'sequence': sequence,
+      if (role != null) 'role': role,
+      if (content != null) 'content': content,
+      if (toolsJson != null) 'tools_json': toolsJson,
+      if (planId != null) 'plan_id': planId,
+      if (status != null) 'status': status,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AgentConversationMessagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? conversationId,
+    Value<int>? sequence,
+    Value<String>? role,
+    Value<String>? content,
+    Value<String?>? toolsJson,
+    Value<String?>? planId,
+    Value<String>? status,
+    Value<String>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return AgentConversationMessagesCompanion(
+      id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
+      sequence: sequence ?? this.sequence,
+      role: role ?? this.role,
+      content: content ?? this.content,
+      toolsJson: toolsJson ?? this.toolsJson,
+      planId: planId ?? this.planId,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (conversationId.present) {
+      map['conversation_id'] = Variable<String>(conversationId.value);
+    }
+    if (sequence.present) {
+      map['sequence'] = Variable<int>(sequence.value);
+    }
+    if (role.present) {
+      map['role'] = Variable<String>(role.value);
+    }
+    if (content.present) {
+      map['content'] = Variable<String>(content.value);
+    }
+    if (toolsJson.present) {
+      map['tools_json'] = Variable<String>(toolsJson.value);
+    }
+    if (planId.present) {
+      map['plan_id'] = Variable<String>(planId.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentConversationMessagesCompanion(')
+          ..write('id: $id, ')
+          ..write('conversationId: $conversationId, ')
+          ..write('sequence: $sequence, ')
+          ..write('role: $role, ')
+          ..write('content: $content, ')
+          ..write('toolsJson: $toolsJson, ')
+          ..write('planId: $planId, ')
+          ..write('status: $status, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$IntelligenceDatabase extends GeneratedDatabase {
   _$IntelligenceDatabase(QueryExecutor e) : super(e);
   $IntelligenceDatabaseManager get managers =>
@@ -4729,6 +5821,10 @@ abstract class _$IntelligenceDatabase extends GeneratedDatabase {
   late final $SmartCollectionsTable smartCollections = $SmartCollectionsTable(
     this,
   );
+  late final $AgentConversationsTable agentConversations =
+      $AgentConversationsTable(this);
+  late final $AgentConversationMessagesTable agentConversationMessages =
+      $AgentConversationMessagesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4742,6 +5838,8 @@ abstract class _$IntelligenceDatabase extends GeneratedDatabase {
     watchEvents,
     agentRuns,
     smartCollections,
+    agentConversations,
+    agentConversationMessages,
   ];
 }
 
@@ -6627,6 +7725,7 @@ typedef $$WatchEventsTableProcessedTableManager =
 typedef $$AgentRunsTableCreateCompanionBuilder =
     AgentRunsCompanion Function({
       required String id,
+      Value<String?> conversationId,
       required String operation,
       Value<String> status,
       required String planJson,
@@ -6640,6 +7739,7 @@ typedef $$AgentRunsTableCreateCompanionBuilder =
 typedef $$AgentRunsTableUpdateCompanionBuilder =
     AgentRunsCompanion Function({
       Value<String> id,
+      Value<String?> conversationId,
       Value<String> operation,
       Value<String> status,
       Value<String> planJson,
@@ -6662,6 +7762,11 @@ class $$AgentRunsTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6720,6 +7825,11 @@ class $$AgentRunsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get operation => $composableBuilder(
     column: $table.operation,
     builder: (column) => ColumnOrderings(column),
@@ -6772,6 +7882,11 @@ class $$AgentRunsTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get operation =>
       $composableBuilder(column: $table.operation, builder: (column) => column);
@@ -6838,6 +7953,7 @@ class $$AgentRunsTableTableManager
           updateCompanionCallback:
               ({
                 Value<String> id = const Value.absent(),
+                Value<String?> conversationId = const Value.absent(),
                 Value<String> operation = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<String> planJson = const Value.absent(),
@@ -6849,6 +7965,7 @@ class $$AgentRunsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => AgentRunsCompanion(
                 id: id,
+                conversationId: conversationId,
                 operation: operation,
                 status: status,
                 planJson: planJson,
@@ -6862,6 +7979,7 @@ class $$AgentRunsTableTableManager
           createCompanionCallback:
               ({
                 required String id,
+                Value<String?> conversationId = const Value.absent(),
                 required String operation,
                 Value<String> status = const Value.absent(),
                 required String planJson,
@@ -6873,6 +7991,7 @@ class $$AgentRunsTableTableManager
                 Value<int> rowid = const Value.absent(),
               }) => AgentRunsCompanion.insert(
                 id: id,
+                conversationId: conversationId,
                 operation: operation,
                 status: status,
                 planJson: planJson,
@@ -7139,6 +8258,556 @@ typedef $$SmartCollectionsTableProcessedTableManager =
       SmartCollectionRow,
       PrefetchHooks Function()
     >;
+typedef $$AgentConversationsTableCreateCompanionBuilder =
+    AgentConversationsCompanion Function({
+      required String id,
+      required String title,
+      Value<String> preview,
+      Value<String?> pinnedAt,
+      Value<String?> archivedAt,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$AgentConversationsTableUpdateCompanionBuilder =
+    AgentConversationsCompanion Function({
+      Value<String> id,
+      Value<String> title,
+      Value<String> preview,
+      Value<String?> pinnedAt,
+      Value<String?> archivedAt,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$AgentConversationsTableFilterComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationsTable> {
+  $$AgentConversationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get preview => $composableBuilder(
+    column: $table.preview,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AgentConversationsTableOrderingComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationsTable> {
+  $$AgentConversationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get preview => $composableBuilder(
+    column: $table.preview,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pinnedAt => $composableBuilder(
+    column: $table.pinnedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AgentConversationsTableAnnotationComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationsTable> {
+  $$AgentConversationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get preview =>
+      $composableBuilder(column: $table.preview, builder: (column) => column);
+
+  GeneratedColumn<String> get pinnedAt =>
+      $composableBuilder(column: $table.pinnedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get archivedAt => $composableBuilder(
+    column: $table.archivedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$AgentConversationsTableTableManager
+    extends
+        RootTableManager<
+          _$IntelligenceDatabase,
+          $AgentConversationsTable,
+          AgentConversationRow,
+          $$AgentConversationsTableFilterComposer,
+          $$AgentConversationsTableOrderingComposer,
+          $$AgentConversationsTableAnnotationComposer,
+          $$AgentConversationsTableCreateCompanionBuilder,
+          $$AgentConversationsTableUpdateCompanionBuilder,
+          (
+            AgentConversationRow,
+            BaseReferences<
+              _$IntelligenceDatabase,
+              $AgentConversationsTable,
+              AgentConversationRow
+            >,
+          ),
+          AgentConversationRow,
+          PrefetchHooks Function()
+        > {
+  $$AgentConversationsTableTableManager(
+    _$IntelligenceDatabase db,
+    $AgentConversationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AgentConversationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AgentConversationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AgentConversationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> preview = const Value.absent(),
+                Value<String?> pinnedAt = const Value.absent(),
+                Value<String?> archivedAt = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AgentConversationsCompanion(
+                id: id,
+                title: title,
+                preview: preview,
+                pinnedAt: pinnedAt,
+                archivedAt: archivedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String title,
+                Value<String> preview = const Value.absent(),
+                Value<String?> pinnedAt = const Value.absent(),
+                Value<String?> archivedAt = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => AgentConversationsCompanion.insert(
+                id: id,
+                title: title,
+                preview: preview,
+                pinnedAt: pinnedAt,
+                archivedAt: archivedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AgentConversationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$IntelligenceDatabase,
+      $AgentConversationsTable,
+      AgentConversationRow,
+      $$AgentConversationsTableFilterComposer,
+      $$AgentConversationsTableOrderingComposer,
+      $$AgentConversationsTableAnnotationComposer,
+      $$AgentConversationsTableCreateCompanionBuilder,
+      $$AgentConversationsTableUpdateCompanionBuilder,
+      (
+        AgentConversationRow,
+        BaseReferences<
+          _$IntelligenceDatabase,
+          $AgentConversationsTable,
+          AgentConversationRow
+        >,
+      ),
+      AgentConversationRow,
+      PrefetchHooks Function()
+    >;
+typedef $$AgentConversationMessagesTableCreateCompanionBuilder =
+    AgentConversationMessagesCompanion Function({
+      required String id,
+      required String conversationId,
+      required int sequence,
+      required String role,
+      required String content,
+      Value<String?> toolsJson,
+      Value<String?> planId,
+      Value<String> status,
+      required String createdAt,
+      Value<int> rowid,
+    });
+typedef $$AgentConversationMessagesTableUpdateCompanionBuilder =
+    AgentConversationMessagesCompanion Function({
+      Value<String> id,
+      Value<String> conversationId,
+      Value<int> sequence,
+      Value<String> role,
+      Value<String> content,
+      Value<String?> toolsJson,
+      Value<String?> planId,
+      Value<String> status,
+      Value<String> createdAt,
+      Value<int> rowid,
+    });
+
+class $$AgentConversationMessagesTableFilterComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationMessagesTable> {
+  $$AgentConversationMessagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sequence => $composableBuilder(
+    column: $table.sequence,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get toolsJson => $composableBuilder(
+    column: $table.toolsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get planId => $composableBuilder(
+    column: $table.planId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AgentConversationMessagesTableOrderingComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationMessagesTable> {
+  $$AgentConversationMessagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sequence => $composableBuilder(
+    column: $table.sequence,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get role => $composableBuilder(
+    column: $table.role,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get toolsJson => $composableBuilder(
+    column: $table.toolsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get planId => $composableBuilder(
+    column: $table.planId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AgentConversationMessagesTableAnnotationComposer
+    extends Composer<_$IntelligenceDatabase, $AgentConversationMessagesTable> {
+  $$AgentConversationMessagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get conversationId => $composableBuilder(
+    column: $table.conversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get sequence =>
+      $composableBuilder(column: $table.sequence, builder: (column) => column);
+
+  GeneratedColumn<String> get role =>
+      $composableBuilder(column: $table.role, builder: (column) => column);
+
+  GeneratedColumn<String> get content =>
+      $composableBuilder(column: $table.content, builder: (column) => column);
+
+  GeneratedColumn<String> get toolsJson =>
+      $composableBuilder(column: $table.toolsJson, builder: (column) => column);
+
+  GeneratedColumn<String> get planId =>
+      $composableBuilder(column: $table.planId, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$AgentConversationMessagesTableTableManager
+    extends
+        RootTableManager<
+          _$IntelligenceDatabase,
+          $AgentConversationMessagesTable,
+          AgentConversationMessageRow,
+          $$AgentConversationMessagesTableFilterComposer,
+          $$AgentConversationMessagesTableOrderingComposer,
+          $$AgentConversationMessagesTableAnnotationComposer,
+          $$AgentConversationMessagesTableCreateCompanionBuilder,
+          $$AgentConversationMessagesTableUpdateCompanionBuilder,
+          (
+            AgentConversationMessageRow,
+            BaseReferences<
+              _$IntelligenceDatabase,
+              $AgentConversationMessagesTable,
+              AgentConversationMessageRow
+            >,
+          ),
+          AgentConversationMessageRow,
+          PrefetchHooks Function()
+        > {
+  $$AgentConversationMessagesTableTableManager(
+    _$IntelligenceDatabase db,
+    $AgentConversationMessagesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AgentConversationMessagesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$AgentConversationMessagesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$AgentConversationMessagesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> conversationId = const Value.absent(),
+                Value<int> sequence = const Value.absent(),
+                Value<String> role = const Value.absent(),
+                Value<String> content = const Value.absent(),
+                Value<String?> toolsJson = const Value.absent(),
+                Value<String?> planId = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AgentConversationMessagesCompanion(
+                id: id,
+                conversationId: conversationId,
+                sequence: sequence,
+                role: role,
+                content: content,
+                toolsJson: toolsJson,
+                planId: planId,
+                status: status,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String conversationId,
+                required int sequence,
+                required String role,
+                required String content,
+                Value<String?> toolsJson = const Value.absent(),
+                Value<String?> planId = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                required String createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => AgentConversationMessagesCompanion.insert(
+                id: id,
+                conversationId: conversationId,
+                sequence: sequence,
+                role: role,
+                content: content,
+                toolsJson: toolsJson,
+                planId: planId,
+                status: status,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AgentConversationMessagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$IntelligenceDatabase,
+      $AgentConversationMessagesTable,
+      AgentConversationMessageRow,
+      $$AgentConversationMessagesTableFilterComposer,
+      $$AgentConversationMessagesTableOrderingComposer,
+      $$AgentConversationMessagesTableAnnotationComposer,
+      $$AgentConversationMessagesTableCreateCompanionBuilder,
+      $$AgentConversationMessagesTableUpdateCompanionBuilder,
+      (
+        AgentConversationMessageRow,
+        BaseReferences<
+          _$IntelligenceDatabase,
+          $AgentConversationMessagesTable,
+          AgentConversationMessageRow
+        >,
+      ),
+      AgentConversationMessageRow,
+      PrefetchHooks Function()
+    >;
 
 class $IntelligenceDatabaseManager {
   final _$IntelligenceDatabase _db;
@@ -7159,4 +8828,11 @@ class $IntelligenceDatabaseManager {
       $$AgentRunsTableTableManager(_db, _db.agentRuns);
   $$SmartCollectionsTableTableManager get smartCollections =>
       $$SmartCollectionsTableTableManager(_db, _db.smartCollections);
+  $$AgentConversationsTableTableManager get agentConversations =>
+      $$AgentConversationsTableTableManager(_db, _db.agentConversations);
+  $$AgentConversationMessagesTableTableManager get agentConversationMessages =>
+      $$AgentConversationMessagesTableTableManager(
+        _db,
+        _db.agentConversationMessages,
+      );
 }

@@ -109,6 +109,7 @@ class WatchEvents extends Table {
 @DataClassName('AgentRunRow')
 class AgentRuns extends Table {
   TextColumn get id => text()();
+  TextColumn get conversationId => text().nullable()();
   TextColumn get operation => text()();
   TextColumn get status => text().withDefault(const Constant('planned'))();
   TextColumn get planJson => text()();
@@ -117,6 +118,41 @@ class AgentRuns extends Table {
   TextColumn get error => text().nullable()();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// The durable navigation layer for Filmly Conversations. It is kept separate
+/// from agent runs: a conversation may contain only questions, and historical
+/// runs must remain valid even if a person later deletes a conversation.
+@DataClassName('AgentConversationRow')
+class AgentConversations extends Table {
+  TextColumn get id => text()();
+  TextColumn get title => text()();
+  TextColumn get preview => text().withDefault(const Constant(''))();
+  TextColumn get pinnedAt => text().nullable()();
+  TextColumn get archivedAt => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// Stores the visible, local-only conversation transcript. Raw provider
+/// payloads, credentials, and hidden prompts are never written here.
+@DataClassName('AgentConversationMessageRow')
+class AgentConversationMessages extends Table {
+  TextColumn get id => text()();
+  TextColumn get conversationId => text()();
+  IntColumn get sequence => integer()();
+  TextColumn get role => text()();
+  TextColumn get content => text()();
+  TextColumn get toolsJson => text().nullable()();
+  TextColumn get planId => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('complete'))();
+  TextColumn get createdAt => text()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
