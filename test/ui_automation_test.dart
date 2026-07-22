@@ -7,21 +7,21 @@ void log(String msg) {
 }
 
 void main() async {
+  if (Platform.environment['FILMLY_LEGACY_UI_E2E'] != '1') {
+    log(
+      'Skipping legacy UI automation. Set FILMLY_LEGACY_UI_E2E=1 and provide a current VM service URI to run it.',
+    );
+    return;
+  }
   log('=== STARTING AUTOMATED UI TEST CLOSED LOOP ===');
 
-  // 1. Resolve Dart VM Service URI
-  String? uri;
-  final uriFile = File('.flutter_skill_uri');
-  if (uriFile.existsSync()) {
-    uri = uriFile.readAsStringSync().trim();
-  }
-
-  // Fallback to default vm service port 50000 if not found
-  if (uri == null || !uri.startsWith('ws://')) {
-    log(
-      'No valid .flutter_skill_uri found. Reading from default vm service port 50000...',
+  // Live tests must opt in with the URI of the current debug session. A URI
+  // persisted from a prior Flutter process is not a reliable test target.
+  final uri = Platform.environment['FLUTTER_SKILL_URI']?.trim() ?? '';
+  if (!uri.startsWith('ws://')) {
+    throw StateError(
+      'FILMLY_LEGACY_UI_E2E=1 requires FLUTTER_SKILL_URI for the running debug app.',
     );
-    uri = 'ws://127.0.0.1:50000/EaMyQLOLwYs=/ws';
   }
 
   log('Connecting to VM Service at: $uri');

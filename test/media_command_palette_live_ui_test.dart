@@ -7,23 +7,16 @@ import 'package:flutter_test/flutter_test.dart';
 /// Real macOS smoke test. It connects to a running Debug build and searches
 /// the user's existing library; no provider or network response is mocked.
 void main() {
+  final vmUri = Platform.environment['FLUTTER_SKILL_URI']?.trim() ?? '';
+  final enabled = vmUri.startsWith('ws://');
   test(
     'opens a real library result from the Agent command palette',
     () async {
-      final uriFile = File('.flutter_skill_uri');
-      final vmUri =
-          Platform.environment['FLUTTER_SKILL_URI']?.trim() ??
-          (await uriFile.exists() ? (await uriFile.readAsString()).trim() : '');
-      expect(
-        vmUri,
-        startsWith('ws://'),
-        reason:
-            'Start the macOS debug app and pass FLUTTER_SKILL_URI when needed.',
-      );
       final client = FlutterSkillClient(vmUri);
       addTearDown(client.disconnect);
       await client.connect();
 
+      await _dismissOpenPalette(client);
       await client.tap(key: 'sidebar_/agent');
       await _waitFor(client, 'agent_open_command_palette');
       await client.tap(key: 'agent_open_command_palette');
@@ -44,15 +37,30 @@ void main() {
       );
       await _saveScreenshot(client, '02-real-library-results');
 
+      await _waitFor(client, 'media_command_result_0_selected');
       await client.tap(key: 'media_command_result_0');
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      await _saveScreenshot(client, '03-after-result-tap');
+      await _saveScreenshot(client, '03-after-result-open');
       await _waitUntilAbsent(client, 'media_command_palette_field');
       await _waitForText(client, '唐朝诡事录');
       await _saveScreenshot(client, '04-opened-result');
     },
     timeout: const Timeout(Duration(seconds: 45)),
+    skip: enabled
+        ? false
+        : 'Set FLUTTER_SKILL_URI for a running macOS Debug app to run live UI tests.',
   );
+}
+
+Future<void> _dismissOpenPalette(FlutterSkillClient client) async {
+  for (var attempt = 0; attempt < 2; attempt++) {
+    if (await client.getWidgetProperties('media_command_palette_field') ==
+        null) {
+      return;
+    }
+    await client.pressKey('escape');
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
 }
 
 Future<void> _waitFor(FlutterSkillClient client, String key) async {

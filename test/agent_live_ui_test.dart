@@ -5,18 +5,14 @@ import 'package:flutter_skill/src/drivers/flutter_driver.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  final vmUri = Platform.environment['FLUTTER_SKILL_URI']?.trim() ?? '';
+  final enabled =
+      Platform.environment['FILMLY_AGENT_LIVE_E2E'] == '1' &&
+      vmUri.startsWith('ws://');
   test(
     'uses the configured Gemini key to plan and execute a safe Agent task',
     () async {
-      final uriFile = File('.flutter_skill_uri');
-      expect(
-        await uriFile.exists(),
-        isTrue,
-        reason: 'Start the macOS debug app before running this live UI test.',
-      );
-      final uri = (await uriFile.readAsString()).trim();
-      expect(uri, startsWith('ws://'));
-      final client = FlutterSkillClient(uri);
+      final client = FlutterSkillClient(vmUri);
       addTearDown(client.disconnect);
       await client.connect();
 
@@ -48,6 +44,9 @@ void main() {
       await _saveScreenshot(client, '03-agent-complete');
     },
     timeout: const Timeout(Duration(seconds: 90)),
+    skip: enabled
+        ? false
+        : 'Set FILMLY_AGENT_LIVE_E2E=1 and FLUTTER_SKILL_URI to run a live provider test.',
   );
 }
 

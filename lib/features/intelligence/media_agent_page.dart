@@ -270,6 +270,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Widget _welcomePanel() {
     return Center(
       child: SingleChildScrollView(
+        key: const Key('agent_workbench_welcome'),
         padding: const EdgeInsets.fromLTRB(30, 16, 30, 32),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 620),
@@ -381,11 +382,12 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
 
   Widget _composer() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+      constraints: const BoxConstraints(minHeight: 56),
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 20),
       padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
       decoration: BoxDecoration(
         color: const Color(0xFFFCFCFD),
-        borderRadius: BorderRadius.circular(17),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: FilmlyPalette.divider),
         boxShadow: const [
           BoxShadow(
@@ -422,7 +424,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
             label: 'Send',
             icon: Icons.arrow_upward_rounded,
             accent: true,
-            height: 38,
+            height: 40,
             padding: const EdgeInsets.symmetric(horizontal: 13),
             onTap: _thinking ? null : () => _sendMessage(),
           ),
@@ -432,30 +434,27 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   }
 
   Widget _buildThinkingIndicator() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: FilmlyPalette.surface,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 10),
+          Text(
+            'OPEN FILMLY · Reviewing your library…',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+              color: FilmlyPalette.textMuted,
             ),
-            SizedBox(width: 10),
-            Text(
-              'Agent 正在检索媒体库并思考中…',
-              style: TextStyle(fontSize: 13, color: FilmlyPalette.textMuted),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -463,53 +462,56 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Widget _buildMessageBubble(ChatUiMessage msg) {
     final isUser = msg.isUser;
     return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        constraints: const BoxConstraints(maxWidth: 580),
-        child: Column(
-          crossAxisAlignment: isUser
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isUser ? FilmlyPalette.primary : FilmlyPalette.surface,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (msg.toolsUsed.isNotEmpty) ...[
-                    Wrap(
-                      spacing: 6,
-                      children: [
-                        for (final tool in msg.toolsUsed)
-                          Chip(
-                            visualDensity: VisualDensity.compact,
-                            label: Text(
-                              '🛠️ $tool',
-                              style: const TextStyle(fontSize: 10),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                  Text(
-                    msg.text,
-                    style: TextStyle(
-                      color: isUser ? Colors.white : FilmlyPalette.textPrimary,
-                      fontSize: 14,
-                      height: 1.45,
-                    ),
+        key: Key('agent_message_${msg.id}'),
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        constraints: const BoxConstraints(maxWidth: 620),
+        padding: EdgeInsets.only(left: isUser ? 14 : 0),
+        decoration: BoxDecoration(
+          border: isUser
+              ? const Border(
+                  left: BorderSide(
+                    color: FilmlyPalette.textSecondary,
+                    width: 2,
                   ),
-                ],
+                )
+              : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isUser ? 'YOU' : 'OPEN FILMLY',
+              style: const TextStyle(
+                color: FilmlyPalette.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.05,
               ),
             ),
-            if (msg.plan != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              msg.text,
+              style: const TextStyle(
+                color: FilmlyPalette.textPrimary,
+                fontSize: 14,
+                height: 1.55,
+              ),
+            ),
+            if (msg.toolsUsed.isNotEmpty) ...[
               const SizedBox(height: 8),
+              Text(
+                'Consulted local tools: ${msg.toolsUsed.map(_toolLabel).join(' · ')}',
+                style: const TextStyle(
+                  color: FilmlyPalette.textMuted,
+                  fontSize: 11,
+                  height: 1.35,
+                ),
+              ),
+            ],
+            if (msg.plan != null) ...[
+              const SizedBox(height: 14),
               _buildActionCard(msg),
             ],
           ],
@@ -545,7 +547,27 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                   ),
                 ),
               ),
+              if (plan.preview.isNotEmpty)
+                Text(
+                  '${plan.preview.length} ITEMS',
+                  style: const TextStyle(
+                    color: FilmlyPalette.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
             ],
+          ),
+          const SizedBox(height: 7),
+          const Text(
+            'PLAN · REVIEW BEFORE EXECUTION',
+            style: TextStyle(
+              color: FilmlyPalette.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.75,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -569,18 +591,32 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                   itemCount: plan.preview.take(5).length,
                   itemBuilder: (context, idx) {
                     final item = plan.preview[idx];
-                    return ListTile(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                      ),
-                      title: Text(
-                        item.title,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      subtitle: Text(
-                        item.detail,
-                        style: const TextStyle(fontSize: 10),
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: FilmlyPalette.textPrimary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            item.detail,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: FilmlyPalette.textMuted,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -591,15 +627,17 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
           if (run == null)
             FilmlyGlassButton(
               key: const Key('agent_confirm_plan_button'),
-              label: '确认这个计划',
+              label: 'Review & confirm',
               icon: Icons.check_circle_outline_rounded,
+              accent: true,
               onTap: () => _confirmPlan(msg),
             )
           else if (run.status == MediaAgentRunStatus.confirmed)
             FilmlyGlassButton(
               key: const Key('agent_execute_plan_button'),
-              label: '执行计划',
+              label: 'Execute plan',
               icon: Icons.play_arrow_rounded,
+              accent: true,
               onTap: () => _executePlan(msg),
             )
           else if (run.status == MediaAgentRunStatus.succeeded)
@@ -630,4 +668,6 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
       ),
     );
   }
+
+  String _toolLabel(String tool) => tool.replaceAll('_', ' ');
 }

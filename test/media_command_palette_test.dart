@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/data/database/database.dart';
@@ -123,6 +124,62 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('media_command_result_0')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('media_command_palette')), findsNothing);
+  });
+
+  testWidgets('uses Arrow keys to choose the result opened by Enter', (
+    tester,
+  ) async {
+    const first = AskFilmlyResult(
+      title: 'First match',
+      snippet: 'First',
+      reason: 'Metadata match',
+      score: 2,
+    );
+    const second = AskFilmlyResult(
+      title: 'Second match',
+      snippet: 'Second',
+      reason: 'Metadata match',
+      score: 1,
+    );
+    await pumpPalette(
+      tester,
+      overrides: [
+        askFilmlyProvider.overrideWith(
+          (ref, query) async =>
+              query == 'matches' ? const [first, second] : const [],
+        ),
+      ],
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('media_command_palette_field')),
+      'matches',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('media_command_result_1_selected')),
+      findsOneWidget,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('media_command_palette')), findsNothing);
+  });
+
+  testWidgets('Ctrl+K closes an open command palette', (tester) async {
+    await pumpPalette(tester);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('media_command_palette')), findsNothing);

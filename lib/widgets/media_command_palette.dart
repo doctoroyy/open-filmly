@@ -58,8 +58,10 @@ class _MediaCommandPaletteSheet extends ConsumerStatefulWidget {
 class _MediaCommandPaletteSheetState
     extends ConsumerState<_MediaCommandPaletteSheet> {
   final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  late final _focusNode = FocusNode(onKeyEvent: _handleFieldKeyEvent);
   String _query = '';
+  int _selectedResultIndex = 0;
+  List<AskFilmlyResult> _visibleResults = const [];
 
   @override
   void initState() {
@@ -133,6 +135,66 @@ class _MediaCommandPaletteSheetState
     widget.appContext.push(location);
   }
 
+  List<AskFilmlyResult> _activeResults() {
+    return _visibleResults;
+  }
+
+  void _updateQuery(String value) {
+    setState(() {
+      _query = value;
+      _selectedResultIndex = 0;
+      _visibleResults = const [];
+    });
+  }
+
+  int _effectiveSelectedIndex(List<AskFilmlyResult> items) {
+    if (items.isEmpty) return 0;
+    return _selectedResultIndex.clamp(0, items.length - 1);
+  }
+
+  Future<void> _activateSelectedResult() async {
+    final items = _activeResults();
+    if (items.isEmpty) {
+      await _openAskFilmly();
+      return;
+    }
+    await _openResult(items[_effectiveSelectedIndex(items)]);
+  }
+
+  KeyEventResult _handleFieldKeyEvent(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        (key == LogicalKeyboardKey.keyK &&
+            (HardwareKeyboard.instance.isMetaPressed ||
+                HardwareKeyboard.instance.isControlPressed))) {
+      _close();
+      return KeyEventResult.handled;
+    }
+
+    final items = _activeResults();
+    if (items.isNotEmpty && key == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _selectedResultIndex =
+            (_effectiveSelectedIndex(items) + 1) % items.length;
+      });
+      return KeyEventResult.handled;
+    }
+    if (items.isNotEmpty && key == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _selectedResultIndex =
+            (_effectiveSelectedIndex(items) - 1 + items.length) % items.length;
+      });
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      _activateSelectedResult();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     final query = _query.trim();
@@ -143,6 +205,8 @@ class _MediaCommandPaletteSheetState
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.escape): _close,
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _close,
+        const SingleActivator(LogicalKeyboardKey.keyK, control: true): _close,
       },
       child: Align(
         alignment: Alignment.topCenter,
@@ -209,8 +273,8 @@ class _MediaCommandPaletteSheetState
               controller: _controller,
               focusNode: _focusNode,
               autofocus: true,
-              onChanged: (value) => setState(() => _query = value),
-              onSubmitted: (_) => _openAskFilmly(),
+              onChanged: _updateQuery,
+              onSubmitted: (_) => _activateSelectedResult(),
               style: const TextStyle(
                 color: FilmlyPalette.textPrimary,
                 fontSize: 18,
@@ -234,7 +298,7 @@ class _MediaCommandPaletteSheetState
               tooltip: 'Clear',
               onPressed: () {
                 _controller.clear();
-                setState(() => _query = '');
+                _updateQuery('');
                 _focusNode.requestFocus();
               },
               icon: const Icon(Icons.close_rounded, size: 19),
@@ -247,17 +311,26 @@ class _MediaCommandPaletteSheetState
   }
 
   Widget _body(String query, AsyncValue<List<AskFilmlyResult>> results) {
-    if (query.isEmpty) return _emptyState();
+    if (query.isEmpty) {
+      _visibleResults = const [];
+      return _emptyState();
+    }
     return results.when(
-      loading: () => const SizedBox(
-        height: 230,
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-      ),
-      error: (error, _) => _notice(
-        icon: Icons.cloud_off_rounded,
-        title: 'Search is temporarily unavailable',
-        detail: '$error',
-      ),
+      loading: () {
+        _visibleResults = const [];
+        return const SizedBox(
+          height: 230,
+          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        );
+      },
+      error: (error, _) {
+        _visibleResults = const [];
+        return _notice(
+          icon: Icons.cloud_off_rounded,
+          title: 'Search is temporarily unavailable',
+          detail: '$error',
+        );
+      },
       data: (items) => _results(items),
     );
   }
@@ -303,9 +376,12 @@ class _MediaCommandPaletteSheetState
         detail: 'Try a title, a person, or describe a moment you remember.',
       );
     }
+    final visibleItems = items.take(8).toList(growable: false);
+    _visibleResults = visibleItems;
+    final selectedIndex = _effectiveSelectedIndex(visibleItems);
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
-      itemCount: items.take(8).length + 2,
+      itemCount: visibleItems.length + 2,
       itemBuilder: (context, index) {
         if (index == 0) {
           return const Padding(
@@ -313,7 +389,7 @@ class _MediaCommandPaletteSheetState
             child: _SectionLabel('RESULTS FROM YOUR LIBRARY'),
           );
         }
-        if (index == items.take(8).length + 1) {
+        if (index == visibleItems.length + 1) {
           return Padding(
             padding: const EdgeInsets.only(top: 8),
             child: _commandRow(
@@ -324,121 +400,144 @@ class _MediaCommandPaletteSheetState
             ),
           );
         }
-        return _resultRow(items[index - 1], index: index - 1);
+        return _resultRow(
+          visibleItems[index - 1],
+          index: index - 1,
+          selected: index - 1 == selectedIndex,
+        );
       },
     );
   }
 
-  Widget _resultRow(AskFilmlyResult result, {required int index}) {
+  Widget _resultRow(
+    AskFilmlyResult result, {
+    required int index,
+    required bool selected,
+  }) {
     final time = result.startMs == null
         ? null
         : _formatTimestamp(Duration(milliseconds: result.startMs!));
-    return InkWell(
-      key: Key('media_command_result_$index'),
-      onTap: () => _openResult(result),
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: result.isScene
-                    ? FilmlyPalette.accent.withValues(alpha: 0.11)
-                    : FilmlyPalette.surface,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Icon(
-                result.isScene
-                    ? Icons.play_arrow_rounded
-                    : Icons.movie_outlined,
-                color: result.isScene
-                    ? FilmlyPalette.accent
-                    : FilmlyPalette.textSecondary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: InkWell(
+        key: Key('media_command_result_$index'),
+        onTap: () => _openResult(result),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          key: selected ? Key('media_command_result_${index}_selected') : null,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: selected
+                ? FilmlyPalette.accent.withValues(alpha: 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: result.isScene
+                        ? FilmlyPalette.accent.withValues(alpha: 0.11)
+                        : FilmlyPalette.surface,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(
+                    result.isScene
+                        ? Icons.play_arrow_rounded
+                        : Icons.movie_outlined,
+                    color: result.isScene
+                        ? FilmlyPalette.accent
+                        : FilmlyPalette.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        child: Text(
-                          result.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: FilmlyPalette.textPrimary,
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              result.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: FilmlyPalette.textPrimary,
+                              ),
+                            ),
                           ),
-                        ),
+                          if (result.year?.isNotEmpty == true) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              result.year!,
+                              style: const TextStyle(
+                                color: FilmlyPalette.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
-                      if (result.year?.isNotEmpty == true) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          result.year!,
-                          style: const TextStyle(
-                            color: FilmlyPalette.textMuted,
-                            fontSize: 12,
+                      if (result.snippet.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text(
+                            result.snippet,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: FilmlyPalette.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                      ],
+                      const SizedBox(height: 5),
+                      Wrap(
+                        spacing: 7,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            result.reason,
+                            style: const TextStyle(
+                              color: FilmlyPalette.textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                          if (time != null)
+                            Text(
+                              time,
+                              style: const TextStyle(
+                                color: FilmlyPalette.accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                  if (result.snippet.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        result.snippet,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: FilmlyPalette.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 5),
-                  Wrap(
-                    spacing: 7,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        result.reason,
-                        style: const TextStyle(
-                          color: FilmlyPalette.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                      if (time != null)
-                        Text(
-                          time,
-                          style: const TextStyle(
-                            color: FilmlyPalette.accent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  result.isScene
+                      ? Icons.play_circle_fill_rounded
+                      : Icons.arrow_outward_rounded,
+                  size: 19,
+                  color: result.isScene
+                      ? FilmlyPalette.accent
+                      : FilmlyPalette.textMuted,
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Icon(
-              result.isScene
-                  ? Icons.play_circle_fill_rounded
-                  : Icons.arrow_outward_rounded,
-              size: 19,
-              color: result.isScene
-                  ? FilmlyPalette.accent
-                  : FilmlyPalette.textMuted,
-            ),
-          ],
+          ),
         ),
       ),
     );
