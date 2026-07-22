@@ -1,436 +1,320 @@
-# Design: Media Command Center
+# Design: Filmly Command Palette & Conversation Library
 
-**Status:** Active — Phases 1 and 1B implemented; later phases proposed
+**Status:** Proposed redesign
 
-**Owner:** Open Filmly
+**Platforms:** Desktop first (macOS validation), with a responsive path for
+Windows and mobile consumption
+**Replaces:** the first Media Command Center design
 
-**Last updated:** 2026-07-22
-**Related:** `docs/plan-media-command-center.md`
+## Why the first design is not enough
 
-## Summary
+The first implementation solved neither of the two jobs it was meant to
+separate:
 
-Open Filmly is building a personal media OS, not a player with an AI chat box
-attached. The Media Command Center is the fastest way to interact with that
-OS on desktop: press `Cmd+K` (or `Ctrl+K`), describe a title, line, scene,
-person, mood, or library task, then act on a real result immediately.
+1. `Cmd/Ctrl+K` should let someone find and open something immediately.
+2. A longer question or a library task should have a durable home where the
+   conversation can be resumed.
 
-The command center is deliberately distinct from the full **Media Agent**:
+Instead, the full Agent currently behaves like a single, temporary chat
+transcript. It has no conversation list, consumes a large empty canvas, and
+makes the lightweight search shortcut feel like a route into a chat product.
+That is the opposite of the intended experience: **Spotlight for immediate
+navigation, a conversation library for sustained thinking.**
 
-| Surface | Best for | Primary outcome |
-| --- | --- | --- |
-| Command Center | One short intent, one immediate destination | Open a title or play a scene |
-| Ask Filmly | Inspecting and comparing search results | Find the right moment with context |
-| Media Agent | Multi-turn questions and changes to the library | Produce a reviewable plan, then require confirmation |
+This redesign treats them as two distinct surfaces that happen to share a
+query and the same media intelligence layer. It is not an “AI chat redesign”.
+It is the desktop interaction model for a personal media OS.
 
-This keeps routine retrieval instant while preserving a capable workspace for
-work that needs context, preview, confirmation, or a conversation.
+## Product promise
 
-## Problem
-
-Today, a library search is mostly a title lookup. It does not serve the
-questions people actually have about a private library:
-
-- “Find the scene where they meet at the airport.”
-- “Open the first episode of *Stranger Things*.”
-- “Which files have no subtitles?”
-- “Help me make a quiet science-fiction collection.”
-
-Putting every one of those requests into a full-screen chat page is slow and
-visually heavy. Returning only titles also loses the distinctive value of an
-intelligent media library: a result can carry a source, a timestamp, and a
-direct path to playback.
-
-## Goals
-
-1. Make a real library result reachable in one keyboard invocation and one
-   activation.
-2. Show why a result matched and, for a scene, the exact playable timestamp.
-3. Keep the first interaction useful without an AI provider, using metadata
-   and full-text indexes already stored locally.
-4. Send requests that need follow-up or mutation to the Agent without hiding
-   the handoff from the user.
-5. Maintain local-first behavior: opening, searching, and browsing must not
-   upload a user's library.
-
-## Non-goals
-
-- Replacing the media detail page, player, Ask Filmly, or the full Agent
-  workspace.
-- Treating a language model answer as an authority for a library operation.
-- Making deletion, moving, or renaming a one-step command.
-- Requiring embeddings, a cloud provider, or a completed transcription before
-  title search works.
-- Forcing the desktop command palette pattern onto a touch-first mobile UI.
-
-## Core interaction
-
-### Open and close
-
-On desktop, `Cmd+K` on macOS and `Ctrl+K` elsewhere toggles the command
-center. It opens centered near the top of the current app window, dims the
-library behind it, and places focus in the query field. `Esc` dismisses it and
-returns focus to the prior surface.
-
-The existing `Cmd/Ctrl+F` continues to open traditional title search. The two
-shortcuts represent different intents rather than competing implementations:
-
-```text
-Cmd/Ctrl+F  → title/filter search
-Cmd/Ctrl+K  → describe what you remember or what you want to do
-```
-
-### States
-
-```text
-Empty
-  → three concise starting actions: search, full Ask Filmly, full Agent
-
-Typing
-  → local title / transcript / scene results stream into a single list
-
-Selection
-  → Up / Down changes the active row; Enter runs its safe default action
-
-No match
-  → explain that no local match exists, retain the query, offer Ask Filmly
-
-Error
-  → explain which capability is unavailable; title search and playback stay
-     available even if optional AI infrastructure is not
-```
-
-### Result taxonomy
-
-Every result has one primary action. The UI must never make the user infer
-whether an item will start playback, open a page, or change data.
-
-| Result kind | Example | Primary action | Required evidence |
+| Surface | The question it answers | Outcome | Must never become |
 | --- | --- | --- | --- |
-| Media | A title / series match | Open media detail | title, year, match reason |
-| Scene | Dialogue or indexed scene | Play at timestamp | title, snippet, timestamp, match reason |
-| Agent handoff | “Find duplicate files” | Open Agent with the exact prompt | visible handoff label |
-| Safe library report | “Library health” | Open report or Agent preview | input scope and freshness |
-| Mutating plan | “Generate subtitles for…” | Open a plan; never execute here | affected-item preview and confirmation step |
+| **Filmly Command Palette** | “Where is that film, scene, person, or line?” | A focused result list; one key or click opens the destination. | A chat window or an action executor. |
+| **Filmly Conversations** | “Help me understand, review, or safely plan work in my library.” | A persistent, named conversation with evidence and reviewable plans. | A blank full-page messenger clone. |
 
-Scene rows use a play affordance. Media rows use a detail affordance. A plan is
-never represented as a play result.
-
-### Keyboard behavior
-
-| Key | Behavior |
-| --- | --- |
-| `Cmd/Ctrl+K` | Toggle the command center |
-| `Esc` | Dismiss without changing library state |
-| `↑` / `↓` | Move the active result; do not move the text caret |
-| `Enter` | Open the active result; with no selected result, continue in Ask Filmly |
-| Click / tap | Run the same action as `Enter` on that row |
-
-Keyboard selection is visible with a subtle accent surface and works with a
-screen reader's selected state. There is no hidden destructive shortcut.
-
-## Information layout
+The primary desktop flow is therefore:
 
 ```text
- ┌────────────────────────────────────────────────────────────────┐
- │ ✦  Search scenes, dialogue, people, or a feeling…          ESC │
- ├────────────────────────────────────────────────────────────────┤
- │ RESULTS FROM YOUR LIBRARY                                      │
- │ ▸  唐朝诡事录 · 2022                                            │
- │    Metadata match                                              │
- │                                                                 │
- │    唐朝诡事录 · 00:17:43                                  ▶     │
- │    “……苏无名……” · Dialogue timeline match                    │
- │                                                                 │
- │ ───────────────────────────────────────────────────────────── │
- │ ◇  Continue in Media Agent                                     │
- ├────────────────────────────────────────────────────────────────┤
- │ ASK FILMLY                              ↑↓ Select  ↵ Open     │
- └────────────────────────────────────────────────────────────────┘
+Cmd/Ctrl+K
+  → type a memory, title, person, line, or scene
+  → choose a concrete list result
+  → open media detail or play at the matched timestamp
+
+Only when the request needs reasoning, follow-up, or a reviewable action:
+  → Continue as a new Filmly conversation
+  → keep the conversation in the local conversation library
 ```
 
-The visual language is quiet and utility-oriented: a warm near-white surface,
-one accent color, low-contrast separators, and only one prominent icon per
-row. It should feel closer to a focused system utility than a chat product.
+## Design direction: the private screening room
 
-Results are limited initially to eight so that the action remains fast and the
-palette never becomes a second library page. A full results request moves to
-Ask Filmly.
+The interface should feel like a carefully indexed private collection: quiet,
+editorial, precise, and close to native macOS utility software. It should not
+look like a generic SaaS dashboard, a messenger, or an “AI assistant” with
+decorative sparkles.
 
-## Visual design
-
-### Art direction
-
-**A quiet editorial instrument.** The command center should feel like a
-precision tool laid over a personal cinema, not like a generic AI chat panel.
-It borrows the familiar immediacy of Spotlight but adopts Open Filmly's
-near-white, black, and electric-blue visual language. The memorable detail is
-the contrast between an almost silent search surface and a single bright blue
-playback timestamp: the interface makes the moment in a film feel tangible.
-
-Avoid gradients, chat bubbles, oversized AI illustrations, or a rainbow of
-status badges. Information density comes from precise spacing, type hierarchy,
-and clear evidence rather than decorative cards.
+- **Visual character:** warm paper-white surfaces, graphite text, a single
+  cinematic blue for focus and navigation, and restrained shadows. Use film
+  poster or scene imagery only when it helps choose a result.
+- **Typography:** a compact, high-legibility Chinese/Latin pairing. The
+  implementation should use the platform text stack until a bundled typeface
+  is approved; hierarchy comes from weight, measure, and spacing—not large
+  display slogans.
+- **Shape:** 10–14 px corners for controls, 12 px row rhythm, hairline
+  dividers. Large rounded cards are reserved for a reviewable plan, never for
+  every message.
+- **Motion:** 140–180 ms, ease-out. The palette rises and settles; the active
+  result moves by tint and a small position change. No bounce, glow, or
+  typewriter effect.
 
 ### Tokens
 
-These are product tokens, not one-off palette values. They map to the existing
-`FilmlyPalette` and should be extracted as component tokens when the surface
-is stabilized.
-
 | Token | Value | Use |
 | --- | --- | --- |
-| Canvas | `#F3F3F6` | App content behind the modal |
-| Palette surface | `#F9F9FB` | Command-center body |
-| Quiet fill | `#EAEAEE` | Keycaps, inactive icon wells, hover fill |
-| Hairline | `#E2E2E6` | Dividers and outline |
-| Ink | `#1C1C1E` | Primary text and the single solid action |
-| Secondary ink | `#6E6E76` | Explanations and snippets |
-| Muted ink | `#9A9AA2` | Labels and secondary metadata |
-| Filmly blue | `#2F6BFF` | Timestamp, active result, links, focused state |
-| Backdrop | `#57000000` | Modal dim; the library remains recognizable |
+| Canvas | `#F6F5F2` | Conversation and palette background |
+| Elevated surface | `#FFFDFC` | Composer, palette, plan card |
+| Ink | `#1D1C1A` | Titles and primary content |
+| Secondary ink | `#68655F` | Summaries and timestamps |
+| Rule | `#E5E2DC` | Dividers and inactive borders |
+| Filmly blue | `#246BDE` | Selection, links, open/play actions |
+| Warm focus | `#EAF1FF` | Keyboard-active result row |
+| Warning | `#A85C16` | Pending plan state only |
 
-Dark mode is not specified by this document. Until it has a complete token
-set, preserve the current native light appearance rather than inverting a few
-colors opportunistically.
-
-### Desktop composition
-
-The command center has fixed visual anchors but flexible height. It should
-never feel like a window within a window.
-
-| Viewport | Palette width | Top offset | Horizontal margin | Maximum height |
-| --- | ---: | ---: | ---: | ---: |
-| ≥ 1180 px | 720 px | 92 px | 20 px | 640 px |
-| 820–1179 px | min(720 px, viewport − 40 px) | 72 px | 20 px | 600 px |
-| < 820 px desktop | viewport − 32 px | 56 px | 16 px | viewport − 80 px |
-
-The container uses a 20 px radius, a 1 px hairline, and one deep but diffuse
-shadow (`y: 22`, `blur: 52`, black at 25%). It has no chrome, title bar, or
-separate close button; `Esc` and the visible keycap make dismissal obvious.
+## Information architecture
 
 ```text
-1440 × 900 desktop
-
-  ┌─ existing library remains visible but de-emphasized ────────────────┐
-  │                                                                     │
-  │                    ┌──────────── 720 ────────────┐                │
-  │                    │  [✦]  natural-language query  [ESC]          │
-  │                    ├───────────────────────────────────────────────│
-  │                    │  RESULTS FROM YOUR LIBRARY                    │
-  │                    │  ┌ selected / blue 10% tint ───────────────┐ │
-  │                    │  │ [poster/play] Title · year            ↗ │ │
-  │                    │  │ reason                         01:17:43 │ │
-  │                    │  └─────────────────────────────────────────┘ │
-  │                    │  [play] Scene title                      ▶   │
-  │                    │          dialogue or scene evidence          │
-  │                    ├───────────────────────────────────────────────│
-  │                    │  ASK FILMLY              ↑↓ Select  ↵ Open  │
-  │                    └───────────────────────────────────────────────┘
-  │                                                                     │
-  └─────────────────────────────────────────────────────────────────────┘
+Open Filmly shell
+├── Cmd/Ctrl+K: Filmly Command Palette
+│   ├── direct media / person / scene result → detail or player timestamp
+│   ├── Ask Filmly search workspace → /ask
+│   └── “Continue in Filmly” → a new persisted conversation
+└── Filmly Conversations → /agent
+    ├── conversation rail
+    │   ├── New conversation
+    │   ├── Pinned
+    │   ├── Today / Earlier / Archived
+    │   └── overflow: rename, archive, delete
+    ├── active conversation thread
+    │   ├── grounded answer and source affordances
+    │   └── reviewable plan card, when relevant
+    └── contextual detail drawer (only when useful)
+        ├── plan preview / execution status
+        └── citations, matched media, or task history
 ```
 
-### Type and spacing
+The global Open Filmly navigation stays unchanged. “Conversations” is a
+workspace within the existing Agent destination, not a second application
+sidebar.
 
-Use the operating system's display sans so titles in Latin, Chinese, Japanese,
-and Korean use the same native-quality rendering: SF Pro / PingFang SC on
-macOS, Segoe UI on Windows, and the platform's appropriate fallback elsewhere.
+## 1. Filmly Command Palette
 
-| Element | Size / weight | Spacing rule |
+### Behaviour
+
+`Cmd+K` on macOS and `Ctrl+K` elsewhere opens the palette from every desktop
+route. The field has focus before the surface finishes its entrance animation.
+Typing is search-first: it immediately produces a keyboard-navigable list of
+real library matches.
+
+The palette does not send text to a cloud provider while the person is simply
+searching. It may use local title, metadata, FTS, and semantic indexes. A
+query becomes a conversation only through the explicit handoff row or the
+`Shift+Enter` shortcut.
+
+| Input | Primary result | Secondary option |
 | --- | --- | --- |
-| Query | 18 px / 500 | 16 px top and 15 px bottom in a 64 px input bar |
-| Result title | 14 px / 600 | one line; truncate at the end |
-| Result snippet | 12 px / 400 | one line; 3 px below title |
-| Evidence and timestamp | 11 px / 400; timestamp 700 | 5 px below snippet |
-| Section label | 10 px / 800, 1.05 px tracking | 14 px above first result |
-| Footer label | 10 px / 800, 1.1 px tracking | 10 px vertical padding |
+| `唐朝诡事录` | Open the show | Open seasons / episodes |
+| `雨夜 长安 等朋友` | Play the matching scene at its timestamp | Open Ask Filmly search |
+| `宫崎骏` | List matching titles, people, and collections | Continue in Filmly if no local result answers it |
+| `找重复文件` | “Plan this in Filmly” handoff row | Never execute from the palette |
 
-Result rows use a 12 px radius, 10 px horizontal padding, and 10 px vertical
-padding. The leading visual well is 38 × 38 px. These repeated measures make
-media, scene, and handoff rows feel like one system rather than a list of
-unrelated cards.
-
-### Component states
-
-| Component | Rest | Hover | Keyboard selected | Pressed / loading | Disabled / unavailable |
-| --- | --- | --- | --- | --- | --- |
-| Query field | transparent, focused text cursor | unchanged | native focus ring only | clear control appears when non-empty | no input only during app startup |
-| Result row | transparent | `Quiet fill` | Filmly blue at 10% opacity + semantics selected | 96% scale is not used; retain position | not applicable; hide invalid results |
-| Scene affordance | blue icon well | blue 14% tint | same as row | direct player transition | never shown without URI + timestamp |
-| Media affordance | quiet icon well | `Quiet fill` | same as row | detail transition | never shown without media id |
-| Agent handoff | hairline-separated plain row | quiet fill | blue 10% tint | route transition only | shown even without cloud AI |
-| Keycap | quiet fill | unchanged | unchanged | unchanged | omit unavailable shortcuts |
-
-Rows do not jump, resize, or introduce a spinner inside the title when an
-action starts. The palette fades and the destination owns the next loading
-state. This preserves the feeling of an immediate command.
-
-### Motion
-
-- Open: 180 ms ease-out fade plus a restrained `0.985 → 1.0` scale from the
-  top center.
-- Close: use the same 180 ms transition in reverse; wait for it before
-  navigating so the modal backdrop cannot cover the destination.
-- Active result: 120 ms ease-out color transition only.
-- Hover controls: 160 ms ease-out; no elastic motion, rotation, or parallax.
-- Loading: a 2 px progress indicator centered in the result area. It replaces
-  rows rather than making the query field move.
-
-### Full Media Agent workspace
-
-The full Agent is a **workbench**, not a messenger clone. It keeps the same
-quiet canvas but uses a wider reading measure and reserves visual emphasis for
-plans that need a decision.
+### Desktop wireframe
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│ ‹  Media Agent                                    Search ⌘K          │
-│    Plan first. Confirm before anything changes.                       │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│  Your library,                                                         │
-│  with intent.                                                         │
-│  Search scenes quickly above, or ask for a review and a safe plan.    │
-│                                                                        │
-│  [Library health] [Find duplicates] [Create collection]               │
-│                                                                        │
-│  User request                                                         │
-│  “Find films I abandoned last year.”                                   │
-│                                                                        │
-│  Agent response                                                        │
-│  12 items match. I can prepare a review; nothing changes yet.         │
-│                                                                        │
-│  ┌ Plan: Long-unwatched review ────────────────────────────────────┐ │
-│  │ 12 items · read-only preview · generated just now                │ │
-│  │ [Review items]                                    [Create plan] │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-├──────────────────────────────────────────────────────────────────────┤
-│ Ask about your library…                                  [Send ↵]    │
-└──────────────────────────────────────────────────────────────────────┘
+                               ⌘K
+                   ┌──────────────────────────────────────────────┐
+                   │  ⌕  Search your library                       │
+                   │                                      Esc       │
+                   ├──────────────────────────────────────────────┤
+                   │  BEST MATCH                                   │
+                   │  [poster] 唐朝诡事录 · 2022          ↵ Open    │
+                   │           36 episodes · TV series             │
+                   ├──────────────────────────────────────────────┤
+                   │  MOMENTS                                      │
+                   │  ▶  唐朝诡事录                                │
+                   │     “雨夜的长安城门…” · 00:31:18     Play ↵   │
+                   │  ▶  长安十二时辰                              │
+                   │     “…” · 00:42:09                            │
+                   ├──────────────────────────────────────────────┤
+                   │  ASK                                           │
+                   │  ↗  Continue in Filmly                        │
+                   │     Ask a follow-up or make a safe plan       │
+                   ├──────────────────────────────────────────────┤
+                   │  ↑↓ Navigate     ↵ Open     ⇧↵ Continue    Esc│
+                   └──────────────────────────────────────────────┘
 ```
 
-Messages are arranged as editorial blocks, not opposing rounded bubbles:
+### Layout and hierarchy
 
-- User requests align to the reading column with a thin left rule and muted
-  `YOU` label.
-- Agent responses use plain text on the canvas with an `OPEN FILMLY` label;
-  tool use is summarized as a compact provenance line, never raw JSON.
-- Plans are the only strong cards. They use a 16 px radius, a quiet surface,
-  a concise scope line, visible preview count, and one black primary action.
-- Confirmed and completed plans retain a timestamp and result summary instead
-  of disappearing from the conversation.
-- The composer is a 56 px anchored work surface with a 12 px radius and no
-  floating send orb. `Enter` sends; `Shift+Enter` inserts a line break.
+- **Placement:** centered horizontally, 12–16% down from the usable desktop
+  height. It is not pinned to the top like an application page.
+- **Width:** 720 px at normal desktop widths; may grow to 800 px for scene
+  result readability. Minimum 480 px.
+- **Input row:** plain search icon, input, and `Esc` hint. No AI logo, hero
+  copy, or permanent “start here” menu. With no query, show only three recent
+  local destinations and a muted prompt example.
+- **Result rows:** 56 px for media, 68 px for a scene. A poster or a play
+  glyph is functional visual context. The reason and timestamp sit on the
+  second line; the right edge states the outcome (`Open`, `Play 00:31:18`).
+- **Selection:** one warm-blue row tint and a 2 px blue leading rule. The
+  selected item never changes the entire card background.
+- **No-result state:** remain in the same compact list. Offer “Search all in
+  Ask Filmly” and “Continue in Filmly”, with the exact query preserved.
 
-At a width below 980 px, the Agent remains a single reading column. A plan
-does not become a side panel; it stays inline so keyboard and narrow-window
-flows retain reading order.
+### Keyboard contract
 
-### Responsive mobile translation
-
-The mobile surface is a bottom sheet rather than a scaled desktop dialog:
-
-| Property | Mobile spec |
+| Key | Behaviour |
 | --- | --- |
-| Sheet | 16 px top radius, 92% viewport max height, drag handle |
-| Query | 52 px field, 16 px side margins, no desktop keycaps |
-| Rows | 56 px minimum touch target; title, reason, and timestamp stay visible |
-| Scene action | Entire row plays at the timestamp; no tiny trailing-only target |
-| Handoff | Opens the full-screen Agent page with the prompt preserved |
-| Footer | Omit keyboard help; use a concise local-search/privacy message instead |
+| `Cmd/Ctrl+K` | Open; when already open, close without changing the current route |
+| `↑` / `↓` | Move the active result row |
+| `Enter` | Execute the active result’s visible outcome |
+| `Shift+Enter` | Start a new Filmly conversation with the current prompt |
+| `Esc` | Close and return focus to the previous element |
+| `Cmd/Ctrl+F` | Keep the existing in-page library search; it does not compete with the palette |
 
-### UI acceptance screenshots
+## 2. Filmly Conversations
 
-The review set for this feature contains real application screenshots, not
-mockups:
+### A library, not a transient transcript
 
-1. Empty desktop palette at 1440 × 900.
-2. Desktop results for a real exact-title query, including selected state.
-3. Scene result with timestamp and match reason.
-4. Post-Enter destination with the palette fully absent.
-5. Full Agent empty state and a plan preview state.
-6. Mobile bottom-sheet layout once Phase 4 begins.
+A conversation begins only on the first submitted message. It receives a
+local, deterministic title from that message and is saved in the intelligence
+database. Reopening it must restore every visible turn, the plans created in
+it, and their current execution states.
 
-## Source of truth and ranking
+The conversation rail is a first-class part of the desktop page. A person can
+scan their prior questions in the same way they scan playlists or recent
+media. Chat history is not hidden behind a profile menu or a modal.
 
-The command center shows data from the user's existing media and intelligence
-stores. It does not synthesize a title, a timestamp, or an operation result.
-
-The ranking order is:
-
-1. Exact and prefix title matches from the core media library.
-2. Other title and metadata matches.
-3. Transcript FTS matches, with their source timestamps.
-4. Indexed scene summaries.
-5. Optional embedding matches when a local or approved provider is available.
-
-If the filename includes a title but the stored title says something else,
-the explicit stored title must rank above the path-only match. This prevents a
-visibly wrong top result from becoming the default action.
-
-## Agent handoff and safety
-
-The palette may hand a query to Media Agent, but it never performs an action
-that changes the library. The Agent workflow remains:
+### Desktop wireframe
 
 ```text
-request → inspect real local data → proposed plan → user confirms → execute
+┌──────── Open Filmly shell ───────┬──── Conversations ────┬──────────────────────── Thread ───────────────────────┐
+│                                   │  + New conversation   │  影视库健康度                         ⌘K Search       │
+│  Home / Movies / TV / …           │                       │  Updated just now · local conversation                  │
+│                                   │  PINNED               │─────────────────────────────────────────────────────────│
+│                                   │  ● 科幻片智能合集      │  YOU                                                    │
+│                                   │    7 items · 12 min   │  分析我的影视库健康度                                  │
+│                                   │                       │                                                         │
+│                                   │  TODAY                │  FILMLY                                                 │
+│                                   │  ◉ 影视库健康度        │  你的库有 2,277 个项目，其中 1,966 个缺少海报…          │
+│                                   │    Missing metadata   │  Sources: library metadata · last checked just now      │
+│                                   │  ◌ 雨夜长安是哪一集    │                                                         │
+│                                   │    2 messages         │  [ View affected titles ]                               │
+│                                   │                       │                                                         │
+│                                   │  EARLIER              │                                                         │
+│                                   │  ◌ 90 分钟的轻松电影   │                                                         │
+│                                   │                       │─────────────────────────────────────────────────────────│
+│                                   │                       │  Ask about your library or describe a task…    ↑ Send   │
+└───────────────────────────────────┴───────────────────────┴─────────────────────────────────────────────────────────┘
 ```
 
-The plan screen must show scope, affected items, and an undo or recovery path
-where one exists. Destructive file actions remain unavailable by default.
+### Conversation rail
 
-## Platform behavior
-
-| Platform | Behavior |
+| Element | Behaviour |
 | --- | --- |
-| macOS / Windows / Linux desktop | Full keyboard-first command center; local search and direct playback |
-| iOS / Android | A compact sheet or a dedicated search entry point; no dependency on a hardware shortcut |
-| All platforms | Consume previously generated transcripts and scene indexes when available |
+| **New conversation** | Clears the active thread without creating an empty record. The record exists after the first send. |
+| **Pinned** | Explicitly pinned conversations, then most recently updated ones. |
+| **Time groups** | Today, Yesterday, Previous 7 days, Earlier. Archive is separated from the default list. |
+| **Conversation row** | Title, one-line latest-answer preview, relative update time, and a subtle plan status dot when applicable. |
+| **Overflow menu** | Rename, pin/unpin, archive, and delete. Deletion asks for confirmation and removes only conversation data, never plans or media. |
+| **Active state** | Warm-blue leading rule plus a quiet surface tint. No filled pill spanning the rail. |
 
-Mobile must preserve the result taxonomy and safety rules, but it should use a
-bottom sheet and touch-sized targets rather than imitate Spotlight.
+Rows are 56–64 px. The rail is 248 px wide at desktop sizes, has its own
+scroll, and never forces the thread to become overly narrow.
 
-## Accessibility and localization
+### Active thread
 
-- Focus always starts in the field and returns to the invoking control on
-  dismissal.
-- Every row exposes title, result type, reason, and timestamp as semantics.
-- Color is never the only indication of a scene, selected result, or error.
-- All new text moves behind the app's localization layer before the surface is
-  declared stable. English is the source locale; Simplified Chinese ships with
-  it.
-- Timestamps follow the app's familiar playback format and do not depend on
-  the display locale.
+- **Reading measure:** 640–760 px. Messages are not full-width page blocks;
+  they have a deliberate left edge and a comfortable line length.
+- **Header:** editable conversation title, local-only status, last-updated
+  time, compact overflow menu, and the `⌘K Search` affordance. The page title
+  is the actual conversation, not a permanent “Media Agent” banner.
+- **Messages:** user requests are a short left-ruled record. Filmly answers
+  are typography on the canvas, followed by compact evidence chips or source
+  links. Avoid rounded speech bubbles for both sides.
+- **Plans:** a plan remains an attached, high-contrast review card containing
+  scope, preview count, affected titles, and exactly one next state. It can
+  open a contextual drawer for the full preview; it never silently executes.
+- **Composer:** sticky but visually light. One field, optional attachment or
+  context control later, `⌘↵` / button to send. It is aligned with the thread,
+  not stretched across unused page width.
+- **Empty conversation:** no oversized marketing headline. Show a small
+  opening prompt and three useful examples in the message area, with the
+  composer already ready.
 
-## Privacy and reliability
+### Contextual detail drawer
 
-- Metadata and FTS retrieval run locally.
-- Optional cloud AI must be opt-in and obey the user's existing provider
-  configuration; a request shows when it leaves the device.
-- API keys are never included in command history, result logging, exports, or
-  screenshots.
-- If an AI provider, worker, or index is unavailable, the palette reports the
-  degraded capability and retains non-AI search and playback.
+The detail drawer is closed by default. It appears only for an active plan,
+a source list, or a result set that needs inspection. It is a 300 px panel on
+large desktops and a slide-over on narrower ones. This preserves the quiet
+thread while keeping evidence and plan review close at hand.
+
+## Responsive behaviour
+
+| Available content width (after global navigation) | Conversations rail | Detail drawer | Palette |
+| --- | --- | --- | --- |
+| `≥ 1120 px` | 248 px, always visible | 300 px when opened | 720–800 px |
+| `780–1119 px` | 232 px, always visible | Slide-over | 640 px max |
+| `< 780 px` | Opened from a conversation button / sheet | Full-height sheet | Full-width bottom sheet |
+
+Mobile consumes conversations and search results, but does not imitate a
+desktop multi-pane view. The current macOS validation remains the release
+gate for this redesign.
+
+## Conversation lifecycle and privacy
+
+1. **New** creates an unsaved visual state.
+2. The first send creates a local conversation and saves the user message.
+3. A final Filmly answer is stored with its visible evidence and any plan ID.
+4. Opening a row restores the thread locally before any provider call.
+5. Continuing a conversation sends only the selected, bounded local context to
+   the configured provider. API keys, raw credentials, and unrelated library
+   paths are never stored in message text.
+6. Archiving hides a conversation from the default list. Deleting it removes
+   its local conversation records after confirmation; it does not delete the
+   associated media, subtitles, collection, or Agent execution record.
+
+Command-palette query text remains ephemeral. It is not command history and
+is not saved unless the person explicitly continues it as a conversation.
+
+## Safety boundaries
+
+- The palette opens destinations only. It never confirms or executes an Agent
+  plan.
+- Every plan appears inside a persisted conversation with its current status.
+- A completed task can still be inspected after reopening the conversation.
+- A failed provider request preserves the user’s sent message and displays a
+  retryable local error record; it never drops the conversation.
+- The command palette, conversation store, and execution history are all
+  independent from the core media database.
+
+## What we deliberately remove
+
+- The generic “Media Agent” landing screen with a large empty field of view.
+- “Open Media Agent” as the dominant empty state of `Cmd/Ctrl+K`.
+- An in-memory-only transcript that disappears on navigation or relaunch.
+- Decorative AI icons, gradients, bubbles, or an always-visible right panel.
 
 ## Acceptance criteria
 
-1. From any desktop library page, `Cmd/Ctrl+K` opens a focused palette.
-2. An exact title query presents that title ahead of path-only legacy matches.
-3. Selecting a scene starts the existing player at the stored timestamp.
-4. Selecting a media result opens the existing media detail page.
-5. The palette fully dismisses before a route or player opens.
-6. Keyboard and pointer activation run the same safe action.
-7. No provider configuration is required for metadata and FTS results.
-8. No library mutation can be executed from the palette.
-
-## Open questions
-
-1. Should the command center search recent viewing activity as an explicit
-   result group, or keep it inside Ask Filmly until the ranking model matures?
-2. When a remote provider is enabled, should its results be shown only after
-   local results, or may it interleave with a visible “cloud-assisted” label?
-3. Which Agent reports deserve a direct read-only result in the command center
-   rather than a handoff to the full workspace?
-4. Should command history be local-only and opt-in, or omitted entirely in the
-   first public release?
+1. Pressing `Cmd/Ctrl+K`, typing a query, and pressing `Enter` can open a real
+   title or play a real scene without visiting a chat route.
+2. `Shift+Enter` or the explicit handoff creates a new conversation with the
+   exact query, never a hidden transient transcript.
+3. Every submitted conversation is visible in the conversation rail after
+   navigation and relaunch.
+4. Selecting an old conversation restores its messages, sources, plan cards,
+   and current plan status.
+5. The active thread has no large unstructured empty space at a 1200 px app
+   width.
+6. The only UI that can confirm or execute a plan is its review card in the
+   selected conversation.
+7. No palette query is persisted unless it becomes a conversation.

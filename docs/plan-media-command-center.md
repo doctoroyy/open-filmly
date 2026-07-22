@@ -1,322 +1,312 @@
-# Technical Plan: Media Command Center
+# Technical Plan: Filmly Command Palette & Conversation Library
 
-**Status:** In progress
+**Status:** Proposed redesign
 
-**Design:** `docs/design-media-command-center.md`
-**Last updated:** 2026-07-22
+**Scope:** macOS-first implementation, preserving the existing intelligence
+database boundary and Media Agent safety model
 
-## Scope
+## Objective
 
-This plan turns the desktop `Cmd/Ctrl+K` entry point into a dependable command
-center for a personal media library. It is intentionally narrower than the
-long-term Media Agent roadmap: the first goal is retrieval with a direct,
-safe outcome; the second is a clear handoff to planning work.
+Replace the temporary Agent transcript with a durable local conversation
+library, while narrowing `Cmd/Ctrl+K` back to its intended role: immediate,
+keyboard-first navigation through real media and scene results.
 
-The implementation must keep the existing core media database and playback
-progress model intact. Intelligence data remains in the independent
-intelligence database. A missing worker, embedding model, or cloud provider
-must only reduce optional capabilities.
+The deliverable is not a new chat feature. It is a clear split between:
 
-## Current baseline
+```text
+Command Palette: local query → result list → open destination
+Conversation: persisted context → grounded answer / plan → review and execute
+```
 
-| Capability | Current state | Notes |
+## Current-state findings
+
+| Finding | Consequence | Redesign response |
 | --- | --- | --- |
-| Shell shortcut | Implemented | `Cmd/Ctrl+K` opens `MediaCommandPalette` |
-| Local title search | Implemented | Uses `SemanticSearchService` and core media rows |
-| Transcript / scene retrieval | Implemented when indexes exist | Uses FTS, scene index, optional embeddings |
-| Direct scene playback | Implemented | Reuses `openPlayer` and existing start position args |
-| Media navigation | Implemented | Reuses `mediaDetailLocation` |
-| Exact-title precedence | Implemented | Avoids filename-only legacy metadata becoming top result |
-| Full Agent page | Implemented | Multi-turn UI with plan / confirm / execute boundaries |
-| Keyboard result selection | Implemented in this iteration | Arrow navigation, Enter activation, and real toggle behavior |
-| Visual foundation | Implemented in this iteration | Selected-state treatment, keyboard help, and palette motion follow the design spec |
-| Agent workbench visual refinement | Implemented in this iteration | Editorial response blocks, provenance line, decision-first plan cards, and anchored composer |
-| Unified intent / command results | Next | Make handoffs and safe reports explicit, not ad-hoc rows |
-| Localization | Next | Current new strings are source-locale English but not localized |
-| Mobile command surface | Deferred | Requires a touch-specific design |
+| `MediaAgentPage` keeps `ChatUiMessage` in widget memory. | Messages disappear after route changes or app restart. | Persist conversations and messages in the intelligence database. |
+| `ConversationalAgentEngine` owns one in-memory `_history`. | Context can leak between UI sessions and cannot be reopened deterministically. | Make the engine request-scoped; pass bounded context for one conversation. |
+| `agent_runs` persists plans but has no conversation link. | A historical plan cannot be discovered from its original discussion. | Add nullable `conversationId` and store `planId` on the model message. |
+| The full Agent is the only durable-looking surface. | A quick `Cmd+K` task feels like a chat detour. | Keep the palette result-only; explicit handoff starts a conversation. |
+| The thread has a wide canvas but no local navigation. | It looks sparse and cannot support returning to work. | Add a 248 px conversation rail and conditional detail drawer. |
 
 ## Architecture
 
 ```text
-AppShell shortcut
-  → MediaCommandPalette
-      → CommandPaletteController (query lifecycle and active row)
-          → CommandSearchService
-              → SemanticSearchService
-                  → core media DB
-                  → intelligence FTS / scene index
-                  → optional embedding provider
-          → CommandIntentResolver
-              → Agent handoff or read-only report descriptor
-      → existing media detail route / existing player / existing Agent route
+                         ┌────────────────────────────┐
+Cmd/Ctrl+K ─────────────▶│ MediaCommandPalette         │
+                         │ local title / FTS / semantic│
+                         └─────────────┬──────────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              ▼                        ▼                        ▼
+       media detail route       player at timestamp       start conversation
+                                                               │
+                                                               ▼
+                         ┌──────────────────────────────────────────────┐
+                         │ ConversationWorkspaceController               │
+                         │ active conversation + UI state + lifecycle    │
+                         └───────┬───────────────────────┬──────────────┘
+                                 │                       │
+                    ┌────────────▼───────────┐  ┌────────▼──────────────┐
+                    │ AgentConversationRepo   │  │ Request-scoped engine │
+                    │ conversations / messages│  │ provider + local tools│
+                    └────────────┬───────────┘  └────────┬──────────────┘
+                                 │                       │
+                                 ▼                       ▼
+                         IntelligenceDatabase      AgentRunRepository
+                         (independent SQLite)      (plans / execution)
 ```
 
-The first implementation can keep the controller inside the palette state
-while behavior is small. Once result groups and query reuse are introduced,
-extract it into a testable service; do not put ranking policy in widgets.
+No conversation data is added to the core media database. Scanning, playback,
+and existing import/export flows remain operational when the intelligence
+database is absent, damaged, or cleared.
 
-## UI implementation contract
+## Data model
 
-The visual source of truth is the `Visual design` section of
-`docs/design-media-command-center.md`. The first production pass uses the
-existing `FilmlyPalette` values rather than creating a parallel theme:
+### Schema migration: v3 → v4
 
-- `MediaCommandPalette` owns the 720 px desktop overlay, its 20 px radius,
-  compact 64 px input bar, result-state tints, and keyboard footer.
-- `MediaAgentPage` owns a 900 px reading measure, plain editorial message
-  blocks, and the anchored 56 px composer work surface.
-- `FilmlyGlassPanel` is reserved for plans and other decision objects. It is
-  not the default wrapper for every paragraph of an Agent response.
-- Animation durations are constrained to the document's 120/160/180 ms
-  values. Do not add bouncing, position shifts, or decorative gradients.
-- Any new visual state needs a stable widget key and a widget or live UI test
-  before it is considered complete.
+Extend `lib/data/intelligence/intelligence_tables.dart` and
+`lib/data/intelligence/intelligence_database.dart` with the following tables.
 
-## Data contracts
+### `agent_conversations`
 
-### Existing retrieval result
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | text PK | UUID / timestamp-safe local ID |
+| `title` | text | Derived locally from the first user message; user editable |
+| `preview` | text | Last visible message summary for the rail |
+| `pinnedAt` | text nullable | Sort pinned conversations first |
+| `archivedAt` | text nullable | Hidden from default rail |
+| `createdAt` | text | ISO-8601 |
+| `updatedAt` | text | Updated transactionally with its last message |
 
-`AskFilmlyResult` already represents a verified title or timestamped scene:
+### `agent_messages`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | text PK | Local message ID |
+| `conversationId` | text | Indexed with `sequence` |
+| `sequence` | integer | Strict local ordering within a conversation |
+| `role` | text | `user`, `model`, or `system` display record |
+| `content` | text | Only visible, non-secret content |
+| `toolsJson` | text nullable | Compact list of tool names, never raw credentials |
+| `planId` | text nullable | Points to the existing `agent_runs.id` |
+| `status` | text | `complete`, `failed`, or `cancelled` |
+| `createdAt` | text | ISO-8601 |
+
+### Existing `agent_runs`
+
+Add nullable `conversationId`. Existing runs remain valid and ungrouped. New
+plans created in a conversation set it in the same transaction that writes the
+model message. A plan must still be usable without a conversation for existing
+service callers and tests.
+
+### Indexes and deletion rules
+
+```sql
+CREATE INDEX agent_messages_conversation_sequence_idx
+  ON agent_messages(conversation_id, sequence);
+CREATE INDEX agent_conversations_updated_idx
+  ON agent_conversations(archived_at, pinned_at, updated_at DESC);
+CREATE INDEX agent_runs_conversation_idx
+  ON agent_runs(conversation_id, updated_at DESC);
+```
+
+Deleting a conversation deletes only its `agent_messages` and
+`agent_conversations` rows. It explicitly does **not** delete `agent_runs`,
+smart collections, subtitle artifacts, media rows, or watch events. Its plan
+link becomes null or remains as an orphaned historical run according to the
+repository’s migration-safe deletion method.
+
+## Repositories and services
+
+### New files
+
+| File | Responsibility |
+| --- | --- |
+| `lib/data/intelligence/agent_conversation_repository.dart` | CRUD, list grouping, message ordering, archive/delete transactions |
+| `lib/services/intelligence/agent_conversation_service.dart` | Start/resume/send lifecycle, title and preview derivation, context bounding |
+| `lib/providers/agent_conversation_providers.dart` | AsyncNotifier state for rail, active thread, and mutations |
+| `lib/features/intelligence/agent_conversation_rail.dart` | Persistent desktop history list |
+| `lib/features/intelligence/agent_thread_view.dart` | Readable message thread and evidence rows |
+| `lib/features/intelligence/agent_composer.dart` | Composer and keyboard send behaviour |
+| `lib/features/intelligence/agent_detail_drawer.dart` | Conditional plan/source inspector |
+
+The existing `MediaAgentPage` becomes a thin conversation workspace shell or
+is renamed to `AgentConversationPage` after routing is migrated. Do not leave
+two independently stateful Agent pages.
+
+### Request-scoped provider context
+
+Refactor `ConversationalAgentEngine` so it does not retain `_history`. The new
+method receives one conversation context and returns one completed turn:
 
 ```dart
-class AskFilmlyResult {
-  String title;
-  String snippet;
-  String reason;
-  double score;
-  String? mediaId;
-  String? uri;
-  int? startMs;
-  int? endMs;
-  bool get isScene;
-}
+Future<ConversationalTurnResult> sendUserMessage({
+  required String userPrompt,
+  required List<AgentModelContextMessage> context,
+  required String conversationId,
+});
 ```
 
-It remains the source-backed retrieval contract. No generated timestamp may be
-written into this type.
+`AgentConversationService.send()` performs this sequence:
 
-### New command result wrapper
-
-Introduce an immutable presentation-layer wrapper once the palette needs more
-than search rows:
-
-```dart
-sealed class CommandPaletteItem {
-  const CommandPaletteItem();
-  CommandResultKind get kind;
-  String get title;
-  String get subtitle;
-  CommandActivation get activation;
-}
+```text
+create conversation only if necessary
+  → insert user message and update rail preview
+  → build bounded model context from selected conversation only
+  → call request-scoped engine
+  → persist model reply / tool labels / optional plan link
+  → update conversation title and rail preview
+  → return the new durable thread state
 ```
 
-Variants:
+The model receives the last 12 complete visible turns (or a byte/token budget
+equivalent) from the active conversation only. A later summarisation mechanism
+may compress older turns, but the first release must never mix contexts from
+two conversations.
 
-- `CommandMediaItem(AskFilmlyResult result)`
-- `CommandSceneItem(AskFilmlyResult result)`
-- `CommandAgentHandoffItem(String prompt, AgentIntent intent)`
-- `CommandReadOnlyReportItem(ReportDescriptor report)`
+On a provider failure, the user message stays in history. The service writes a
+local failed system record with a retry affordance; it does not create an
+invented model response.
 
-`CommandActivation` is a description of navigation or a planned action, not a
-callable capable of mutating files. The widget activates it through an
-explicit dispatcher.
+### Local title and privacy rules
 
-## Delivery phases
+- Use the first user message, whitespace-normalised and truncated to 36
+  grapheme clusters, as the initial title. Do not use a cloud call to create a
+  title.
+- Preview uses the final visible reply or user prompt, truncated locally.
+- Never persist API keys, provider HTTP payloads, raw tool response JSON, or
+  hidden system instructions in messages.
+- Command palette queries remain in widget state unless explicitly handed off
+  to a conversation.
 
-### Phase 1 — Keyboard-first retrieval and visual foundation *(implemented in this iteration)*
+## UI implementation plan
 
-**Goal:** make the existing palette satisfy the basic command-center contract.
+### Phase 1 — Durable conversation foundation
 
-Changes:
+1. Add the v4 migration and generated Drift code.
+2. Implement domain models and `AgentConversationRepository`.
+3. Refactor the conversational engine to request-scoped context.
+4. Implement `AgentConversationService` and Riverpod state.
+5. Keep the current page rendering messages from the repository before any
+   visual redesign; this isolates data correctness from layout work.
 
-- Add an active row index in `lib/widgets/media_command_palette.dart`.
-- Handle `ArrowUp`, `ArrowDown`, `Enter`, `Esc`, `Cmd+K`, and `Ctrl+K` from
-  the focused field. `Cmd/Ctrl+K` must close the palette when it is already
-  open.
-- Draw selected rows with semantic selected state and a subtle accent surface.
-- Make `Enter` open the selected result; without results it opens Ask Filmly
-  with the typed query.
-- Reset selection when the query changes and clamp it when async results are
-  replaced.
-- Keep direct player and route transitions behind the existing dismissal
-  helper so a popup barrier never remains over the destination.
-- Apply the visual design tokens for selected results, keycaps, spacing, and
-  transitions without adding a second palette-specific color system.
+**Exit criteria:** Create two conversations, restart the app, reopen either
+one, and prove that its messages and plan state are restored without mixing
+context.
 
-Files:
+### Phase 2 — Conversation workspace UI
 
-- `lib/widgets/media_command_palette.dart`
-- `test/media_command_palette_test.dart`
-- `test/media_command_palette_live_ui_test.dart`
+1. Replace the fixed 900 px single-column layout with the desktop workspace:
+   global shell + 248 px conversation rail + thread column.
+2. Make “New conversation” unsaved until the first message.
+3. Add time grouping, active row state, overflow actions, empty state, and
+   responsive rail drawer.
+4. Move plan preview into an inline card and detail drawer.
+5. Remove the permanent “Media Agent” title and the oversized welcome copy.
 
-Acceptance:
+**Exit criteria:** At a 1200 px-wide macOS app window, a person can see prior
+conversations, select one, send a message, and inspect a plan without a large
+empty canvas or an overlapping composer.
 
-- Widget tests prove Arrow navigation and Enter activate the expected row.
-- A live macOS test proves an exact-title result opens its real detail page and
-  leaves no palette visible.
+### Phase 3 — Strict command palette
 
-### Phase 1B — Agent workbench refinement *(implemented in this iteration)*
+1. Reduce the palette’s empty state to a focused input plus compact local
+   recents; remove “Open Media Agent” as a primary card.
+2. Group real results as Best match, Moments, and Ask.
+3. Add `Shift+Enter` for explicit conversation handoff and preserve the exact
+   query on the new thread.
+4. Keep `Enter` deterministic: open the highlighted title or play the
+   highlighted timestamp.
+5. Use the existing semantic search service. Search does not require a cloud
+   Agent provider.
 
-**Goal:** make the full Agent feel like a calm decision workspace, not a
-messenger clone.
+**Exit criteria:** A real indexed scene can be opened by keyboard directly
+from `Cmd+K`; an action request cannot execute from the palette.
 
-Changes:
+### Phase 4 — Plan history and recovery
 
-- Replace opposing rounded chat bubbles in
-  `lib/features/intelligence/media_agent_page.dart` with labelled editorial
-  blocks. User input uses a thin rule and muted `YOU` label; Agent output uses
-  `OPEN FILMLY` and plain canvas text.
-- Summarize tool use as a small provenance line instead of emoji chips or raw
-  function names as the dominant visual element.
-- Reserve card treatment for `MediaAgentPlan`: scope, preview count,
-  confirmation state, and the one available primary action must remain visible
-  without reading the whole conversation.
-- Refine the empty state and composer to match the 900 px reading measure and
-  the dimensions in the UI design.
-- Preserve existing plan/confirm/execute/undo behavior and their stable keys.
+1. Attach newly created `agent_runs` to their conversation ID.
+2. Resolve plan state from `AgentRunRepository` each time a historical thread
+   is opened; do not trust a stale message snapshot.
+3. Render `planned`, `confirmed`, `running`, `succeeded`, `failed`, and
+   `undone` states exactly as the existing safety workflow requires.
+4. Archive/delete conversation rules must never change existing Agent run
+   records or core library data.
 
-Files:
+**Exit criteria:** A plan generated before app restart can be reopened,
+reviewed, confirmed, executed, or inspected in its originating conversation.
 
-- `lib/features/intelligence/media_agent_page.dart`
-- `test/media_agent_page_test.dart` (new)
-- `test/agent_live_ui_test.dart`
+## Routing and keyboard integration
 
-Acceptance:
+| Route / trigger | Target |
+| --- | --- |
+| `/agent` | New unsaved workspace or last active conversation |
+| `/agent/:conversationId` | Specific persisted conversation |
+| `/agent?prompt=…` | New conversation, sends only after page initialises |
+| `Cmd/Ctrl+K` | `MediaCommandPalette.show()` from the root shell |
+| `Shift+Enter` inside palette | `/agent?prompt=…` |
+| `Cmd/Ctrl+F` | Existing page-local search, unchanged |
 
-- Empty Agent state contains the documented heading, examples, and anchored
-  composer.
-- A plan appears as a decision card with preview count and no hidden execute
-  action.
-- Existing safe-plan live flow can still find the confirmation and execution
-  controls. Provider failures must appear as a compact, readable error state.
-
-### Phase 2 — Query lifecycle and deterministic ranking
-
-**Goal:** results stay responsive and explainable as the library grows.
-
-Changes:
-
-- Add a 150–250 ms debounce before a new query becomes observable by the
-  provider; cancellation or stale-result suppression is mandatory.
-- Extract ranking policy from `SemanticSearchService` into a small testable
-  scorer if it grows beyond title/metadata/FTS precedence.
-- Dedupe the same title/scene hit while preserving the strongest evidence.
-- Group results by `Media`, `Scenes`, and `Library` only when each group has
-  enough useful content; avoid empty headers.
-- Maintain an explicit local-only availability state when embeddings or an AI
-  provider cannot run.
-
-Files:
-
-- `lib/services/intelligence/semantic_search_service.dart`
-- `lib/services/intelligence/command_search_service.dart` (new)
-- `lib/providers/intelligence_providers.dart`
-- `lib/widgets/media_command_palette.dart`
-- `test/semantic_search_service_test.dart`
-- `test/command_search_service_test.dart` (new)
-
-Acceptance:
-
-- Exact titles outrank any filename-only result.
-- The same asset/timestamp does not appear twice from FTS and embedding paths.
-- FTS-only search remains usable with no provider configuration.
-
-### Phase 3 — Intent recognition and Agent handoff
-
-**Goal:** make the palette useful for library work without turning it into a
-chat window.
-
-Changes:
-
-- Add a deterministic local `CommandIntentResolver` for known safe intents:
-  duplicates, missing subtitles, low quality, smart collection, library
-  health, and unwatched media.
-- Show a dedicated “Continue in Media Agent” row with the original prompt and
-  a plain-language explanation of what happens next.
-- Resolve read-only reports through the existing repository and Agent planning
-  services; show freshness and scope.
-- Keep ambiguous prompts as Ask Filmly retrieval, not as speculative tool
-  calls.
-
-Files:
-
-- `lib/services/intelligence/command_intent_resolver.dart` (new)
-- `lib/services/intelligence/media_agent_service.dart`
-- `lib/services/intelligence/agent_planner.dart`
-- `lib/core/router/app_router.dart`
-- `lib/widgets/media_command_palette.dart`
-- `test/command_intent_resolver_test.dart` (new)
-
-Acceptance:
-
-- “Find duplicate files” opens an Agent plan, never begins scanning or file
-  mutation from the palette.
-- “Show library health” is explicitly read-only.
-- An unrecognized prompt never claims an action was performed.
-
-### Phase 4 — Localization, accessibility, and mobile design
-
-**Goal:** make the command-center model shippable across user-facing clients.
-
-Changes:
-
-- Move strings to the app localization mechanism; keep English as source and
-  ship Simplified Chinese at the same time.
-- Add semantics labels, selected semantics, focus restoration, and high
-  contrast checks.
-- Build a mobile bottom-sheet counterpart with the same command result
-  contract, without desktop keyboard hints.
-- Add responsive screenshots for a desktop width and a phone width.
-
-Acceptance:
-
-- Keyboard-only desktop flow is complete.
-- VoiceOver / TalkBack exposes result type, evidence, and primary action.
-- Mobile targets have at least 44 pt touch size.
+The root shell owns global shortcut registration. A text field consumes normal
+typing; the shortcut handler must avoid stealing `Cmd/Ctrl+K` while an
+accessibility modal or system dialog is active.
 
 ## Tests and verification
 
-| Layer | Required verification |
+### Automated tests
+
+| Test | Coverage |
 | --- | --- |
-| Unit | ranking, dedupe, intent resolver, activation dispatcher |
-| Widget | query reset, selection, Enter/Esc/toggle, no-result fallback, error state |
-| Integration | palette → media detail; palette → player at timestamp; palette → Agent prompt |
-| Live macOS | connect to the running debug app and its real configured library; no mock data |
-| Regression | `flutter analyze`, targeted tests, existing playback / database migration tests |
+| `test/agent_conversation_repository_test.dart` | CRUD, group ordering, archive/delete, sequence ordering |
+| `test/intelligence_database_migration_test.dart` | v3 → v4 upgrade preserves assets, jobs, runs, and smart collections |
+| `test/agent_conversation_service_test.dart` | new/resume/send, bounded context, provider failure persistence |
+| `test/conversational_agent_engine_test.dart` | no cross-conversation history and correct tool/plan result mapping |
+| `test/media_command_palette_test.dart` | keyboard selection, `Enter` direct result, `Shift+Enter` handoff, no query persistence |
+| `test/agent_conversation_page_test.dart` | rail selection, new draft, responsive drawer, restored messages |
+| `test/agent_plan_history_test.dart` | reopen plan and render its current execution state |
 
-The live test must not read or print provider API keys. It may use a pre-existing
-title in the local library and should save screenshots only under `/tmp`.
+### Real macOS verification
 
-## Rollout and compatibility
+The release gate includes a non-mocked, opt-in run against the configured
+provider and existing local media database:
 
-- Feature-gate the command center behind the existing intelligence capability
-  check until Phase 1 is stable.
-- Let desktop users continue to use title search through `Cmd/Ctrl+F`.
-- Do not migrate or rewrite `media.id`, `episodes.id`, core media rows, or
-  playback progress.
-- Do not persist raw queries by default. If local history is introduced later,
-  make it opt-in and deletable.
-- Keep API keys in the system credential store; never in a plan, command
-  result, log, export, or database backup.
+1. Launch the installed macOS release build with the existing data container.
+2. Open `Cmd+K`, search an actual title and an indexed scene, then navigate by
+   keyboard to the real detail/player destination.
+3. Hand off a typed request to a new conversation.
+4. Send it to the configured provider, confirm the visible reply and any
+   returned local evidence.
+5. Navigate away, quit and relaunch, then select the conversation from the
+   rail and compare all message text and plan state.
+6. Capture the actual application screenshot and report the database counts
+   without exposing configured credentials.
 
-## Risks and mitigations
+Unit/widget tests may use controlled fakes for determinism; the acceptance
+evidence above must use the real configured provider and the real local
+library, not a mocked screenshot or data source.
 
-| Risk | Mitigation |
-| --- | --- |
-| Stale async queries reorder the list | query token / debounce and stale-result suppression |
-| Wrong top result causes wrong playback | explicit-title scoring, reason labels, keyboard selection instead of blind auto-play |
-| AI provider failure breaks basic search | local metadata + FTS remain the default retrieval path |
-| Agent request feels like a hidden operation | explicit handoff row, preview, confirmation, no mutations in palette |
-| Desktop-first UI leaks to mobile | shared result contract, independent mobile surface |
+## Data safety and backwards compatibility
 
-## Definition of done for this iteration
+- The intelligence database remains a separate file. Removing it removes only
+  conversations, indexes, and Agent metadata; media rows and playback progress
+  remain intact.
+- Existing `agent_runs` rows without `conversationId` remain listable in the
+  existing run history.
+- No core media IDs, episode IDs, import/export formats, or bundle identifiers
+  are modified.
+- The app continues to browse and play media when no provider is configured.
+- Conversation deletion must use an explicit confirmation in the UI and must
+  not delete agent-run, collection, subtitle, or media records.
 
-1. Phase 1 is implemented and covered by widget and real macOS tests.
-2. The design document's keyboard, direct-result, and safety rules are
-   reflected in the shipped palette.
-3. `flutter analyze` and all targeted tests pass.
-4. The implementation remains compatible with a library that has no AI
-   provider, no embeddings, and no transcripts.
+## Definition of done
 
-Phases 2–4 remain planned work and should be implemented in separate reviewable
-changes rather than folded into the first interaction pass.
+1. `Cmd/Ctrl+K` is visibly a command palette and opens actual results with one
+   keyboard action.
+2. The full conversation workspace has a durable, usable conversation list.
+3. Conversations survive routing and application relaunch.
+4. Provider context is limited to the selected conversation and cannot leak
+   from another conversation.
+5. Action plans remain reviewable, safe, and linked to their origin.
+6. The redesigned macOS release build passes automated tests, analysis, and a
+   real provider/local-library smoke test with screenshot evidence.
