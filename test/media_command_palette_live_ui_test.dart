@@ -19,6 +19,7 @@ void main() {
       await _dismissOpenPalette(client);
       await client.tap(key: 'sidebar_/agent');
       await _waitFor(client, 'agent_open_command_palette');
+      await _saveScreenshot(client, '00-agent-workbench');
       await client.tap(key: 'agent_open_command_palette');
       await _waitFor(client, 'media_command_palette_field');
       await _saveScreenshot(client, '01-command-palette');
@@ -44,6 +45,11 @@ void main() {
       await _waitUntilAbsent(client, 'media_command_palette_field');
       await _waitForText(client, '唐朝诡事录');
       await _saveScreenshot(client, '04-opened-result');
+
+      // Leave the debug app on the workbench so a clean desktop capture can
+      // inspect the final UI without FlutterSkill's interaction indicator.
+      await client.tap(key: 'sidebar_/agent');
+      await _waitFor(client, 'agent_workbench_welcome');
     },
     timeout: const Timeout(Duration(seconds: 45)),
     skip: enabled
