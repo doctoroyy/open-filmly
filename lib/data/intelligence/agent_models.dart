@@ -5,7 +5,9 @@ enum MediaAgentOperation {
   findDuplicates,
   inspectLowQuality,
   smartCollection,
-  listUnwatched;
+  listUnwatched,
+  customFilter,
+  libraryReport;
 
   static MediaAgentOperation fromName(String value) => values.firstWhere(
     (item) => item.name == value,
@@ -18,6 +20,8 @@ enum MediaAgentOperation {
     MediaAgentOperation.inspectLowQuality => '检查低画质文件',
     MediaAgentOperation.smartCollection => '建立智能合集',
     MediaAgentOperation.listUnwatched => '列出长期未观看内容',
+    MediaAgentOperation.customFilter => '条件组合筛选报告',
+    MediaAgentOperation.libraryReport => '影视库全盘统计与健康度分析',
   };
 }
 
@@ -175,3 +179,19 @@ class SmartCollection {
 }
 
 String encodeJson(Object value) => jsonEncode(value);
+
+class MediaAgentChatMessage {
+  const MediaAgentChatMessage({
+    required this.id,
+    required this.isUser,
+    required this.content,
+    this.plan,
+    required this.timestamp,
+  });
+
+  final String id;
+  final bool isUser;
+  final String content;
+  final MediaAgentPlan? plan;
+  final DateTime timestamp;
+}

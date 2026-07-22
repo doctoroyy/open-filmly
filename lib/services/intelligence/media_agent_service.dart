@@ -8,6 +8,7 @@ import '../../data/intelligence/smart_collection_repository.dart';
 import '../../data/models/media.dart';
 import '../../data/repositories/media_repository.dart';
 import '../../data/repositories/playback_progress_repository.dart';
+import 'agent_planner.dart';
 
 typedef AgentSubtitleGenerator = Future<List<String>> Function(Media media);
 
@@ -24,6 +25,7 @@ class MediaAgentService {
     required this.runs,
     required this.collections,
     this.subtitleGenerator,
+    this.planner,
   });
 
   final MediaRepository mediaRepository;
@@ -31,6 +33,20 @@ class MediaAgentService {
   final AgentRunRepository runs;
   final SmartCollectionRepository collections;
   final AgentSubtitleGenerator? subtitleGenerator;
+  final MediaAgentPlanner? planner;
+
+  Future<MediaAgentPlan> planFromRequest(String request) async {
+    final agentPlanner = planner;
+    if (agentPlanner == null) {
+      throw const AgentPlannerException('Gemini Agent 尚未配置');
+    }
+    final intent = await agentPlanner.plan(request);
+    return plan(
+      intent.operation,
+      query: intent.query,
+      collectionName: intent.collectionName,
+    );
+  }
 
   Future<MediaAgentPlan> plan(
     MediaAgentOperation operation, {
@@ -49,6 +65,11 @@ class MediaAgentService {
         query,
       ),
       MediaAgentOperation.listUnwatched => await _unwatchedCandidates(media),
+      MediaAgentOperation.customFilter => _collectionCandidates(
+        media,
+        query,
+      ),
+      MediaAgentOperation.libraryReport => media,
     };
     final name = collectionName?.trim().isNotEmpty == true
         ? collectionName!.trim()
@@ -142,7 +163,9 @@ class MediaAgentService {
         }
       case MediaAgentOperation.findDuplicates ||
           MediaAgentOperation.inspectLowQuality ||
-          MediaAgentOperation.listUnwatched:
+          MediaAgentOperation.listUnwatched ||
+          MediaAgentOperation.customFilter ||
+          MediaAgentOperation.libraryReport:
         break;
     }
     await runs.setStatus(runId, MediaAgentRunStatus.undone);
@@ -190,6 +213,8 @@ class MediaAgentService {
       case MediaAgentOperation.findDuplicates:
       case MediaAgentOperation.inspectLowQuality:
       case MediaAgentOperation.listUnwatched:
+      case MediaAgentOperation.customFilter:
+      case MediaAgentOperation.libraryReport:
         return {'mediaIds': ids, 'count': ids.length};
       case MediaAgentOperation.smartCollection:
         final name = run.plan.parameters['name']?.toString() ?? '智能合集';
@@ -300,6 +325,12 @@ class MediaAgentService {
           ...item.genres,
         ].where((value) => value.isNotEmpty).join(' · '),
         MediaAgentOperation.listUnwatched => '没有发现观看进度',
+        MediaAgentOperation.customFilter => [
+          item.year,
+          if (item.rating != null) '⭐ ${item.rating}',
+          ...item.genres,
+        ].where((value) => value.isNotEmpty).join(' · '),
+        MediaAgentOperation.libraryReport => '媒体类型: ${item.type.name} · 年份: ${item.year}',
       };
 
   String _description(
@@ -316,6 +347,8 @@ class MediaAgentService {
       MediaAgentOperation.smartCollection =>
         '将创建“$collectionName”，包含 $count 个媒体条目，规则：${query.trim().isEmpty ? '当前筛选结果' : query.trim()}。',
       MediaAgentOperation.listUnwatched => '发现 $count 个没有观看记录的媒体，只生成清单。',
+      MediaAgentOperation.customFilter => '符合筛选条件的媒体共有 $count 项，查询规则：${query.trim().isEmpty ? '默认全库' : query.trim()}。',
+      MediaAgentOperation.libraryReport => '媒体库全盘扫描完成，共统计 $count 项媒体数据。',
     };
   }
 

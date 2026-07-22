@@ -1,5 +1,6 @@
 import '../../data/intelligence/intelligence_asset_repository.dart';
 import '../../data/intelligence/intelligence_search_repository.dart';
+import '../../data/models/media.dart';
 import '../../data/repositories/media_repository.dart';
 
 class AskFilmlyResult {
@@ -55,7 +56,10 @@ class SemanticSearchService {
           mediaId: item.id,
           snippet: item.overview ?? '',
           reason: '媒体库元数据匹配',
-          score: 1,
+          // A path can contain a show's name even when this particular row has
+          // incorrect legacy metadata. Prefer the explicit title so selecting
+          // the first command-palette result is safe and unsurprising.
+          score: _mediaMatchScore(item, normalized),
         ),
       ),
     );
@@ -93,5 +97,17 @@ class SemanticSearchService {
     final name = slash >= 0 ? withoutQuery.substring(slash + 1) : withoutQuery;
     final dot = name.lastIndexOf('.');
     return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  double _mediaMatchScore(Media item, String query) {
+    final normalizedQuery = query.trim().toLowerCase();
+    final title = item.title.trim().toLowerCase();
+    if (title == normalizedQuery) return 10;
+    if (title.startsWith(normalizedQuery)) return 9;
+    if (title.contains(normalizedQuery)) return 8;
+
+    final overview = (item.overview ?? '').toLowerCase();
+    if (overview.contains(normalizedQuery)) return 4;
+    return 1;
   }
 }

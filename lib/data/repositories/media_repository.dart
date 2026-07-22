@@ -92,6 +92,57 @@ class MediaRepository {
     return browse(searchTerm: normalized, sort: sort, limit: limit);
   }
 
+  /// Advanced multi-condition query for Agent intelligence and smart filtering.
+  Future<List<Media>> queryAdvanced({
+    String? searchTerm,
+    List<String>? genres,
+    int? minYear,
+    int? maxYear,
+    double? minRating,
+    MediaType? type,
+    bool? unwatchedOnly,
+  }) async {
+    var items = await browse(type: type, deduplicateShows: false);
+
+    if (searchTerm != null && searchTerm.trim().isNotEmpty) {
+      final norm = searchTerm.trim().toLowerCase();
+      items = items.where((m) => _matchesSearch(m, norm)).toList();
+    }
+
+    if (genres != null && genres.isNotEmpty) {
+      final normGenres = genres
+          .map((g) => g.trim().toLowerCase())
+          .where((g) => g.isNotEmpty)
+          .toList(growable: false);
+      if (normGenres.isNotEmpty) {
+        items = items.where((m) => _matchesGenreTerms(m, normGenres)).toList();
+      }
+    }
+
+    if (minYear != null) {
+      items = items.where((m) {
+        final y = int.tryParse(m.year);
+        return y != null && y >= minYear;
+      }).toList();
+    }
+
+    if (maxYear != null) {
+      items = items.where((m) {
+        final y = int.tryParse(m.year);
+        return y != null && y <= maxYear;
+      }).toList();
+    }
+
+    if (minRating != null) {
+      items = items.where((m) {
+        final r = double.tryParse(m.rating ?? '');
+        return r != null && r >= minRating;
+      }).toList();
+    }
+
+    return items;
+  }
+
   Future<void> upsert(Media media) async {
     final now = DateTime.now().toIso8601String();
     await _db

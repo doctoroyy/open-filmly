@@ -98,8 +98,10 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         ),
         GoRoute(
           path: '/ask',
-          pageBuilder: (context, state) =>
-              _fadePage(state, const AskFilmlyPage()),
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            AskFilmlyPage(initialQuery: state.uri.queryParameters['q']),
+          ),
         ),
         GoRoute(
           path: '/me',
@@ -231,8 +233,10 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
         ),
         GoRoute(
           path: '/agent',
-          pageBuilder: (context, state) =>
-              _fadePage(state, const MediaAgentPage()),
+          pageBuilder: (context, state) => _fadePage(
+            state,
+            MediaAgentPage(initialPrompt: state.uri.queryParameters['prompt']),
+          ),
         ),
       ],
     ),

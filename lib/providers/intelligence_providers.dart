@@ -15,6 +15,8 @@ import '../providers/data_providers.dart';
 import '../services/intelligence/media_identity_service.dart';
 import '../services/intelligence/media_context_service.dart';
 import '../services/intelligence/media_agent_service.dart';
+import '../services/intelligence/agent_planner.dart';
+import '../services/intelligence/conversational_agent_engine.dart';
 import '../services/intelligence/ai_job_service.dart';
 import '../services/intelligence/ai_provider.dart';
 import '../services/intelligence/ai_worker_client.dart';
@@ -136,6 +138,9 @@ final mediaAgentServiceProvider = FutureProvider<MediaAgentService>((
     progressRepository: ref.watch(playbackProgressRepositoryProvider),
     runs: ref.watch(agentRunRepositoryProvider),
     collections: ref.watch(smartCollectionRepositoryProvider),
+    planner: config.geminiApiKey.trim().isEmpty
+        ? null
+        : GeminiAgentPlanner(apiKey: config.geminiApiKey),
     subtitleGenerator: intelligence == null
         ? null
         : (media) async {
@@ -165,4 +170,16 @@ final mediaAgentServiceProvider = FutureProvider<MediaAgentService>((
   );
   await service.recoverInterrupted();
   return service;
+});
+
+final conversationalAgentEngineProvider = FutureProvider<ConversationalAgentEngine?>((ref) async {
+  final config = await ref.watch(configProvider.future);
+  if (config.geminiApiKey.trim().isEmpty) return null;
+  final service = await ref.watch(mediaAgentServiceProvider.future);
+  return ConversationalAgentEngine(
+    apiKey: config.geminiApiKey,
+    mediaRepository: ref.watch(mediaRepositoryProvider),
+    progressRepository: ref.watch(playbackProgressRepositoryProvider),
+    agentService: service,
+  );
 });

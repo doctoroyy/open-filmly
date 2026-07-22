@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/core/router/app_router.dart';
@@ -71,6 +72,25 @@ void main() {
     // add_rounded is in the top bar (and the empty-state button).
     expect(find.byIcon(Icons.add_rounded), findsWidgets);
   });
+
+  testWidgets(
+    'Cmd+K opens the media command palette without leaving the page',
+    (tester) async {
+      await pumpApp(tester);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('media_command_palette')), findsOneWidget);
+      expect(
+        find.byKey(const Key('media_command_palette_field')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('sidebar_/')), findsOneWidget);
+    },
+  );
 
   testWidgets('sidebar settings item navigates to the config page', (
     tester,

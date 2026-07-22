@@ -9,7 +9,9 @@ import '../../widgets/filmly_design.dart';
 import '../../services/intelligence/semantic_search_service.dart';
 
 class AskFilmlyPage extends ConsumerStatefulWidget {
-  const AskFilmlyPage({super.key});
+  const AskFilmlyPage({super.key, this.initialQuery});
+
+  final String? initialQuery;
 
   @override
   ConsumerState<AskFilmlyPage> createState() => _AskFilmlyPageState();
@@ -23,6 +25,11 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
   @override
   void initState() {
     super.initState();
+    final initialQuery = widget.initialQuery?.trim() ?? '';
+    if (initialQuery.isNotEmpty) {
+      _controller.text = initialQuery;
+      _query = initialQuery;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
@@ -49,7 +56,9 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
       return;
     }
     final mediaId = result.mediaId;
-    if (mediaId != null && mounted) context.push('/media?id=${Uri.encodeQueryComponent(mediaId)}');
+    if (mediaId != null && mounted) {
+      context.push('/media?id=${Uri.encodeQueryComponent(mediaId)}');
+    }
   }
 
   @override
@@ -73,7 +82,8 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
                     children: [
                       FilmlyIconButton(
                         icon: Icons.chevron_left_rounded,
-                        onTap: () => context.canPop() ? context.pop() : context.go('/'),
+                        onTap: () =>
+                            context.canPop() ? context.pop() : context.go('/'),
                       ),
                       const SizedBox(width: 14),
                       const Text(
@@ -89,7 +99,10 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
                   const SizedBox(height: 12),
                   const Text(
                     '描述一个场景、对白、人物或主题，直接跳到影片中的对应时刻。',
-                    style: TextStyle(color: FilmlyPalette.textMuted, fontSize: 14),
+                    style: TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 22),
                   TextField(
@@ -97,7 +110,10 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
                     focusNode: _focusNode,
                     onChanged: (value) => setState(() => _query = value),
                     onSubmitted: (_) => setState(() {}),
-                    style: const TextStyle(color: FilmlyPalette.textPrimary, fontSize: 17),
+                    style: const TextStyle(
+                      color: FilmlyPalette.textPrimary,
+                      fontSize: 17,
+                    ),
                     decoration: InputDecoration(
                       hintText: '例如：找所有雨夜等待、纽约夜景或关于时间的对白',
                       prefixIcon: const Icon(Icons.auto_awesome_rounded),
@@ -151,7 +167,9 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
         child: Row(
           children: [
             Icon(
-              result.isScene ? Icons.play_circle_outline_rounded : Icons.movie_outlined,
+              result.isScene
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.movie_outlined,
               color: FilmlyPalette.accent,
               size: 30,
             ),
@@ -160,17 +178,30 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(result.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(
+                    result.title,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   if (result.snippet.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 5),
-                      child: Text(result.snippet, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        result.snippet,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(
-                      [result.reason, if (timestamp.isNotEmpty) timestamp].join(' · '),
-                      style: const TextStyle(color: FilmlyPalette.textMuted, fontSize: 12),
+                      [
+                        result.reason,
+                        if (timestamp.isNotEmpty) timestamp,
+                      ].join(' · '),
+                      style: const TextStyle(
+                        color: FilmlyPalette.textMuted,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],

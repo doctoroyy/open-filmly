@@ -11,6 +11,7 @@ import 'package:open_filmly/data/models/media.dart';
 import 'package:open_filmly/data/repositories/media_repository.dart';
 import 'package:open_filmly/data/repositories/playback_progress_repository.dart';
 import 'package:open_filmly/services/intelligence/media_agent_service.dart';
+import 'package:open_filmly/services/intelligence/agent_planner.dart';
 
 void main() {
   test(
@@ -137,5 +138,48 @@ void main() {
         hasLength(1),
       );
     },
+  );
+
+  test(
+    'turns a natural-language request into a normal confirmation plan',
+    () async {
+      final core = AppDatabase(NativeDatabase.memory());
+      final intelligence = IntelligenceDatabase.inMemory();
+      addTearDown(core.close);
+      addTearDown(intelligence.close);
+      final mediaRepository = MediaRepository(core);
+      await mediaRepository.upsert(
+        const Media(
+          id: 'agent-request-movie',
+          title: 'Space Film',
+          year: '2026',
+          type: MediaType.movie,
+          path: '/Movies/space.mkv',
+          detailsJson: '{"genres":["Sci-Fi"]}',
+        ),
+      );
+      final service = MediaAgentService(
+        mediaRepository: mediaRepository,
+        progressRepository: PlaybackProgressRepository(core),
+        runs: AgentRunRepository(intelligence),
+        collections: SmartCollectionRepository(intelligence),
+        planner: _FakeAgentPlanner(),
+      );
+
+      final plan = await service.planFromRequest('把科幻片整理成合集');
+
+      expect(plan.operation, MediaAgentOperation.smartCollection);
+      expect(plan.parameters['query'], 'Sci-Fi');
+      expect(plan.preview.single.title, 'Space Film');
+    },
+  );
+}
+
+class _FakeAgentPlanner implements MediaAgentPlanner {
+  @override
+  Future<AgentIntent> plan(String request) async => const AgentIntent(
+    operation: MediaAgentOperation.smartCollection,
+    query: 'Sci-Fi',
+    collectionName: '科幻片',
   );
 }

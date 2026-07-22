@@ -12,6 +12,7 @@ import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/global_search.dart';
+import '../../widgets/media_command_palette.dart';
 
 /// Persistent macOS-style split view: a light sidebar on the left (brand +
 /// library nav) and the routed content on the right — matching NetEase 爆米花's
@@ -175,7 +176,7 @@ class _AppShellState extends ConsumerState<AppShell> {
           ),
           _OpenAskFilmlyIntent: CallbackAction<_OpenAskFilmlyIntent>(
             onInvoke: (_) {
-              context.go('/ask');
+              MediaCommandPalette.show(context);
               return null;
             },
           ),
