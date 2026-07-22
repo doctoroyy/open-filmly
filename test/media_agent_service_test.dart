@@ -8,6 +8,7 @@ import 'package:open_filmly/data/intelligence/agent_run_repository.dart';
 import 'package:open_filmly/data/intelligence/intelligence_database.dart';
 import 'package:open_filmly/data/intelligence/smart_collection_repository.dart';
 import 'package:open_filmly/data/models/media.dart';
+import 'package:open_filmly/data/models/playback_progress.dart';
 import 'package:open_filmly/data/repositories/media_repository.dart';
 import 'package:open_filmly/data/repositories/playback_progress_repository.dart';
 import 'package:open_filmly/services/intelligence/media_agent_service.dart';
@@ -171,6 +172,63 @@ void main() {
       expect(plan.operation, MediaAgentOperation.smartCollection);
       expect(plan.parameters['query'], 'Sci-Fi');
       expect(plan.preview.single.title, 'Space Film');
+    },
+  );
+
+  test(
+    'matches a Chinese genre and unwatched condition for a smart collection',
+    () async {
+      final core = AppDatabase(NativeDatabase.memory());
+      final intelligence = IntelligenceDatabase.inMemory();
+      addTearDown(core.close);
+      addTearDown(intelligence.close);
+      final mediaRepository = MediaRepository(core);
+      final progressRepository = PlaybackProgressRepository(core);
+      await mediaRepository.upsert(
+        const Media(
+          id: 'unwatched-scifi',
+          title: '未看的科幻片',
+          year: '2026',
+          type: MediaType.movie,
+          path: '/Movies/unwatched-scifi.mkv',
+          detailsJson: '{"genres":["科幻"]}',
+          dateAdded: '2020-01-01T00:00:00.000Z',
+        ),
+      );
+      await mediaRepository.upsert(
+        const Media(
+          id: 'watched-scifi',
+          title: '看过的科幻片',
+          year: '2026',
+          type: MediaType.movie,
+          path: '/Movies/watched-scifi.mkv',
+          detailsJson: '{"genres":["科幻"]}',
+          dateAdded: '2020-01-01T00:00:00.000Z',
+        ),
+      );
+      await progressRepository.save(
+        PlaybackProgress(
+          mediaId: 'watched-scifi',
+          position: const Duration(minutes: 45),
+          duration: const Duration(hours: 2),
+          updatedAt: DateTime.utc(2026, 7, 1),
+        ),
+      );
+
+      final service = MediaAgentService(
+        mediaRepository: mediaRepository,
+        progressRepository: progressRepository,
+        runs: AgentRunRepository(intelligence),
+        collections: SmartCollectionRepository(intelligence),
+      );
+
+      final plan = await service.plan(
+        MediaAgentOperation.smartCollection,
+        query: '科幻 且 未观看',
+        collectionName: '未观看科幻片合集',
+      );
+
+      expect(plan.preview.map((item) => item.mediaId), ['unwatched-scifi']);
     },
   );
 }

@@ -4,11 +4,9 @@ import 'package:open_filmly/data/database/database.dart';
 import 'package:open_filmly/data/intelligence/intelligence_asset_repository.dart';
 import 'package:open_filmly/data/intelligence/intelligence_database.dart';
 import 'package:open_filmly/data/intelligence/intelligence_search_repository.dart';
-import 'package:open_filmly/data/intelligence/embedding_repository.dart';
 import 'package:open_filmly/data/models/media.dart';
 import 'package:open_filmly/data/repositories/media_repository.dart';
 import 'package:open_filmly/services/intelligence/ai_provider.dart';
-import 'package:open_filmly/services/intelligence/embedding_index_service.dart';
 import 'package:open_filmly/services/intelligence/media_identity_service.dart';
 import 'package:open_filmly/services/intelligence/semantic_search_service.dart';
 import 'package:open_filmly/services/intelligence/transcript_service.dart';
@@ -48,20 +46,10 @@ void main() {
       ),
     );
 
-    final transcripts = TranscriptService(intelligence);
-    final embeddingIndex = EmbeddingIndexService(
-      provider: FakeSemanticProvider(),
-      embeddings: EmbeddingRepository(intelligence),
-      transcripts: transcripts,
-    );
-    await embeddingIndex.indexAsset(identity.identityKey, model: 'test-model');
-
     final service = SemanticSearchService(
       mediaRepository: mediaRepository,
       assets: IntelligenceAssetRepository(intelligence),
       transcriptSearch: IntelligenceSearchRepository(intelligence),
-      embeddingSearch: embeddingIndex,
-      embeddingModel: 'test-model',
     );
     final results = await service.search('rain');
 
@@ -136,47 +124,4 @@ void main() {
 
     expect(results.first.mediaId, 'exact-title');
   });
-}
-
-class FakeSemanticProvider implements AiProvider {
-  @override
-  String get id => 'fake';
-
-  @override
-  Future<Map<String, dynamic>> probe(
-    String path, {
-    void Function(double progress)? onProgress,
-  }) => Future.value(const {});
-
-  @override
-  Future<TranscriptionResult> transcribe({
-    required String path,
-    required String language,
-    required String model,
-    void Function(double progress)? onProgress,
-  }) => throw UnimplementedError();
-
-  @override
-  Future<TranslationResult> translate({
-    required List<String> texts,
-    required String sourceLanguage,
-    required String targetLanguage,
-    required String model,
-    void Function(double progress)? onProgress,
-  }) => throw UnimplementedError();
-
-  @override
-  Future<List<double>> embed({
-    required String text,
-    required String model,
-  }) async => const [1, 0];
-
-  @override
-  Future<List<String>> sampleFrames({
-    required String path,
-    required String outputDirectory,
-    required int durationMs,
-    int count = 12,
-    void Function(double progress)? onProgress,
-  }) => throw UnimplementedError();
 }

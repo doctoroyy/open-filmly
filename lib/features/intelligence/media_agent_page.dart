@@ -7,6 +7,23 @@ import '../../providers/intelligence_providers.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/media_command_palette.dart';
 
+/// Gemini may use lightweight Markdown even when the conversation surface is
+/// intentionally editorial rather than a Markdown document. Preserve the
+/// content while removing the formatting markers that would otherwise render
+/// as visual noise in a compact Agent reply.
+String normalizeAgentReply(String value) {
+  return value
+      .replaceAll('\r\n', '\n')
+      .replaceAll(
+        RegExp(r'^[ \t]{0,3}#{1,6}[ \t]+', multiLine: true),
+        '',
+      )
+      .replaceAll('**', '')
+      .replaceAll('__', '')
+      .replaceAll('`', '')
+      .trim();
+}
+
 class ChatUiMessage {
   ChatUiMessage({
     required this.id,
@@ -461,6 +478,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
 
   Widget _buildMessageBubble(ChatUiMessage msg) {
     final isUser = msg.isUser;
+    final displayText = isUser ? msg.text : normalizeAgentReply(msg.text);
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
@@ -492,7 +510,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              msg.text,
+              displayText,
               style: const TextStyle(
                 color: FilmlyPalette.textPrimary,
                 fontSize: 14,
@@ -523,6 +541,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Widget _buildActionCard(ChatUiMessage msg) {
     final plan = msg.plan!;
     final run = msg.run;
+    final hasMatches = plan.preview.isNotEmpty;
     return FilmlyGlassPanel(
       key: const Key('agent_plan_panel'),
       borderRadius: BorderRadius.circular(14),
@@ -547,7 +566,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                   ),
                 ),
               ),
-              if (plan.preview.isNotEmpty)
+              if (hasMatches)
                 Text(
                   '${plan.preview.length} ITEMS',
                   style: const TextStyle(
@@ -578,7 +597,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
             ),
           ),
           const SizedBox(height: 10),
-          if (plan.preview.isNotEmpty)
+          if (hasMatches)
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 140),
               child: Container(
@@ -623,8 +642,44 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                 ),
               ),
             ),
+          if (!hasMatches) ...[
+            const SizedBox(height: 10),
+            Container(
+              key: const Key('agent_empty_plan_notice'),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: FilmlyPalette.background.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.search_off_rounded,
+                    size: 16,
+                    color: FilmlyPalette.textMuted,
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'No matches in this library. Nothing will change; try a broader rule or refresh metadata.',
+                      style: TextStyle(
+                        color: FilmlyPalette.textSecondary,
+                        fontSize: 11,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
-          if (run == null)
+          if (run == null && !hasMatches)
+            const Text(
+              'Nothing to confirm until this plan has matches.',
+              style: TextStyle(color: FilmlyPalette.textMuted, fontSize: 12),
+            )
+          else if (run == null)
             FilmlyGlassButton(
               key: const Key('agent_confirm_plan_button'),
               label: 'Review & confirm',

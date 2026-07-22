@@ -60,12 +60,12 @@ class MediaAgentService {
       MediaAgentOperation.findDuplicates => _duplicateCandidates(media),
       MediaAgentOperation.inspectLowQuality =>
         media.where(_isLowQuality).toList(),
-      MediaAgentOperation.smartCollection => _collectionCandidates(
+      MediaAgentOperation.smartCollection => await _collectionCandidates(
         media,
         query,
       ),
       MediaAgentOperation.listUnwatched => await _unwatchedCandidates(media),
-      MediaAgentOperation.customFilter => _collectionCandidates(
+      MediaAgentOperation.customFilter => await _collectionCandidates(
         media,
         query,
       ),
@@ -263,20 +263,44 @@ class MediaAgentService {
         .toList(growable: false);
   }
 
-  List<Media> _collectionCandidates(List<Media> media, String query) {
+  Future<List<Media>> _collectionCandidates(
+    List<Media> media,
+    String query,
+  ) async {
     final normalized = query.trim().toLowerCase();
     if (normalized.isEmpty) return media;
-    return media
-        .where((item) {
-          final haystack = [
-            item.title,
-            item.overview ?? '',
-            item.genres.join(' '),
-            item.path,
-          ].join(' ').toLowerCase();
-          return normalized.split(RegExp(r'\s+')).every(haystack.contains);
-        })
+
+    final requiresUnwatched = RegExp(
+      r'未观看|未看|没看|unwatched(?:\s*:\s*true)?',
+    ).hasMatch(normalized);
+    final normalizedTerms = normalized
+        .replaceAll(
+          RegExp(r'未观看|未看|没看|unwatched(?:\s*:\s*true)?'),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\b(?:and|or)\b|且|以及|并且|genre\s*:'), ' ')
+        .split(RegExp(r'\s+'))
+        .map((term) => term.trim())
+        .where((term) => term.isNotEmpty)
         .toList(growable: false);
+
+    final matches = <Media>[];
+    for (final item in media) {
+      final haystack = [
+        item.title,
+        item.overview ?? '',
+        item.genres.join(' '),
+        item.path,
+      ].join(' ').toLowerCase();
+      if (!normalizedTerms.every(haystack.contains)) continue;
+
+      if (requiresUnwatched) {
+        final progress = await progressRepository.getByMediaId(item.id);
+        if (progress != null && progress.position > Duration.zero) continue;
+      }
+      matches.add(item);
+    }
+    return matches;
   }
 
   bool _isSubtitleCandidate(Media item) {
