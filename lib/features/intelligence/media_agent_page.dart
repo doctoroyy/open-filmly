@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/router/app_router.dart';
 import '../../data/intelligence/agent_models.dart';
 import '../../providers/intelligence_providers.dart';
 import '../../widgets/filmly_design.dart';
@@ -34,6 +37,7 @@ class MediaAgentPage extends ConsumerStatefulWidget {
 
 class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   static const _railWidth = 248.0;
+  static const _drawerWidth = 300.0;
 
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
@@ -43,6 +47,8 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Map<String, MediaAgentRun> _runs = const {};
   Set<String> _conversationsWithPlans = const {};
   String? _activeConversationId;
+  MediaAgentRun? _detailRun;
+  bool _showArchived = false;
   bool _loading = true;
   bool _thinking = false;
   String? _error;
@@ -57,7 +63,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
         selectLatest: initialPrompt == null || initialPrompt.isEmpty,
       );
       if (initialPrompt?.isNotEmpty == true && mounted) {
-        _startNewConversation();
+        await _startNewConversation();
         await _sendMessage(initialPrompt);
       }
     });
@@ -86,26 +92,33 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   }) async {
     if (showLoading && mounted) setState(() => _loading = true);
     final service = ref.read(agentConversationServiceProvider);
-    final conversations = await service.listConversations();
+    final conversations = await service.listConversations(
+      includeArchived: _showArchived,
+    );
+    final visible = _showArchived
+        ? conversations.where((item) => item.isArchived).toList(growable: false)
+        : conversations;
     final conversationsWithPlans = await service.conversationIdsWithPlans();
     final requestedId = preferredConversationId ?? _activeConversationId;
-    final activeId = conversations.any((item) => item.id == requestedId)
+    final activeId = visible.any((item) => item.id == requestedId)
         ? requestedId
-        : (selectLatest && conversations.isNotEmpty
-              ? conversations.first.id
-              : null);
+        : (selectLatest && visible.isNotEmpty ? visible.first.id : null);
     final messages = activeId == null
         ? const <AgentConversationMessage>[]
         : await service.listMessages(activeId);
     final runs = await _loadRuns(messages);
+    final detailRun = _detailRun == null
+        ? null
+        : (runs[_detailRun!.id] ?? _detailRun);
 
     if (!mounted) return;
     setState(() {
-      _conversations = conversations;
+      _conversations = visible;
       _conversationsWithPlans = conversationsWithPlans;
       _activeConversationId = activeId;
       _messages = messages;
       _runs = runs;
+      _detailRun = detailRun;
       _loading = false;
     });
     _scrollToBottom();
@@ -133,13 +146,58 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Future<void> _selectConversation(String id) =>
       _loadWorkspace(preferredConversationId: id, selectLatest: false);
 
-  void _startNewConversation() {
+  Future<void> _startNewConversation() async {
+    final leaveArchive = _showArchived;
     setState(() {
       _activeConversationId = null;
       _messages = const [];
       _runs = const {};
+      _detailRun = null;
       _error = null;
+      if (_showArchived) _showArchived = false;
     });
+    if (leaveArchive) {
+      await _loadWorkspace(selectLatest: false, showLoading: false);
+    }
+  }
+
+  Future<void> _toggleArchivedView() async {
+    setState(() {
+      _showArchived = !_showArchived;
+      _activeConversationId = null;
+      _messages = const [];
+      _runs = const {};
+      _detailRun = null;
+    });
+    await _loadWorkspace(selectLatest: true, showLoading: true);
+  }
+
+  void _openPlanDetail(MediaAgentRun run) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= 1120) {
+      setState(() => _detailRun = run);
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SafeArea(
+        top: false,
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.82,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            child: _planDetailPanel(run, sheet: true),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _closePlanDetail() {
+    if (_detailRun == null) return;
+    setState(() => _detailRun = null);
   }
 
   Future<void> _sendMessage([String? override]) async {
@@ -232,10 +290,15 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
         await service.setPinned(conversation.id, pinned: false);
       case _ConversationAction.archive:
         await service.setArchived(conversation.id, archived: true);
+      case _ConversationAction.unarchive:
+        await service.setArchived(conversation.id, archived: false);
       case _ConversationAction.delete:
         final confirmed = await _confirmDelete(conversation);
         if (!confirmed) return;
         await service.delete(conversation.id);
+        if (_detailRun?.conversationId == conversation.id) {
+          _detailRun = null;
+        }
     }
     if (!mounted) return;
     await _loadWorkspace(selectLatest: true, showLoading: false);
@@ -313,13 +376,27 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final railVisible = constraints.maxWidth >= 780;
+            final drawerInline =
+                constraints.maxWidth >= 1120 && _detailRun != null;
             return Row(
               children: [
                 if (railVisible) ...[
-                  SizedBox(width: _railWidth, child: _conversationRail()),
+                  SizedBox(
+                    width: constraints.maxWidth >= 1120
+                        ? _railWidth
+                        : 232,
+                    child: _conversationRail(),
+                  ),
                   const VerticalDivider(width: 1, color: Color(0xFFE5E2DC)),
                 ],
                 Expanded(child: _thread(railVisible: railVisible)),
+                if (drawerInline) ...[
+                  const VerticalDivider(width: 1, color: Color(0xFFE5E2DC)),
+                  SizedBox(
+                    width: _drawerWidth,
+                    child: _planDetailPanel(_detailRun!),
+                  ),
+                ],
               ],
             );
           },
@@ -349,14 +426,14 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
         ),
       ),
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         child: SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
             key: const Key('agent_new_conversation'),
-            onPressed: () {
+            onPressed: () async {
               if (sheet) Navigator.of(context).pop();
-              _startNewConversation();
+              await _startNewConversation();
             },
             icon: const Icon(Icons.edit_outlined, size: 16),
             label: const Text('New conversation'),
@@ -364,6 +441,35 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
               foregroundColor: FilmlyPalette.textPrimary,
               side: const BorderSide(color: Color(0xFFE5E2DC)),
               padding: const EdgeInsets.symmetric(vertical: 11),
+            ),
+          ),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const Key('agent_toggle_archived'),
+            onPressed: () async {
+              if (sheet) Navigator.of(context).pop();
+              await _toggleArchivedView();
+            },
+            icon: Icon(
+              _showArchived
+                  ? Icons.inbox_outlined
+                  : Icons.archive_outlined,
+              size: 15,
+            ),
+            label: Text(_showArchived ? 'Active conversations' : 'Archived'),
+            style: TextButton.styleFrom(
+              foregroundColor: FilmlyPalette.textSecondary,
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
             ),
           ),
         ),
@@ -376,14 +482,16 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
       );
     } else if (_conversations.isEmpty) {
       children.add(
-        const Expanded(
+        Expanded(
           child: Padding(
-            padding: EdgeInsets.all(18),
+            padding: const EdgeInsets.all(18),
             child: Align(
               alignment: Alignment.topLeft,
               child: Text(
-                'Your saved questions and plans will appear here.',
-                style: TextStyle(
+                _showArchived
+                    ? 'No archived conversations.'
+                    : 'Your saved questions and plans will appear here.',
+                style: const TextStyle(
                   color: FilmlyPalette.textMuted,
                   fontSize: 12,
                   height: 1.45,
@@ -542,9 +650,13 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                       : _ConversationAction.pin,
                   child: Text(conversation.isPinned ? 'Unpin' : 'Pin'),
                 ),
-                const PopupMenuItem(
-                  value: _ConversationAction.archive,
-                  child: Text('Archive'),
+                PopupMenuItem(
+                  value: conversation.isArchived
+                      ? _ConversationAction.unarchive
+                      : _ConversationAction.archive,
+                  child: Text(
+                    conversation.isArchived ? 'Unarchive' : 'Archive',
+                  ),
                 ),
                 const PopupMenuDivider(),
                 const PopupMenuItem(
@@ -592,16 +704,51 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  conversation?.title ?? 'New conversation',
+                InkWell(
                   key: const Key('agent_thread_title'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: FilmlyPalette.textPrimary,
-                    fontSize: 18,
-                    letterSpacing: -0.35,
-                    fontWeight: FontWeight.w700,
+                  onTap: conversation == null
+                      ? null
+                      : () async {
+                          final value = await _promptRename(conversation);
+                          if (value == null || value.trim().isEmpty) return;
+                          await ref
+                              .read(agentConversationServiceProvider)
+                              .rename(conversation.id, value);
+                          if (!mounted) return;
+                          await _loadWorkspace(
+                            preferredConversationId: conversation.id,
+                            selectLatest: false,
+                            showLoading: false,
+                          );
+                        },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            conversation?.title ?? 'New conversation',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: FilmlyPalette.textPrimary,
+                              fontSize: 18,
+                              letterSpacing: -0.35,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (conversation != null) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.edit_outlined,
+                            size: 14,
+                            color: FilmlyPalette.textMuted,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -617,6 +764,37 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
               ],
             ),
           ),
+          if (conversation != null)
+            PopupMenuButton<_ConversationAction>(
+              tooltip: 'Conversation options',
+              onSelected: (action) =>
+                  _handleConversationAction(action, conversation),
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: _ConversationAction.rename,
+                  child: Text('Rename'),
+                ),
+                PopupMenuItem(
+                  value: conversation.isPinned
+                      ? _ConversationAction.unpin
+                      : _ConversationAction.pin,
+                  child: Text(conversation.isPinned ? 'Unpin' : 'Pin'),
+                ),
+                PopupMenuItem(
+                  value: conversation.isArchived
+                      ? _ConversationAction.unarchive
+                      : _ConversationAction.archive,
+                  child: Text(
+                    conversation.isArchived ? 'Unarchive' : 'Archive',
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: _ConversationAction.delete,
+                  child: Text('Delete'),
+                ),
+              ],
+            ),
           TextButton.icon(
             key: const Key('agent_open_command_palette'),
             onPressed: () => MediaCommandPalette.show(context),
@@ -809,6 +987,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   Widget _planCard(MediaAgentRun run) {
     final plan = run.plan;
     final hasMatches = plan.preview.isNotEmpty;
+    final preview = plan.preview.isNotEmpty ? plan.preview : run.preview;
     return Container(
       key: const Key('agent_plan_panel'),
       padding: const EdgeInsets.all(15),
@@ -838,7 +1017,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                 ),
               ),
               Text(
-                '${plan.preview.length} ITEMS',
+                '${preview.length} ITEMS',
                 style: const TextStyle(
                   color: FilmlyPalette.textMuted,
                   fontSize: 10,
@@ -874,8 +1053,8 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Column(
-                children: plan.preview
-                    .take(4)
+                children: preview
+                    .take(3)
                     .map(
                       (item) => Padding(
                         padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
@@ -896,9 +1075,181 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                     .toList(growable: false),
               ),
             ),
+            if (preview.length > 3 || hasMatches)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: Key('agent_open_plan_detail_${run.id}'),
+                  onPressed: () => _openPlanDetail(run),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF246BDE),
+                    textStyle: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    padding: const EdgeInsets.only(top: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: Text(
+                    preview.length > 3
+                        ? 'View all ${preview.length} titles'
+                        : 'Inspect plan',
+                  ),
+                ),
+              ),
           ],
           const SizedBox(height: 13),
           _planAction(run, hasMatches: hasMatches),
+        ],
+      ),
+    );
+  }
+
+  Widget _planDetailPanel(MediaAgentRun run, {bool sheet = false}) {
+    final plan = run.plan;
+    final preview = plan.preview.isNotEmpty ? plan.preview : run.preview;
+    final hasMatches = preview.isNotEmpty;
+    return DecoratedBox(
+      key: const Key('agent_plan_detail_drawer'),
+      decoration: const BoxDecoration(color: Color(0xFFFFFDFC)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 10),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'PLAN DETAIL',
+                    style: TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.05,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  key: const Key('agent_close_plan_detail'),
+                  tooltip: 'Close',
+                  onPressed: () {
+                    if (sheet) {
+                      Navigator.of(context).pop();
+                    } else {
+                      _closePlanDetail();
+                    }
+                  },
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              plan.title,
+              style: const TextStyle(
+                color: FilmlyPalette.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              _planStatusLabel(run.status),
+              style: const TextStyle(
+                color: FilmlyPalette.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.85,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              plan.description,
+              style: const TextStyle(
+                color: FilmlyPalette.textSecondary,
+                fontSize: 12,
+                height: 1.45,
+              ),
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE5E2DC)),
+          Expanded(
+            child: preview.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(18),
+                      child: Text(
+                        'No affected titles in this plan yet.',
+                        style: TextStyle(
+                          color: FilmlyPalette.textMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                    itemCount: preview.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 4),
+                    itemBuilder: (context, index) {
+                      final item = preview[index];
+                      return InkWell(
+                        key: Key('agent_plan_preview_$index'),
+                        onTap: item.mediaId == null
+                            ? null
+                            : () => context.push(
+                                  mediaDetailLocation(item.mediaId!),
+                                ),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 9,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: FilmlyPalette.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (item.detail.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  item.detail,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: FilmlyPalette.textMuted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          const Divider(height: 1, color: Color(0xFFE5E2DC)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+            child: _planAction(run, hasMatches: hasMatches),
+          ),
         ],
       ),
     );
@@ -968,60 +1319,70 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
     };
   }
 
-  Widget _composer() => Container(
-    padding: const EdgeInsets.fromLTRB(28, 12, 28, 20),
-    decoration: const BoxDecoration(color: Color(0xFFF6F5F2)),
-    child: Align(
-      alignment: Alignment.center,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          padding: const EdgeInsets.fromLTRB(13, 7, 8, 7),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFDFC),
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(color: const Color(0xFFE5E2DC)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0D000000),
-                blurRadius: 18,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  key: const Key('agent_request_input'),
-                  controller: _inputController,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    hintText: 'Ask about your library or describe a task…',
-                    hintStyle: TextStyle(color: FilmlyPalette.textMuted),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 9,
+  Widget _composer() => CallbackShortcuts(
+    bindings: <ShortcutActivator, VoidCallback>{
+      const SingleActivator(LogicalKeyboardKey.enter, meta: true): () {
+        if (!_thinking) _sendMessage();
+      },
+      const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
+        if (!_thinking) _sendMessage();
+      },
+    },
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(28, 12, 28, 20),
+      decoration: const BoxDecoration(color: Color(0xFFF6F5F2)),
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 56),
+            padding: const EdgeInsets.fromLTRB(13, 7, 8, 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFDFC),
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: const Color(0xFFE5E2DC)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x0D000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('agent_request_input'),
+                    controller: _inputController,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.newline,
+                    onSubmitted: (_) => _sendMessage(),
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      hintText: 'Ask about your library or describe a task…',
+                      hintStyle: TextStyle(color: FilmlyPalette.textMuted),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 9,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              FilmlyGlassButton(
-                key: const Key('agent_gemini_plan_button'),
-                label: 'Send',
-                icon: Icons.arrow_upward_rounded,
-                accent: true,
-                height: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 13),
-                onTap: _thinking ? null : () => _sendMessage(),
-              ),
-            ],
+                const SizedBox(width: 8),
+                FilmlyGlassButton(
+                  key: const Key('agent_gemini_plan_button'),
+                  label: 'Send',
+                  icon: Icons.arrow_upward_rounded,
+                  accent: true,
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 13),
+                  onTap: _thinking ? null : () => _sendMessage(),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1061,6 +1422,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   }
 
   String _sectionFor(AgentConversation conversation) {
+    if (_showArchived) return 'Archived';
     if (conversation.isPinned) return 'Pinned';
     final now = DateTime.now();
     final updated = conversation.updatedAt.toLocal();
@@ -1092,4 +1454,4 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   String _toolLabel(String tool) => tool.replaceAll('_', ' ');
 }
 
-enum _ConversationAction { rename, pin, unpin, archive, delete }
+enum _ConversationAction { rename, pin, unpin, archive, unarchive, delete }

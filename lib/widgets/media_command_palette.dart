@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 
 import '../core/platform/open_player.dart';
 import '../core/router/app_router.dart';
+import '../data/models/media.dart';
 import '../features/player/player_page.dart';
+import '../providers/data_providers.dart';
 import '../providers/intelligence_providers.dart';
 import '../services/intelligence/semantic_search_service.dart';
 import 'filmly_design.dart';
@@ -241,6 +243,35 @@ class _MediaCommandPaletteSheetState
     ];
   }
 
+  /// Prefer recently watched titles, then recently added, capped at three
+  /// local destinations for the empty palette state.
+  List<AskFilmlyResult> _recentDestinations() {
+    final watched =
+        ref.watch(recentlyWatchedMediaProvider).asData?.value ??
+        const <Media>[];
+    final recent =
+        ref.watch(recentMediaProvider).asData?.value ?? const <Media>[];
+    final seen = <String>{};
+    final destinations = <AskFilmlyResult>[];
+    for (final media in [...watched, ...recent]) {
+      if (!seen.add(media.id)) continue;
+      destinations.add(
+        AskFilmlyResult(
+          title: media.title,
+          year: media.year.isEmpty ? null : media.year,
+          mediaId: media.id,
+          snippet: media.overview?.trim().isNotEmpty == true
+              ? media.overview!.trim()
+              : (media.type == MediaType.tv ? 'TV series' : 'Movie'),
+          reason: 'Recent destination',
+          score: 1,
+        ),
+      );
+      if (destinations.length >= 3) break;
+    }
+    return destinations;
+  }
+
   @override
   Widget build(BuildContext context) {
     final query = _query.trim();
@@ -351,10 +382,12 @@ class _MediaCommandPaletteSheetState
 
   Widget _body(String query, AsyncValue<List<AskFilmlyResult>> results) {
     if (query.isEmpty) {
-      _entries = const [
-        _PaletteEntry.action(_PaletteAction.continueConversation),
+      final recent = _recentDestinations();
+      _entries = [
+        ...recent.map(_PaletteEntry.result),
+        const _PaletteEntry.action(_PaletteAction.continueConversation),
       ];
-      return _emptyState();
+      return _emptyState(recent);
     }
     return results.when(
       loading: () {
@@ -378,44 +411,63 @@ class _MediaCommandPaletteSheetState
     );
   }
 
-  Widget _emptyState() {
-    final selected = _effectiveSelectedIndex(_entries) == 0;
+  Widget _emptyState(List<AskFilmlyResult> recent) {
+    final selectedIndex = _effectiveSelectedIndex(_entries);
+    final children = <Widget>[
+      const _SectionLabel('SEARCH YOUR LIBRARY'),
+      const SizedBox(height: 9),
+      const Text(
+        'Type a title, a person, a line, or the moment you remember.',
+        style: TextStyle(
+          color: FilmlyPalette.textSecondary,
+          fontSize: 13,
+          height: 1.45,
+        ),
+      ),
+      const SizedBox(height: 10),
+      Text(
+        'e.g. 唐朝诡事录 · 雨夜 长安 · 宫崎骏',
+        style: TextStyle(
+          color: FilmlyPalette.textMuted.withValues(alpha: 0.9),
+          fontSize: 12,
+        ),
+      ),
+    ];
+
+    if (recent.isNotEmpty) {
+      children.add(const SizedBox(height: 16));
+      children.add(const _SectionLabel('RECENT'));
+      children.add(const SizedBox(height: 6));
+      for (var i = 0; i < recent.length; i++) {
+        children.add(
+          _resultRow(
+            recent[i],
+            resultIndex: i,
+            selected: i == selectedIndex,
+          ),
+        );
+      }
+    }
+
+    children.add(const SizedBox(height: 12));
+    children.add(
+      _commandRow(
+        key: const Key('media_command_palette_continue_conversation'),
+        icon: Icons.arrow_outward_rounded,
+        title: 'Continue in Filmly',
+        subtitle: 'Use a durable conversation for a question or a safe plan',
+        outcome: 'Ask',
+        selected: recent.length == selectedIndex,
+        onTap: _openAgent,
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionLabel('SEARCH YOUR LIBRARY'),
-          const SizedBox(height: 9),
-          const Text(
-            'Type a title, a person, a line, or the moment you remember.',
-            style: TextStyle(
-              color: FilmlyPalette.textSecondary,
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'e.g. 唐朝诡事录 · 雨夜 长安 · 宫崎骏',
-            style: TextStyle(
-              color: FilmlyPalette.textMuted.withValues(alpha: 0.9),
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _commandRow(
-            key: const Key('media_command_palette_continue_conversation'),
-            icon: Icons.arrow_outward_rounded,
-            title: 'Continue in Filmly',
-            subtitle:
-                'Use a durable conversation for a question or a safe plan',
-            outcome: 'Ask',
-            selected: selected,
-            onTap: _openAgent,
-          ),
-        ],
+        children: children,
       ),
     );
   }

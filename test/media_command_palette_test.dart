@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_filmly/data/database/database.dart';
+import 'package:open_filmly/data/models/media.dart';
 import 'package:open_filmly/providers/data_providers.dart';
 import 'package:open_filmly/providers/intelligence_providers.dart';
 import 'package:open_filmly/services/intelligence/semantic_search_service.dart';
@@ -66,6 +67,30 @@ void main() {
       find.byKey(const Key('media_command_palette_continue_conversation')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('shows up to three recent destinations when the query is empty', (
+    tester,
+  ) async {
+    const recent = Media(
+      id: '/Movies/Arrival.mkv',
+      title: 'Arrival',
+      year: '2016',
+      type: MediaType.movie,
+      path: '/Movies/Arrival.mkv',
+    );
+    await pumpPalette(
+      tester,
+      overrides: [
+        recentlyWatchedMediaProvider.overrideWith((ref) async => [recent]),
+        recentMediaProvider.overrideWith((ref) async => const []),
+      ],
+    );
+
+    expect(find.text('RECENT'), findsOneWidget);
+    expect(find.text('Arrival'), findsOneWidget);
+    expect(find.text('Recent destination'), findsOneWidget);
+    expect(find.byKey(const Key('media_command_result_0')), findsOneWidget);
   });
 
   testWidgets('shows semantic matches in a directly actionable result list', (
