@@ -573,9 +573,11 @@ class _Sidebar extends StatelessWidget {
               const Divider(height: 1, color: FilmlyPalette.divider),
               const SizedBox(height: 10),
               // Quick actions only — no fake account row (no user system yet).
+              // Keep the row compact: six 26px targets must fit the 212px rail.
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     _SidebarIconButton(
                       key: const Key('sidebar_/favorites'),
@@ -612,7 +614,6 @@ class _Sidebar extends StatelessWidget {
                       tooltip: '来源',
                       onTap: onTapSources,
                     ),
-                    const Spacer(),
                     _SidebarIconButton(
                       key: const Key('sidebar_/config'),
                       icon: Icons.settings_rounded,
@@ -721,9 +722,8 @@ class _SidebarIconButton extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 28,
-          height: 28,
-          margin: const EdgeInsets.only(left: 2),
+          width: 26,
+          height: 26,
           decoration: BoxDecoration(
             color: selected
                 ? FilmlyPalette.accent.withValues(alpha: 0.12)
@@ -735,7 +735,7 @@ class _SidebarIconButton extends StatelessWidget {
             color: selected
                 ? FilmlyPalette.accent
                 : FilmlyPalette.textSecondary,
-            size: 18,
+            size: 16,
           ),
         ),
       ),
