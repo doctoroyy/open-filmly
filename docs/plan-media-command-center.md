@@ -1,6 +1,6 @@
 # Technical Plan: Filmly Command Palette & Conversation Library
 
-**Status:** Proposed redesign
+**Status:** Implemented on `agent/agent-workspace-redesign` (see `plan-personal-media-os-next.md` for follow-on work)
 
 **Scope:** macOS-first implementation, preserving the existing intelligence
 database boundary and Media Agent safety model

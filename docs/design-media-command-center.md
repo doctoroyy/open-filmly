@@ -1,6 +1,6 @@
 # Design: Filmly Command Palette & Conversation Library
 
-**Status:** Proposed redesign
+**Status:** Implemented (conversation rail, palette sections, plan drawer); polish tracked in `plan-personal-media-os-next.md`
 
 **Platforms:** Desktop first (macOS validation), with a responsive path for
 Windows and mobile consumption
