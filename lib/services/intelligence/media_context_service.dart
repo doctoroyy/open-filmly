@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
 import '../../data/intelligence/intelligence_models.dart';
 import 'content_segment_service.dart';
 import 'spoiler_guard_service.dart';
@@ -22,15 +26,24 @@ class CompanionResponse {
   final List<CompanionCitation> citations;
 }
 
+typedef CompanionModelResponder =
+    Future<String> Function({
+      required String question,
+      required String safeContext,
+      required int positionMs,
+    });
+
 class MediaContextService {
   MediaContextService(
     this._transcripts, {
     this.contentSegments,
+    this.modelResponder,
     SpoilerGuardService? spoilerGuard,
   }) : _spoilerGuard = spoilerGuard ?? const SpoilerGuardService();
 
   final TranscriptService _transcripts;
   final ContentSegmentService? contentSegments;
+  final CompanionModelResponder? modelResponder;
   final SpoilerGuardService _spoilerGuard;
 
   Future<CompanionResponse> answer({
@@ -48,59 +61,66 @@ class MediaContextService {
     }
 
     final terms = _terms(question);
-    final lineMatches = _rankLines(safe, terms).take(4).toList(growable: false);
-
+    final lineMatches = _rankLines(safe, terms).take(5).toList(growable: false);
     final scenes = await contentSegments?.listByAsset(assetId) ?? const [];
     final visibleScenes = scenes
         .where((scene) => scene.endMs <= positionMs)
         .toList(growable: false);
     final sceneMatches = _rankScenes(visibleScenes, terms).take(2).toList();
 
-    if (lineMatches.isEmpty && sceneMatches.isEmpty) {
-      final recent = safe.reversed.take(3).toList().reversed.toList();
-      return CompanionResponse(
-        text: '根据你已经看到的最近内容：${recent.map((s) => s.text).join(' ')}',
-        citations: [
-          for (final segment in recent)
-            CompanionCitation(
-              startMs: segment.startMs,
-              endMs: segment.endMs,
-              text: segment.text,
-            ),
-        ],
-      );
-    }
+    final citations = <CompanionCitation>[
+      for (final scene in sceneMatches)
+        CompanionCitation(
+          startMs: scene.startMs,
+          endMs: scene.endMs,
+          text: scene.summary,
+        ),
+      for (final segment in lineMatches)
+        CompanionCitation(
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+          text: segment.text,
+        ),
+    ];
 
-    final buffer = StringBuffer('根据你已经看到的内容：');
-    if (sceneMatches.isNotEmpty) {
-      buffer.write(
-        sceneMatches
-            .map((scene) => '【${scene.title}】${scene.summary}')
-            .join(' '),
-      );
-      if (lineMatches.isNotEmpty) buffer.write(' ');
-    }
-    if (lineMatches.isNotEmpty) {
-      buffer.write(lineMatches.map((line) => line.text).join(' '));
-    }
-
-    return CompanionResponse(
-      text: buffer.toString(),
-      citations: [
-        for (final scene in sceneMatches)
-          CompanionCitation(
-            startMs: scene.startMs,
-            endMs: scene.endMs,
-            text: scene.summary,
-          ),
-        for (final segment in lineMatches)
+    if (citations.isEmpty) {
+      final recent = safe.reversed.take(4).toList().reversed.toList();
+      citations.addAll([
+        for (final segment in recent)
           CompanionCitation(
             startMs: segment.startMs,
             endMs: segment.endMs,
             text: segment.text,
           ),
-      ],
-    );
+      ]);
+    }
+
+    final safeContext = citations
+        .map(
+          (item) =>
+              '[${_format(item.startMs)}-${_format(item.endMs)}] ${item.text}',
+        )
+        .join('\n');
+
+    final responder = modelResponder;
+    if (responder != null) {
+      try {
+        final text = await responder(
+          question: question,
+          safeContext: safeContext,
+          positionMs: positionMs,
+        );
+        if (text.trim().isNotEmpty) {
+          return CompanionResponse(text: text.trim(), citations: citations);
+        }
+      } catch (_) {
+        // Fall back to extractive answer.
+      }
+    }
+
+    final buffer = StringBuffer('根据你已经看到的内容：');
+    buffer.write(citations.map((item) => item.text).join(' '));
+    return CompanionResponse(text: buffer.toString(), citations: citations);
   }
 
   List<String> _terms(String question) {
@@ -157,5 +177,90 @@ class MediaContextService {
     }
     scored.sort((a, b) => b.score.compareTo(a.score));
     return scored.map((item) => item.scene).toList(growable: false);
+  }
+
+  String _format(int milliseconds) {
+    final duration = Duration(milliseconds: milliseconds);
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(duration.inHours)}:${two(duration.inMinutes.remainder(60))}:${two(duration.inSeconds.remainder(60))}';
+  }
+}
+
+/// Optional Gemini companion that only sees spoiler-safe transcript context.
+class GeminiCompanionResponder {
+  GeminiCompanionResponder({
+    required this.apiKey,
+    this.model = 'gemini-2.5-flash',
+    this.client,
+  });
+
+  final String apiKey;
+  final String model;
+  final http.Client? client;
+
+  Future<String> call({
+    required String question,
+    required String safeContext,
+    required int positionMs,
+  }) async {
+    if (apiKey.trim().isEmpty) {
+      throw StateError('Gemini API Key missing');
+    }
+    final requestClient = client ?? http.Client();
+    final ownsClient = client == null;
+    try {
+      final endpoint = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent',
+      );
+      final response = await requestClient.post(
+        endpoint,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey.trim(),
+        },
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {
+                  'text':
+                      '你是 Open Filmly 的 AI Companion。用户当前播放到 ${_format(positionMs)}。\n'
+                      '你只能根据“已看过的内容”回答，严禁剧透后续剧情。\n'
+                      '如果上下文不足以回答，就明确说不知道，并建议回看相关时间点。\n'
+                      '用简洁中文回答。\n\n'
+                      '已看过的内容：\n$safeContext\n\n'
+                      '用户问题：$question',
+                },
+              ],
+            },
+          ],
+          'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 512},
+        }),
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Gemini companion failed: ${response.statusCode}');
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) return '';
+      final candidates = decoded['candidates'];
+      if (candidates is! List || candidates.isEmpty) return '';
+      final content = candidates.first['content'];
+      if (content is! Map) return '';
+      final parts = content['parts'];
+      if (parts is! List || parts.isEmpty) return '';
+      return parts
+          .map((part) => part is Map ? part['text']?.toString() ?? '' : '')
+          .join()
+          .trim();
+    } finally {
+      if (ownsClient) requestClient.close();
+    }
+  }
+
+  String _format(int milliseconds) {
+    final duration = Duration(milliseconds: milliseconds);
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${two(duration.inHours)}:${two(duration.inMinutes.remainder(60))}:${two(duration.inSeconds.remainder(60))}';
   }
 }

@@ -167,12 +167,17 @@ final libraryIntelligenceIndexerProvider = Provider<LibraryIntelligenceIndexer>(
   ),
 );
 
-final mediaContextServiceProvider = Provider<MediaContextService>(
-  (ref) => MediaContextService(
+final mediaContextServiceProvider = Provider<MediaContextService>((ref) {
+  final configAsync = ref.watch(configProvider);
+  final apiKey = configAsync.asData?.value.geminiApiKey.trim() ?? '';
+  return MediaContextService(
     ref.watch(transcriptServiceProvider),
     contentSegments: ref.watch(contentSegmentServiceProvider),
-  ),
-);
+    modelResponder: apiKey.isEmpty
+        ? null
+        : GeminiCompanionResponder(apiKey: apiKey).call,
+  );
+});
 
 final smartSkipServiceProvider = Provider<SmartSkipService>(
   (ref) => SmartSkipService(ref.watch(contentSegmentServiceProvider)),
