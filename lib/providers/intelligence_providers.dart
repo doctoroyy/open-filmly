@@ -29,6 +29,7 @@ import '../services/intelligence/media_intelligence_service.dart';
 import '../services/intelligence/personal_memory_service.dart';
 import '../services/intelligence/semantic_search_service.dart';
 import '../services/intelligence/subtitle_generation_service.dart';
+import '../services/intelligence/smart_skip_service.dart';
 import '../services/intelligence/subtitle_ingest_service.dart';
 import '../services/intelligence/transcript_service.dart';
 
@@ -173,7 +174,9 @@ final mediaContextServiceProvider = Provider<MediaContextService>(
   ),
 );
 
-// Keep named argument for readability at call sites.
+final smartSkipServiceProvider = Provider<SmartSkipService>(
+  (ref) => SmartSkipService(ref.watch(contentSegmentServiceProvider)),
+);
 
 final subtitleGenerationServiceProvider = Provider<SubtitleGenerationService>(
   (ref) => SubtitleGenerationService(ref.watch(transcriptServiceProvider)),
@@ -233,6 +236,7 @@ final conversationalAgentEngineProvider =
         mediaRepository: ref.watch(mediaRepositoryProvider),
         progressRepository: ref.watch(playbackProgressRepositoryProvider),
         agentService: service,
+        semanticSearch: ref.watch(semanticSearchServiceProvider),
       );
     });
 

@@ -27,6 +27,7 @@ import '../../services/playback/subtitle_preference.dart';
 import '../../services/playback/vlc_video_view.dart';
 import '../../services/intelligence/media_identity_service.dart';
 import '../../services/intelligence/intelligence_storage.dart';
+import '../../services/intelligence/smart_skip_service.dart';
 import '../../data/intelligence/watch_event_repository.dart';
 import '../../features/intelligence/companion_sheet.dart';
 
@@ -186,6 +187,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool _muted = false;
   double _rate = 1.0;
   bool _alwaysOnTop = false;
+  List<SmartSkipMarker> _smartSkipMarkers = const [];
+  SmartSkipMarker? _activeSkipMarker;
 
   /// Displayed like Baomihua top-right transfer rate (KB/s or MB/s).
   double _transferBytesPerSec = 0;
@@ -424,6 +427,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     });
     try {
       await _resolveMemoryAsset();
+      unawaited(_loadSmartSkipMarkers());
       await _playback.open(_uri, startAt: startAt, httpHeaders: _httpHeaders);
       if (!mounted) return;
       // Keep [_opening] true until playback actually starts (or buffering
@@ -657,6 +661,37 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     return uri;
   }
 
+  Future<void> _loadSmartSkipMarkers() async {
+    final localPath = _localPathForAiSubtitle(_uri);
+    if (localPath == null) {
+      if (mounted) {
+        setState(() {
+          _smartSkipMarkers = const [];
+          _activeSkipMarker = null;
+        });
+      }
+      return;
+    }
+    try {
+      final identity = await MediaIdentityService.fromFile(path: localPath);
+      final markers = await ref
+          .read(smartSkipServiceProvider)
+          .markersFor(identity.identityKey);
+      if (!mounted) return;
+      setState(() {
+        _smartSkipMarkers = markers;
+        _activeSkipMarker = ref
+            .read(smartSkipServiceProvider)
+            .activeMarker(
+              markers: markers,
+              positionMs: _position.inMilliseconds,
+            );
+      });
+    } catch (_) {
+      // Smart skip is optional.
+    }
+  }
+
   Future<void> _resolveMemoryAsset() async {
     final localPath = _localPathForAiSubtitle(_uri);
     if (localPath == null) {
@@ -706,7 +741,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   void _bindStreams() {
     _positionSub = _playback.player.stream.position.listen((position) {
       if (!mounted || _dragging) return;
-      setState(() => _position = position);
+      final active = ref
+          .read(smartSkipServiceProvider)
+          .activeMarker(
+            markers: _smartSkipMarkers,
+            positionMs: position.inMilliseconds,
+          );
+      setState(() {
+        _position = position;
+        _activeSkipMarker = active;
+      });
       if ((position - _lastPersistedPosition).abs() >= _persistInterval) {
         unawaited(_persistProgress());
       }
@@ -1262,6 +1306,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               if (_error != null) _errorOverlay(),
               if (_toast != null) _toastOverlay(),
               if (_autoNextSeconds > 0) _autoNextOverlay(),
+              if (_activeSkipMarker != null) _smartSkipOverlay(),
               _controlsOverlay(context),
               // Desktop drawers live inside baomihua chrome; mobile uses sheets.
               if (PlatformCapabilities.isDesktop) ...[
@@ -1283,6 +1328,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         ? _nativeBottomSheetReserve
         : (_controlsVisible ? _nativeBottomControlsReserve : 0.0);
     return EdgeInsets.only(top: top, bottom: bottom);
+  }
+
+  Widget _smartSkipOverlay() {
+    final marker = _activeSkipMarker;
+    if (marker == null) return const SizedBox.shrink();
+    return Positioned(
+      right: 28,
+      bottom: PlatformCapabilities.isDesktop ? 110 : 132,
+      child: Material(
+        color: Colors.transparent,
+        child: FilledButton.icon(
+          key: Key('player_smart_skip_${marker.kind}'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.black.withValues(alpha: 0.72),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+          onPressed: () async {
+            await _playback.seek(Duration(milliseconds: marker.endMs));
+            if (mounted) {
+              setState(() => _activeSkipMarker = null);
+              _showToast(marker.label);
+            }
+          },
+          icon: const Icon(Icons.skip_next_rounded, size: 18),
+          label: Text(marker.label),
+        ),
+      ),
+    );
   }
 
   Widget _bufferingOverlay() {

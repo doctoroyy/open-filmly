@@ -1,6 +1,7 @@
 import '../../data/models/media.dart';
 import '../../data/repositories/media_repository.dart';
 import '../../data/repositories/playback_progress_repository.dart';
+import 'semantic_search_service.dart';
 
 /// Function calling declarations and local tool dispatcher for Gemini Agent.
 class AgentTools {
@@ -81,6 +82,20 @@ class AgentTools {
         },
       },
     },
+    {
+      'name': 'search_dialogue_scenes',
+      'description': '在本地已索引的字幕/对白时间轴中搜索场景，并返回可跳转的时间点',
+      'parameters': {
+        'type': 'object',
+        'properties': {
+          'query': {
+            'type': 'string',
+            'description': '场景、对白、人物或主题描述',
+          },
+        },
+        'required': ['query'],
+      },
+    },
   ];
 
   static Future<Map<String, dynamic>> execute({
@@ -88,6 +103,7 @@ class AgentTools {
     required Map<String, dynamic> arguments,
     required MediaRepository mediaRepository,
     required PlaybackProgressRepository progressRepository,
+    SemanticSearchService? semanticSearch,
   }) async {
     switch (name) {
       case 'search_media':
@@ -232,6 +248,36 @@ class AgentTools {
       case 'create_smart_collection':
       case 'batch_generate_subtitles':
         return {'status': 'ready_for_plan_generation', 'args': arguments};
+
+      case 'search_dialogue_scenes':
+        final query = arguments['query']?.toString().trim() ?? '';
+        if (query.isEmpty) {
+          return {'error': 'query is required'};
+        }
+        if (semanticSearch == null) {
+          return {
+            'error': 'semantic search is not available',
+            'hint': '在 Media Intelligence 中先建立字幕索引',
+          };
+        }
+        final results = await semanticSearch.search(query, limit: 12);
+        return {
+          'count': results.length,
+          'scenes': [
+            for (final item in results)
+              {
+                'title': item.title,
+                'year': item.year,
+                'mediaId': item.mediaId,
+                'startMs': item.startMs,
+                'endMs': item.endMs,
+                'snippet': item.snippet,
+                'reason': item.reason,
+                'score': item.score,
+                'playable': item.isScene,
+              },
+          ],
+        };
 
       default:
         return {'error': 'Unknown tool: $name'};

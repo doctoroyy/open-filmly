@@ -142,9 +142,61 @@ class _AskFilmlyPageState extends ConsumerState<AskFilmlyPage> {
       error: (error, _) => Center(child: Text('搜索失败：$error')),
       data: (items) {
         if (_query.trim().isEmpty) {
-          return const Center(child: Text('输入自然语言开始搜索你的影视库'));
+          return ListView(
+            children: [
+              const SizedBox(height: 28),
+              const Text(
+                '输入自然语言开始搜索你的影视库',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: FilmlyPalette.textMuted),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final example in const [
+                    '雨夜 长安',
+                    '宫崎骏',
+                    '关于时间的对白',
+                    '赛博朋克但不沉重',
+                  ])
+                    ActionChip(
+                      label: Text(example),
+                      onPressed: () => setState(() {
+                        _controller.text = example;
+                        _query = example;
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => context.push('/intelligence'),
+                  icon: const Icon(Icons.hub_outlined, size: 16),
+                  label: const Text('还没有字幕结果？先建立 Media Intelligence 索引'),
+                ),
+              ),
+            ],
+          );
         }
-        if (items.isEmpty) return const Center(child: Text('暂时没有找到匹配内容'));
+        if (items.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('暂时没有找到匹配内容'),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () => context.push('/intelligence'),
+                  child: const Text('去索引本地字幕旁车'),
+                ),
+              ],
+            ),
+          );
+        }
         return ListView.separated(
           itemCount: items.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),

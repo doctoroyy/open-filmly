@@ -93,6 +93,10 @@ AI Companion 关注观看过程中的即时疑问：
 - 资源库管理：添加、编辑、导入和删除网络资源，并区分本地下载与远程来源
 - 跨设备数据库导入/导出，覆盖安装时保留现有数据
 - 数字文件名剧集识别、旁车文件清理、重复剧集修复和同剧重复卡片合并
+- **Media Intelligence Layer**：本地字幕旁车入库、场景分段、离线语义索引
+- **Ask Filmly / Cmd+K**：自然语言搜索标题、对白与场景时间点
+- **AI Companion**：无剧透问答、依据时间轴回看、智能跳过片头/片尾
+- **Filmly Conversations**：持久会话库、可预览 Agent 计划、Spotlight 命令面板
 - macOS VLCKit 3.7.3、Windows libVLC 与 iOS / Android MobileVLCKit / libVLC 原生播放
 - 硬件解码、音轨、字幕轨道、外挂字幕、播放缓冲、进度拖动、倍速、音量、上下集与自动连播
 - macOS / Windows 窗口拖动、双击最大化、全屏和桌面键盘快捷键
