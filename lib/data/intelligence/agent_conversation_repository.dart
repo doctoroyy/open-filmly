@@ -68,6 +68,19 @@ class AgentConversationRepository {
     return rows.map(_toMessage).toList(growable: false);
   }
 
+  /// Conversation ids that currently have at least one attached plan card.
+  /// Used only for rail status dots; it never loads full plan payloads.
+  Future<Set<String>> conversationIdsWithPlans() async {
+    final conversationId = _database.agentConversationMessages.conversationId;
+    final rows = await (_database.selectOnly(_database.agentConversationMessages)
+          ..addColumns([conversationId])
+          ..where(_database.agentConversationMessages.planId.isNotNull()))
+        .get();
+    return {
+      for (final row in rows) ?row.read(conversationId),
+    };
+  }
+
   Future<AgentConversationMessage> appendMessage({
     required String conversationId,
     required String id,

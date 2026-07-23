@@ -41,6 +41,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
   List<AgentConversation> _conversations = const [];
   List<AgentConversationMessage> _messages = const [];
   Map<String, MediaAgentRun> _runs = const {};
+  Set<String> _conversationsWithPlans = const {};
   String? _activeConversationId;
   bool _loading = true;
   bool _thinking = false;
@@ -86,6 +87,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
     if (showLoading && mounted) setState(() => _loading = true);
     final service = ref.read(agentConversationServiceProvider);
     final conversations = await service.listConversations();
+    final conversationsWithPlans = await service.conversationIdsWithPlans();
     final requestedId = preferredConversationId ?? _activeConversationId;
     final activeId = conversations.any((item) => item.id == requestedId)
         ? requestedId
@@ -100,6 +102,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
     if (!mounted) return;
     setState(() {
       _conversations = conversations;
+      _conversationsWithPlans = conversationsWithPlans;
       _activeConversationId = activeId;
       _messages = messages;
       _runs = runs;
@@ -436,10 +439,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
     required bool sheet,
   }) {
     final active = conversation.id == _activeConversationId;
-    final hasPlan = _messages.any(
-      (message) =>
-          message.conversationId == conversation.id && message.planId != null,
-    );
+    final hasPlan = _conversationsWithPlans.contains(conversation.id);
     return InkWell(
       key: Key('agent_conversation_${conversation.id}'),
       onTap: () {
@@ -511,6 +511,14 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 3),
+                  Text(
+                    _relativeTime(conversation.updatedAt),
+                    style: const TextStyle(
+                      color: FilmlyPalette.textMuted,
+                      fontSize: 10,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1060,7 +1068,7 @@ class _MediaAgentPageState extends ConsumerState<MediaAgentPage> {
     if (DateUtils.isSameDay(now.subtract(const Duration(days: 1)), updated)) {
       return 'Yesterday';
     }
-    if (now.difference(updated).inDays < 7) return 'Earlier this week';
+    if (now.difference(updated).inDays < 7) return 'Previous 7 days';
     return 'Earlier';
   }
 

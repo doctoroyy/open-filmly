@@ -97,11 +97,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('RESULTS FROM YOUR LIBRARY'), findsOneWidget);
+    expect(find.text('MOMENTS'), findsOneWidget);
     expect(find.text('Rain Film'), findsOneWidget);
-    expect(find.text('01:01'), findsOneWidget);
+    expect(find.text('Play 01:01'), findsOneWidget);
     expect(find.text('Scene match'), findsOneWidget);
     expect(find.byKey(const Key('media_command_result_0')), findsOneWidget);
+    expect(find.text('Continue in Filmly'), findsOneWidget);
   });
 
   testWidgets('dismisses the palette before opening a selected result', (
@@ -164,6 +165,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('BEST MATCH'), findsOneWidget);
+
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
 
@@ -176,6 +179,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('media_command_palette')), findsNothing);
+  });
+
+  testWidgets('offers Ask Filmly handoff when library search is empty', (
+    tester,
+  ) async {
+    await pumpPalette(
+      tester,
+      overrides: [
+        askFilmlyProvider.overrideWith((ref, query) async => const []),
+      ],
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('media_command_palette_field')),
+      'nothing-local',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('NO LOCAL MATCHES'), findsOneWidget);
+    expect(find.text('Search all in Ask Filmly'), findsOneWidget);
+    expect(
+      find.byKey(const Key('media_command_palette_ask_all')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('media_command_palette_continue_conversation')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Ctrl+K closes an open command palette', (tester) async {

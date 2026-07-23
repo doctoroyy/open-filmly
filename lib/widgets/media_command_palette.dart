@@ -10,10 +10,8 @@ import '../providers/intelligence_providers.dart';
 import '../services/intelligence/semantic_search_service.dart';
 import 'filmly_design.dart';
 
-/// Desktop-first command palette for the parts of a media library that are
-/// hard to reach through a traditional title search: scenes, dialogue and
-/// natural-language intent. The full Agent remains available as a route for
-/// multi-step conversations and confirmations.
+/// Desktop-first command palette. Search opens library destinations directly;
+/// only an explicit handoff starts a durable Filmly conversation.
 class MediaCommandPalette {
   const MediaCommandPalette._();
 
@@ -43,6 +41,20 @@ class MediaCommandPalette {
   }
 }
 
+enum _PaletteAction { openResult, askAll, continueConversation }
+
+class _PaletteEntry {
+  const _PaletteEntry.result(this.result)
+    : action = _PaletteAction.openResult;
+
+  const _PaletteEntry.action(this.action) : result = null;
+
+  final _PaletteAction action;
+  final AskFilmlyResult? result;
+
+  bool get isResult => action == _PaletteAction.openResult && result != null;
+}
+
 class _MediaCommandPaletteSheet extends ConsumerStatefulWidget {
   const _MediaCommandPaletteSheet({required this.appContext});
 
@@ -57,11 +69,17 @@ class _MediaCommandPaletteSheet extends ConsumerStatefulWidget {
 
 class _MediaCommandPaletteSheetState
     extends ConsumerState<_MediaCommandPaletteSheet> {
+  static const _canvas = Color(0xFFF6F5F2);
+  static const _elevated = Color(0xFFFFFDFC);
+  static const _rule = Color(0xFFE5E2DC);
+  static const _warmFocus = Color(0xFFEAF1FF);
+  static const _filmlyBlue = Color(0xFF246BDE);
+
   final _controller = TextEditingController();
   late final _focusNode = FocusNode(onKeyEvent: _handleFieldKeyEvent);
   String _query = '';
-  int _selectedResultIndex = 0;
-  List<AskFilmlyResult> _visibleResults = const [];
+  int _selectedIndex = 0;
+  List<_PaletteEntry> _entries = const [];
 
   @override
   void initState() {
@@ -135,30 +153,39 @@ class _MediaCommandPaletteSheetState
     widget.appContext.push(location);
   }
 
-  List<AskFilmlyResult> _activeResults() {
-    return _visibleResults;
-  }
-
   void _updateQuery(String value) {
     setState(() {
       _query = value;
-      _selectedResultIndex = 0;
-      _visibleResults = const [];
+      _selectedIndex = 0;
+      _entries = const [];
     });
   }
 
-  int _effectiveSelectedIndex(List<AskFilmlyResult> items) {
+  int _effectiveSelectedIndex(List<_PaletteEntry> items) {
     if (items.isEmpty) return 0;
-    return _selectedResultIndex.clamp(0, items.length - 1);
+    return _selectedIndex.clamp(0, items.length - 1);
   }
 
-  Future<void> _activateSelectedResult() async {
-    final items = _activeResults();
+  Future<void> _activateSelectedEntry() async {
+    final items = _entries;
     if (items.isEmpty) {
-      await _openAskFilmly();
+      if (_query.trim().isEmpty) {
+        await _openAgent();
+      } else {
+        await _openAskFilmly();
+      }
       return;
     }
-    await _openResult(items[_effectiveSelectedIndex(items)]);
+    final entry = items[_effectiveSelectedIndex(items)];
+    switch (entry.action) {
+      case _PaletteAction.openResult:
+        final result = entry.result;
+        if (result != null) await _openResult(result);
+      case _PaletteAction.askAll:
+        await _openAskFilmly();
+      case _PaletteAction.continueConversation:
+        await _openAgent();
+    }
   }
 
   KeyEventResult _handleFieldKeyEvent(FocusNode _, KeyEvent event) {
@@ -172,17 +199,16 @@ class _MediaCommandPaletteSheetState
       return KeyEventResult.handled;
     }
 
-    final items = _activeResults();
+    final items = _entries;
     if (items.isNotEmpty && key == LogicalKeyboardKey.arrowDown) {
       setState(() {
-        _selectedResultIndex =
-            (_effectiveSelectedIndex(items) + 1) % items.length;
+        _selectedIndex = (_effectiveSelectedIndex(items) + 1) % items.length;
       });
       return KeyEventResult.handled;
     }
     if (items.isNotEmpty && key == LogicalKeyboardKey.arrowUp) {
       setState(() {
-        _selectedResultIndex =
+        _selectedIndex =
             (_effectiveSelectedIndex(items) - 1 + items.length) % items.length;
       });
       return KeyEventResult.handled;
@@ -193,10 +219,26 @@ class _MediaCommandPaletteSheetState
         _openAgent();
         return KeyEventResult.handled;
       }
-      _activateSelectedResult();
+      _activateSelectedEntry();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  List<_PaletteEntry> _buildEntries(List<AskFilmlyResult> items) {
+    if (items.isEmpty) {
+      return const [
+        _PaletteEntry.action(_PaletteAction.askAll),
+        _PaletteEntry.action(_PaletteAction.continueConversation),
+      ];
+    }
+    final media = items.where((item) => !item.isScene).take(5).toList();
+    final moments = items.where((item) => item.isScene).take(5).toList();
+    return [
+      ...media.map(_PaletteEntry.result),
+      ...moments.map(_PaletteEntry.result),
+      const _PaletteEntry.action(_PaletteAction.continueConversation),
+    ];
   }
 
   @override
@@ -215,7 +257,12 @@ class _MediaCommandPaletteSheetState
       child: Align(
         alignment: Alignment.topCenter,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 92, 20, 24),
+          padding: EdgeInsets.fromLTRB(
+            20,
+            MediaQuery.sizeOf(context).height * 0.12,
+            20,
+            24,
+          ),
           child: Material(
             key: const Key('media_command_palette'),
             color: Colors.transparent,
@@ -223,14 +270,14 @@ class _MediaCommandPaletteSheetState
               constraints: const BoxConstraints(maxWidth: 720, maxHeight: 640),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9F9FB),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFE0E0E7)),
+                  color: _elevated,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _rule),
                   boxShadow: const [
                     BoxShadow(
-                      color: Color(0x40000000),
-                      blurRadius: 52,
-                      offset: Offset(0, 22),
+                      color: Color(0x33000000),
+                      blurRadius: 40,
+                      offset: Offset(0, 18),
                     ),
                   ],
                 ),
@@ -238,9 +285,9 @@ class _MediaCommandPaletteSheetState
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _inputBar(),
-                    const Divider(height: 1, color: FilmlyPalette.divider),
+                    const Divider(height: 1, color: _rule),
                     Flexible(child: _body(query, results)),
-                    const Divider(height: 1, color: FilmlyPalette.divider),
+                    const Divider(height: 1, color: _rule),
                     _footer(),
                   ],
                 ),
@@ -257,19 +304,7 @@ class _MediaCommandPaletteSheetState
       padding: const EdgeInsets.fromLTRB(18, 16, 14, 15),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEAF1FF),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.search_rounded,
-              size: 18,
-              color: FilmlyPalette.accent,
-            ),
-          ),
+          const Icon(Icons.search_rounded, size: 20, color: FilmlyPalette.textMuted),
           const SizedBox(width: 12),
           Expanded(
             child: TextField(
@@ -278,17 +313,17 @@ class _MediaCommandPaletteSheetState
               focusNode: _focusNode,
               autofocus: true,
               onChanged: _updateQuery,
-              onSubmitted: (_) => _activateSelectedResult(),
+              onSubmitted: (_) => _activateSelectedEntry(),
               style: const TextStyle(
                 color: FilmlyPalette.textPrimary,
-                fontSize: 18,
+                fontSize: 17,
                 fontWeight: FontWeight.w500,
                 letterSpacing: -0.2,
               ),
               decoration: const InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
-                hintText: 'Search a title, scene, person, or line…',
+                hintText: 'Search your library',
                 hintStyle: TextStyle(
                   color: FilmlyPalette.textMuted,
                   fontSize: 17,
@@ -316,19 +351,23 @@ class _MediaCommandPaletteSheetState
 
   Widget _body(String query, AsyncValue<List<AskFilmlyResult>> results) {
     if (query.isEmpty) {
-      _visibleResults = const [];
+      _entries = const [
+        _PaletteEntry.action(_PaletteAction.continueConversation),
+      ];
       return _emptyState();
     }
     return results.when(
       loading: () {
-        _visibleResults = const [];
+        _entries = const [];
         return const SizedBox(
           height: 230,
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
         );
       },
       error: (error, _) {
-        _visibleResults = const [];
+        _entries = const [
+          _PaletteEntry.action(_PaletteAction.continueConversation),
+        ];
         return _notice(
           icon: Icons.cloud_off_rounded,
           title: 'Search is temporarily unavailable',
@@ -340,6 +379,7 @@ class _MediaCommandPaletteSheetState
   }
 
   Widget _emptyState() {
+    final selected = _effectiveSelectedIndex(_entries) == 0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
@@ -356,13 +396,23 @@ class _MediaCommandPaletteSheetState
               height: 1.45,
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 12),
+          Text(
+            'e.g. 唐朝诡事录 · 雨夜 长安 · 宫崎骏',
+            style: TextStyle(
+              color: FilmlyPalette.textMuted.withValues(alpha: 0.9),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 16),
           _commandRow(
             key: const Key('media_command_palette_continue_conversation'),
             icon: Icons.arrow_outward_rounded,
             title: 'Continue in Filmly',
             subtitle:
                 'Use a durable conversation for a question or a safe plan',
+            outcome: 'Ask',
+            selected: selected,
             onTap: _openAgent,
           ),
         ],
@@ -371,73 +421,157 @@ class _MediaCommandPaletteSheetState
   }
 
   Widget _results(List<AskFilmlyResult> items) {
+    final entries = _buildEntries(items);
+    _entries = entries;
+    final selectedIndex = _effectiveSelectedIndex(entries);
+
     if (items.isEmpty) {
-      return _notice(
-        icon: Icons.search_off_rounded,
-        title: 'No library matches yet',
-        detail: 'Try a title, a person, or describe a moment you remember.',
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+        children: [
+          const _SectionLabel('NO LOCAL MATCHES'),
+          const SizedBox(height: 10),
+          const Text(
+            'Try a title, a person, or describe a moment you remember.',
+            style: TextStyle(
+              color: FilmlyPalette.textSecondary,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const _SectionLabel('ASK'),
+          const SizedBox(height: 6),
+          _commandRow(
+            key: const Key('media_command_palette_ask_all'),
+            icon: Icons.travel_explore_rounded,
+            title: 'Search all in Ask Filmly',
+            subtitle: 'Open the full search workspace with this query',
+            outcome: 'Open',
+            selected: selectedIndex == 0,
+            onTap: _openAskFilmly,
+          ),
+          _commandRow(
+            key: const Key('media_command_palette_continue_conversation'),
+            icon: Icons.forum_outlined,
+            title: 'Continue in Filmly',
+            subtitle: 'Ask a follow-up or prepare a safe plan',
+            outcome: 'Ask',
+            selected: selectedIndex == 1,
+            onTap: _openAgent,
+          ),
+        ],
       );
     }
-    final visibleItems = items.take(8).toList(growable: false);
-    _visibleResults = visibleItems;
-    final selectedIndex = _effectiveSelectedIndex(visibleItems);
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
-      itemCount: visibleItems.length + 2,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: _SectionLabel('RESULTS FROM YOUR LIBRARY'),
-          );
-        }
-        if (index == visibleItems.length + 1) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: _commandRow(
-              icon: Icons.forum_outlined,
-              title: 'Continue in Filmly',
-              subtitle: 'Ask a follow-up or prepare a safe plan',
-              onTap: _openAgent,
-            ),
-          );
-        }
-        return _resultRow(
-          visibleItems[index - 1],
-          index: index - 1,
-          selected: index - 1 == selectedIndex,
+
+    final media = items.where((item) => !item.isScene).take(5).toList();
+    final moments = items.where((item) => item.isScene).take(5).toList();
+    final children = <Widget>[];
+    var entryIndex = 0;
+    var resultIndex = 0;
+
+    if (media.isNotEmpty) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(bottom: 6),
+          child: _SectionLabel('BEST MATCH'),
+        ),
+      );
+      for (final result in media) {
+        final index = entryIndex;
+        children.add(
+          _resultRow(
+            result,
+            resultIndex: resultIndex,
+            selected: index == selectedIndex,
+          ),
         );
-      },
+        entryIndex += 1;
+        resultIndex += 1;
+      }
+    }
+
+    if (moments.isNotEmpty) {
+      children.add(
+        Padding(
+          padding: EdgeInsets.only(top: media.isEmpty ? 0 : 10, bottom: 6),
+          child: const _SectionLabel('MOMENTS'),
+        ),
+      );
+      for (final result in moments) {
+        final index = entryIndex;
+        children.add(
+          _resultRow(
+            result,
+            resultIndex: resultIndex,
+            selected: index == selectedIndex,
+          ),
+        );
+        entryIndex += 1;
+        resultIndex += 1;
+      }
+    }
+
+    children.add(
+      const Padding(
+        padding: EdgeInsets.only(top: 10, bottom: 6),
+        child: _SectionLabel('ASK'),
+      ),
+    );
+    children.add(
+      _commandRow(
+        key: const Key('media_command_palette_continue_conversation'),
+        icon: Icons.forum_outlined,
+        title: 'Continue in Filmly',
+        subtitle: 'Ask a follow-up or prepare a safe plan',
+        outcome: 'Ask',
+        selected: entryIndex == selectedIndex,
+        onTap: _openAgent,
+      ),
+    );
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+      children: children,
     );
   }
 
   Widget _resultRow(
     AskFilmlyResult result, {
-    required int index,
+    required int resultIndex,
     required bool selected,
   }) {
     final time = result.startMs == null
         ? null
         : _formatTimestamp(Duration(milliseconds: result.startMs!));
+    final outcome = result.isScene
+        ? (time == null ? 'Play' : 'Play $time')
+        : 'Open';
     return Semantics(
       button: true,
       selected: selected,
       child: InkWell(
-        key: Key('media_command_result_$index'),
+        key: Key('media_command_result_$resultIndex'),
         onTap: () => _openResult(result),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         child: AnimatedContainer(
-          key: selected ? Key('media_command_result_${index}_selected') : null,
+          key: selected
+              ? Key('media_command_result_${resultIndex}_selected')
+              : null,
           duration: const Duration(milliseconds: 120),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
-            color: selected
-                ? FilmlyPalette.accent.withValues(alpha: 0.10)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            color: selected ? _warmFocus : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border(
+              left: BorderSide(
+                color: selected ? _filmlyBlue : Colors.transparent,
+                width: 2,
+              ),
+            ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
             child: Row(
               children: [
                 Container(
@@ -445,8 +579,8 @@ class _MediaCommandPaletteSheetState
                   height: 38,
                   decoration: BoxDecoration(
                     color: result.isScene
-                        ? FilmlyPalette.accent.withValues(alpha: 0.11)
-                        : FilmlyPalette.surface,
+                        ? _filmlyBlue.withValues(alpha: 0.11)
+                        : _canvas,
                     borderRadius: BorderRadius.circular(11),
                   ),
                   child: Icon(
@@ -454,7 +588,7 @@ class _MediaCommandPaletteSheetState
                         ? Icons.play_arrow_rounded
                         : Icons.movie_outlined,
                     color: result.isScene
-                        ? FilmlyPalette.accent
+                        ? _filmlyBlue
                         : FilmlyPalette.textSecondary,
                   ),
                 ),
@@ -502,40 +636,26 @@ class _MediaCommandPaletteSheetState
                           ),
                         ),
                       const SizedBox(height: 5),
-                      Wrap(
-                        spacing: 7,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            result.reason,
-                            style: const TextStyle(
-                              color: FilmlyPalette.textMuted,
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (time != null)
-                            Text(
-                              time,
-                              style: const TextStyle(
-                                color: FilmlyPalette.accent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                        ],
+                      Text(
+                        result.reason,
+                        style: const TextStyle(
+                          color: FilmlyPalette.textMuted,
+                          fontSize: 11,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(
-                  result.isScene
-                      ? Icons.play_circle_fill_rounded
-                      : Icons.arrow_outward_rounded,
-                  size: 19,
-                  color: result.isScene
-                      ? FilmlyPalette.accent
-                      : FilmlyPalette.textMuted,
+                const SizedBox(width: 10),
+                Text(
+                  outcome,
+                  style: TextStyle(
+                    color: result.isScene
+                        ? _filmlyBlue
+                        : FilmlyPalette.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
@@ -550,46 +670,65 @@ class _MediaCommandPaletteSheetState
     required IconData icon,
     required String title,
     required String subtitle,
+    required String outcome,
+    required bool selected,
     required VoidCallback onTap,
   }) {
     return InkWell(
       key: key,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(
-          children: [
-            Icon(icon, size: 20, color: FilmlyPalette.textSecondary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: FilmlyPalette.textPrimary,
-                      fontWeight: FontWeight.w600,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: selected ? _warmFocus : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border(
+            left: BorderSide(
+              color: selected ? _filmlyBlue : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: FilmlyPalette.textSecondary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: FilmlyPalette.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: FilmlyPalette.textMuted,
-                      fontSize: 12,
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: FilmlyPalette.textMuted,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const Icon(
-              Icons.arrow_forward_rounded,
-              size: 17,
-              color: FilmlyPalette.textMuted,
-            ),
-          ],
+              Text(
+                outcome,
+                style: const TextStyle(
+                  color: FilmlyPalette.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -639,19 +778,13 @@ class _MediaCommandPaletteSheetState
       padding: EdgeInsets.symmetric(horizontal: 18, vertical: 10),
       child: Row(
         children: [
-          Text(
-            'FILMLY COMMAND',
-            style: TextStyle(
-              color: FilmlyPalette.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
-            ),
-          ),
-          Spacer(),
-          _KeyHint(label: '↵  Open'),
+          _KeyHint(label: '↑↓ Navigate'),
           SizedBox(width: 8),
-          _KeyHint(label: '⇧↵  Continue'),
+          _KeyHint(label: '↵ Open'),
+          SizedBox(width: 8),
+          _KeyHint(label: '⇧↵ Continue'),
+          Spacer(),
+          _KeyHint(label: 'Esc'),
         ],
       ),
     );

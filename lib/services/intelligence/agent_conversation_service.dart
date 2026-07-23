@@ -40,6 +40,9 @@ class AgentConversationService {
     bool includeArchived = false,
   }) => conversations.list(includeArchived: includeArchived);
 
+  Future<Set<String>> conversationIdsWithPlans() =>
+      conversations.conversationIdsWithPlans();
+
   Future<AgentConversation?> getConversation(String id) =>
       conversations.getById(id);
 

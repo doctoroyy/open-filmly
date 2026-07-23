@@ -46,6 +46,7 @@ void main() {
       expect(messages.last.toolsUsed, ['inspect_metadata_health']);
       expect(messages.last.planId, 'plan-a');
       expect(conversation?.preview, '已分析完成。');
+      expect(await repository.conversationIdsWithPlans(), {'conversation-a'});
     },
   );
 
