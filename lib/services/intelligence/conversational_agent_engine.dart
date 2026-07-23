@@ -6,6 +6,7 @@ import '../../data/repositories/media_repository.dart';
 import '../../data/repositories/playback_progress_repository.dart';
 import 'agent_planner.dart';
 import 'agent_tools.dart';
+import 'library_intelligence_indexer.dart';
 import 'media_agent_service.dart';
 import 'semantic_search_service.dart';
 
@@ -28,6 +29,7 @@ class ConversationalAgentEngine {
     required this.progressRepository,
     required this.agentService,
     this.semanticSearch,
+    this.intelligenceIndexer,
     this.model = 'gemini-2.5-flash',
     this.client,
   });
@@ -37,6 +39,7 @@ class ConversationalAgentEngine {
   final PlaybackProgressRepository progressRepository;
   final MediaAgentService agentService;
   final SemanticSearchService? semanticSearch;
+  final LibraryIntelligenceIndexer? intelligenceIndexer;
   final String model;
   final http.Client? client;
 
@@ -169,6 +172,7 @@ class ConversationalAgentEngine {
             mediaRepository: mediaRepository,
             progressRepository: progressRepository,
             semanticSearch: semanticSearch,
+            intelligenceIndexer: intelligenceIndexer,
           );
 
           if (toolName == 'create_smart_collection') {

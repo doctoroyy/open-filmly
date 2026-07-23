@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../data/intelligence/agent_models.dart';
+import 'local_rule_agent_planner.dart';
 
 class AgentIntent {
   const AgentIntent({
@@ -20,6 +21,27 @@ class AgentIntent {
 
 abstract interface class MediaAgentPlanner {
   Future<AgentIntent> plan(String request);
+}
+
+/// Prefer offline rules for common library jobs; escalate free-form NL to a
+/// remote planner when configured.
+class CompositeMediaAgentPlanner implements MediaAgentPlanner {
+  CompositeMediaAgentPlanner({
+    required this.local,
+    this.remote,
+  });
+
+  final LocalRuleAgentPlanner local;
+  final MediaAgentPlanner? remote;
+
+  @override
+  Future<AgentIntent> plan(String request) async {
+    final matched = local.tryMatch(request);
+    if (matched != null) return matched;
+    final cloud = remote;
+    if (cloud != null) return cloud.plan(request);
+    return local.plan(request);
+  }
 }
 
 class AgentPlannerException implements Exception {

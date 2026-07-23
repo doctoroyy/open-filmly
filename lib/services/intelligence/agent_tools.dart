@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import '../../data/models/media.dart';
 import '../../data/repositories/media_repository.dart';
 import '../../data/repositories/playback_progress_repository.dart';
+import '../playback/external_subtitle_finder.dart';
+import 'library_intelligence_indexer.dart';
 import 'semantic_search_service.dart';
 
 /// Function calling declarations and local tool dispatcher for Gemini Agent.
@@ -96,6 +100,14 @@ class AgentTools {
         'required': ['query'],
       },
     },
+    {
+      'name': 'get_intelligence_status',
+      'description': '查询 Media Intelligence 索引状态，解释为何对白/场景搜索可能为空',
+      'parameters': {
+        'type': 'object',
+        'properties': {},
+      },
+    },
   ];
 
   static Future<Map<String, dynamic>> execute({
@@ -104,6 +116,7 @@ class AgentTools {
     required MediaRepository mediaRepository,
     required PlaybackProgressRepository progressRepository,
     SemanticSearchService? semanticSearch,
+    LibraryIntelligenceIndexer? intelligenceIndexer,
   }) async {
     switch (name) {
       case 'search_media':
@@ -157,11 +170,20 @@ class AgentTools {
         final counts = await mediaRepository.countByType();
         final favorites = await mediaRepository.getFavorites();
         final all = await mediaRepository.browse(deduplicateShows: false);
+        var watchedCount = 0;
+        for (final m in all) {
+          final progress = await progressRepository.getByMediaId(m.id);
+          if (progress != null && progress.position > Duration.zero) {
+            watchedCount++;
+          }
+        }
         return {
           'totalCount': all.length,
           'movieCount': counts[MediaType.movie] ?? 0,
           'tvCount': counts[MediaType.tv] ?? 0,
           'favoriteCount': favorites.length,
+          'watchedCount': watchedCount,
+          'unwatchedCount': (all.length - watchedCount).clamp(0, all.length),
         };
 
       case 'analyze_viewing_habits':
@@ -191,14 +213,36 @@ class AgentTools {
         final all = await mediaRepository.browse(deduplicateShows: false);
         var missingPoster = 0;
         var missingRating = 0;
+        var missingOverview = 0;
+        final samples = <Map<String, dynamic>>[];
         for (final m in all) {
-          if (m.posterPath == null || m.posterPath!.isEmpty) missingPoster++;
-          if (m.rating == null || m.rating!.isEmpty) missingRating++;
+          final issues = <String>[];
+          if (m.posterPath == null || m.posterPath!.isEmpty) {
+            missingPoster++;
+            issues.add('poster');
+          }
+          if (m.rating == null || m.rating!.isEmpty) {
+            missingRating++;
+            issues.add('rating');
+          }
+          if (m.overview == null || m.overview!.trim().isEmpty) {
+            missingOverview++;
+            issues.add('overview');
+          }
+          if (issues.isNotEmpty && samples.length < 8) {
+            samples.add({
+              'id': m.id,
+              'title': m.title,
+              'issues': issues,
+            });
+          }
         }
         return {
           'totalChecked': all.length,
           'missingPosterCount': missingPoster,
           'missingRatingCount': missingRating,
+          'missingOverviewCount': missingOverview,
+          'samples': samples,
         };
 
       case 'inspect_media_issues':
@@ -238,6 +282,22 @@ class AgentTools {
               });
             }
           }
+        } else if (issueType == 'missingSubtitles') {
+          for (final item in all) {
+            final path = _localPath(item);
+            if (path == null) continue;
+            final file = File(path);
+            if (!await file.exists()) continue;
+            final sidecars = await ExternalSubtitleFinder.findFor(path);
+            if (sidecars.isEmpty) {
+              matches.add({
+                'id': item.id,
+                'title': item.title,
+                'path': path,
+                'issue': '同目录无字幕旁车',
+              });
+            }
+          }
         }
         return {
           'issueType': issueType,
@@ -261,10 +321,9 @@ class AgentTools {
           };
         }
         final results = await semanticSearch.search(query, limit: 12);
-        return {
-          'count': results.length,
-          'scenes': [
-            for (final item in results)
+        final scenes = [
+          for (final item in results)
+            if (item.isScene || item.startMs != null)
               {
                 'title': item.title,
                 'year': item.year,
@@ -276,11 +335,43 @@ class AgentTools {
                 'score': item.score,
                 'playable': item.isScene,
               },
-          ],
+        ];
+        return {
+          'count': scenes.length,
+          'scenes': scenes,
+          if (scenes.isEmpty)
+            'hint': '无时间轴命中。请确认已 Index library 且存在字幕旁车或 ASR 结果。',
+        };
+
+      case 'get_intelligence_status':
+        final indexer = intelligenceIndexer;
+        if (indexer == null) {
+          return {
+            'error': 'intelligence indexer is not available',
+            'hint': '打开 Media Intelligence 页面建立索引',
+          };
+        }
+        final counts = await indexer.statusCounts();
+        return {
+          ...counts,
+          'hint': (counts['assetsWithTranscripts'] ?? 0) == 0
+              ? '尚未发现对白索引：放入 .srt/.vtt 旁车后点击 Index library。'
+              : '已有部分对白索引，可在 Ask Filmly / 对话中搜索场景。',
         };
 
       default:
         return {'error': 'Unknown tool: $name'};
     }
+  }
+
+  static String? _localPath(Media item) {
+    final raw = (item.fullPath?.trim().isNotEmpty == true)
+        ? item.fullPath!.trim()
+        : item.path.trim();
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri?.scheme == 'file') return uri!.toFilePath();
+    if (uri?.hasScheme == true) return null;
+    return raw;
   }
 }

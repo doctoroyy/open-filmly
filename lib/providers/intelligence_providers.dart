@@ -25,7 +25,9 @@ import '../services/intelligence/ai_worker_client.dart';
 import '../services/intelligence/content_segment_service.dart';
 import '../services/intelligence/library_intelligence_indexer.dart';
 import '../services/intelligence/local_embedding_service.dart';
+import '../services/intelligence/local_rule_agent_planner.dart';
 import '../services/intelligence/media_intelligence_service.dart';
+import '../services/intelligence/offline_media_agent_engine.dart';
 import '../services/intelligence/personal_memory_service.dart';
 import '../services/intelligence/semantic_search_service.dart';
 import '../services/intelligence/subtitle_generation_service.dart';
@@ -197,9 +199,12 @@ final mediaAgentServiceProvider = FutureProvider<MediaAgentService>((
     progressRepository: ref.watch(playbackProgressRepositoryProvider),
     runs: ref.watch(agentRunRepositoryProvider),
     collections: ref.watch(smartCollectionRepositoryProvider),
-    planner: config.geminiApiKey.trim().isEmpty
-        ? null
-        : GeminiAgentPlanner(apiKey: config.geminiApiKey),
+    planner: CompositeMediaAgentPlanner(
+      local: const LocalRuleAgentPlanner(),
+      remote: config.geminiApiKey.trim().isEmpty
+          ? null
+          : GeminiAgentPlanner(apiKey: config.geminiApiKey),
+    ),
     subtitleGenerator: intelligence == null
         ? null
         : (media) async {
@@ -242,11 +247,12 @@ final conversationalAgentEngineProvider =
         progressRepository: ref.watch(playbackProgressRepositoryProvider),
         agentService: service,
         semanticSearch: ref.watch(semanticSearchServiceProvider),
+        intelligenceIndexer: ref.watch(libraryIntelligenceIndexerProvider),
       );
     });
 
-/// Conversation persistence can be used without an AI key. The configured
-/// provider is only resolved when a person actually sends a turn.
+/// Conversation persistence works offline for common library jobs via
+/// [OfflineMediaAgentEngine]. Free-form NL escalates to Gemini when configured.
 final agentConversationServiceProvider = Provider<AgentConversationService>((
   ref,
 ) {
@@ -254,9 +260,22 @@ final agentConversationServiceProvider = Provider<AgentConversationService>((
     conversations: ref.watch(agentConversationRepositoryProvider),
     runs: ref.watch(agentRunRepositoryProvider),
     responder: ({required userPrompt, required context}) async {
+      final service = await ref.read(mediaAgentServiceProvider.future);
+      final offline = OfflineMediaAgentEngine(
+        mediaRepository: ref.read(mediaRepositoryProvider),
+        progressRepository: ref.read(playbackProgressRepositoryProvider),
+        agentService: service,
+        semanticSearch: ref.read(semanticSearchServiceProvider),
+        intelligenceIndexer: ref.read(libraryIntelligenceIndexerProvider),
+      );
+      final offlineResult = await offline.tryHandle(userPrompt);
+      if (offlineResult != null) return offlineResult;
+
       final engine = await ref.read(conversationalAgentEngineProvider.future);
       if (engine == null) {
-        throw const AgentPlannerException('Gemini API Key 尚未配置');
+        throw const AgentPlannerException(
+          '该请求需要更自由的自然语言理解。请配置 Gemini API Key，或改用：影视库统计 / 健康度 / 查重复 / 未观看 / 智能合集 / 对白场景 / 索引状态',
+        );
       }
       return engine.sendUserMessage(userPrompt: userPrompt, context: context);
     },

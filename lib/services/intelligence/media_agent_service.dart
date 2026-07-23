@@ -9,6 +9,7 @@ import '../../data/models/media.dart';
 import '../../data/repositories/media_repository.dart';
 import '../../data/repositories/playback_progress_repository.dart';
 import 'agent_planner.dart';
+import 'local_rule_agent_planner.dart';
 
 typedef AgentSubtitleGenerator = Future<List<String>> Function(Media media);
 
@@ -38,7 +39,13 @@ class MediaAgentService {
   Future<MediaAgentPlan> planFromRequest(String request) async {
     final agentPlanner = planner;
     if (agentPlanner == null) {
-      throw const AgentPlannerException('Gemini Agent 尚未配置');
+      // Offline fallback so common Chinese library jobs work without Gemini.
+      final intent = await const LocalRuleAgentPlanner().plan(request);
+      return plan(
+        intent.operation,
+        query: intent.query,
+        collectionName: intent.collectionName,
+      );
     }
     final intent = await agentPlanner.plan(request);
     return plan(
