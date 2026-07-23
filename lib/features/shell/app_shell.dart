@@ -10,6 +10,7 @@ import '../../core/platform/desktop_window.dart';
 import '../../core/platform/platform_capabilities.dart';
 import '../../data/models/media.dart';
 import '../../providers/data_providers.dart';
+import '../../providers/intelligence_providers.dart';
 import '../../widgets/filmly_design.dart';
 import '../../widgets/global_search.dart';
 import '../../widgets/media_command_palette.dart';
@@ -53,18 +54,26 @@ class _AppShellState extends ConsumerState<AppShell> {
     try {
       final config = await ref.read(configProvider.future);
       final result = await ref.read(libraryAutoScanProvider).run(config);
-      if (!mounted || !result.hasChanges) return;
-      invalidateLibraryViews(ref);
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(
-          content: Text(
-            '已自动更新媒体库：新增 ${result.importedItems} 项'
-            '${result.enrichedItems > 0 ? '，补全元数据 ${result.enrichedItems} 项' : ''}',
+      if (mounted && result.hasChanges) {
+        invalidateLibraryViews(ref);
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          SnackBar(
+            content: Text(
+              '已自动更新媒体库：新增 ${result.importedItems} 项'
+              '${result.enrichedItems > 0 ? '，补全元数据 ${result.enrichedItems} 项' : ''}',
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (_) {
       // best-effort
+    }
+    // Quietly register assets + ingest local subtitle sidecars so Ask Filmly
+    // and Companion improve without requiring a cloud ASR worker.
+    try {
+      await ref.read(libraryIntelligenceIndexerProvider).indexLibrary(limit: 40);
+    } catch (_) {
+      // best-effort intelligence bootstrap
     }
   }
 
@@ -106,6 +115,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (location.startsWith('/me') ||
         location.startsWith('/config') ||
         location.startsWith('/memory') ||
+        location.startsWith('/intelligence') ||
         location.startsWith('/agent') ||
         location.startsWith('/favorites') ||
         location.startsWith('/anime') ||
@@ -221,6 +231,8 @@ class _AppShellState extends ConsumerState<AppShell> {
               ).startsWith('/favorites');
               final sourcesSelected = _location(context).startsWith('/sources');
               final memorySelected = _location(context).startsWith('/memory');
+              final intelligenceSelected =
+                  _location(context).startsWith('/intelligence');
               final agentSelected = _location(context).startsWith('/agent');
 
               return Scaffold(
@@ -240,10 +252,13 @@ class _AppShellState extends ConsumerState<AppShell> {
                                 onTapFavorites: () => context.go('/favorites'),
                                 onTapSources: () => context.go('/sources'),
                                 onTapMemory: () => context.go('/memory'),
+                                onTapIntelligence: () =>
+                                    context.go('/intelligence'),
                                 onTapAgent: () => context.go('/agent'),
                                 favoritesSelected: favoritesSelected,
                                 sourcesSelected: sourcesSelected,
                                 memorySelected: memorySelected,
+                                intelligenceSelected: intelligenceSelected,
                                 agentSelected: agentSelected,
                               ),
                               const VerticalDivider(
@@ -411,10 +426,12 @@ class _Sidebar extends StatelessWidget {
     required this.onTapFavorites,
     required this.onTapSources,
     required this.onTapMemory,
+    required this.onTapIntelligence,
     required this.onTapAgent,
     required this.favoritesSelected,
     required this.sourcesSelected,
     required this.memorySelected,
+    required this.intelligenceSelected,
     required this.agentSelected,
   });
 
@@ -423,12 +440,14 @@ class _Sidebar extends StatelessWidget {
   final bool favoritesSelected;
   final bool sourcesSelected;
   final bool memorySelected;
+  final bool intelligenceSelected;
   final bool agentSelected;
   final ValueChanged<int> onTapItem;
   final VoidCallback onTapSettings;
   final VoidCallback onTapFavorites;
   final VoidCallback onTapSources;
   final VoidCallback onTapMemory;
+  final VoidCallback onTapIntelligence;
   final VoidCallback onTapAgent;
 
   @override
@@ -543,6 +562,7 @@ class _Sidebar extends StatelessWidget {
                           !favoritesSelected &&
                           !sourcesSelected &&
                           !memorySelected &&
+                          !intelligenceSelected &&
                           !agentSelected,
                       onTap: () => onTapItem(i),
                     );
@@ -570,6 +590,13 @@ class _Sidebar extends StatelessWidget {
                       selected: memorySelected,
                       tooltip: '观看记忆',
                       onTap: onTapMemory,
+                    ),
+                    _SidebarIconButton(
+                      key: const Key('sidebar_/intelligence'),
+                      icon: Icons.hub_outlined,
+                      selected: intelligenceSelected,
+                      tooltip: 'Media Intelligence',
+                      onTap: onTapIntelligence,
                     ),
                     _SidebarIconButton(
                       key: const Key('sidebar_/agent'),

@@ -42,4 +42,18 @@ class IntelligenceAssetRepository {
       _database.intelligenceAssets,
     )..where((row) => row.id.equals(id))).getSingleOrNull();
   }
+
+  Future<List<IntelligenceAssetRow>> list({int limit = 1000}) {
+    return (_database.select(_database.intelligenceAssets)
+          ..orderBy([(row) => OrderingTerm.desc(row.updatedAt)])
+          ..limit(limit))
+        .get();
+  }
+
+  Future<IntelligenceAssetRow?> getByMediaId(String mediaId) {
+    return (_database.select(_database.intelligenceAssets)
+          ..where((row) => row.mediaId.equals(mediaId))
+          ..limit(1))
+        .getSingleOrNull();
+  }
 }

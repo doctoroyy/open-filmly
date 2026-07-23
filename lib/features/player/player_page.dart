@@ -614,11 +614,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
     try {
       final identity = await MediaIdentityService.fromFile(path: localPath);
-      final segments = await ref
+      var segments = await ref
           .read(transcriptServiceProvider)
           .getByAsset(identity.identityKey);
+      // Prefer existing sidecar subtitles so Companion works without ASR.
+      if (segments.isEmpty && _mediaId != null) {
+        final media = await ref.read(mediaByIdProvider(_mediaId!).future);
+        if (media != null) {
+          await ref.read(libraryIntelligenceIndexerProvider).indexMedia(media);
+          segments = await ref
+              .read(transcriptServiceProvider)
+              .getByAsset(identity.identityKey);
+        }
+      }
       if (segments.isEmpty) {
-        _showToast('这部媒体还没有完成 AI 转录');
+        _showToast('这部媒体还没有可用字幕。可先放同目录 .srt，或在 Media Intelligence 里建立索引');
         return;
       }
       if (!mounted) return;
@@ -629,6 +639,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           assetId: identity.identityKey,
           positionMs: _position.inMilliseconds,
           title: _title,
+          onJumpTo: (positionMs) async {
+            await _playback.seek(Duration(milliseconds: positionMs));
+          },
         ),
       );
     } catch (error) {

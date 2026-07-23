@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'ai_job_service.dart';
 import 'ai_provider.dart';
+import 'content_segment_service.dart';
+import 'local_embedding_service.dart';
 import 'media_identity_service.dart';
 import 'subtitle_generation_service.dart';
 import 'transcript_correction_service.dart';
@@ -37,6 +39,8 @@ class MediaIntelligenceService {
     required this.jobService,
     required this.transcripts,
     required this.provider,
+    this.contentSegments,
+    this.embeddings,
     this.correction = const TranscriptCorrectionService(),
   });
 
@@ -45,6 +49,8 @@ class MediaIntelligenceService {
   final AiJobService jobService;
   final TranscriptService transcripts;
   final AiProvider provider;
+  final ContentSegmentService? contentSegments;
+  final LocalEmbeddingService? embeddings;
   final TranscriptCorrectionService correction;
 
   Future<AiJob> transcribeLocalFile({
@@ -79,8 +85,14 @@ class MediaIntelligenceService {
         job.assetId,
         correction.correct(result),
       );
+      await _refreshDerivedIndexes(job.assetId);
     });
     return (await jobs.getById(queued.id))!;
+  }
+
+  Future<void> _refreshDerivedIndexes(String assetId) async {
+    await contentSegments?.rebuildFromTranscripts(assetId);
+    await embeddings?.rebuildFromTranscripts(assetId);
   }
 
   /// Runs the complete first-release subtitle pipeline and writes external

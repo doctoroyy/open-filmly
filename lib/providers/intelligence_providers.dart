@@ -22,10 +22,14 @@ import '../services/intelligence/agent_conversation_service.dart';
 import '../services/intelligence/ai_job_service.dart';
 import '../services/intelligence/ai_provider.dart';
 import '../services/intelligence/ai_worker_client.dart';
+import '../services/intelligence/content_segment_service.dart';
+import '../services/intelligence/library_intelligence_indexer.dart';
+import '../services/intelligence/local_embedding_service.dart';
 import '../services/intelligence/media_intelligence_service.dart';
 import '../services/intelligence/personal_memory_service.dart';
 import '../services/intelligence/semantic_search_service.dart';
 import '../services/intelligence/subtitle_generation_service.dart';
+import '../services/intelligence/subtitle_ingest_service.dart';
 import '../services/intelligence/transcript_service.dart';
 
 final intelligenceDatabaseProvider = Provider<IntelligenceDatabase>((ref) {
@@ -61,6 +65,8 @@ final mediaIntelligenceServiceProvider =
         jobService: jobService,
         transcripts: ref.watch(transcriptServiceProvider),
         provider: provider,
+        contentSegments: ref.watch(contentSegmentServiceProvider),
+        embeddings: ref.watch(localEmbeddingServiceProvider),
       );
     });
 
@@ -113,6 +119,9 @@ final semanticSearchServiceProvider = Provider<SemanticSearchService>((ref) {
     mediaRepository: ref.watch(mediaRepositoryProvider),
     assets: ref.watch(intelligenceAssetRepositoryProvider),
     transcriptSearch: ref.watch(intelligenceSearchRepositoryProvider),
+    transcripts: ref.watch(transcriptServiceProvider),
+    contentSegments: ref.watch(contentSegmentServiceProvider),
+    embeddings: ref.watch(localEmbeddingServiceProvider),
   );
 });
 
@@ -128,9 +137,43 @@ final transcriptServiceProvider = Provider<TranscriptService>(
   (ref) => TranscriptService(ref.watch(intelligenceDatabaseProvider)),
 );
 
-final mediaContextServiceProvider = Provider<MediaContextService>(
-  (ref) => MediaContextService(ref.watch(transcriptServiceProvider)),
+final subtitleIngestServiceProvider = Provider<SubtitleIngestService>(
+  (ref) => SubtitleIngestService(ref.watch(transcriptServiceProvider)),
 );
+
+final contentSegmentServiceProvider = Provider<ContentSegmentService>(
+  (ref) => ContentSegmentService(
+    ref.watch(intelligenceDatabaseProvider),
+    ref.watch(transcriptServiceProvider),
+  ),
+);
+
+final localEmbeddingServiceProvider = Provider<LocalEmbeddingService>(
+  (ref) => LocalEmbeddingService(
+    ref.watch(intelligenceDatabaseProvider),
+    ref.watch(transcriptServiceProvider),
+  ),
+);
+
+final libraryIntelligenceIndexerProvider = Provider<LibraryIntelligenceIndexer>(
+  (ref) => LibraryIntelligenceIndexer(
+    mediaRepository: ref.watch(mediaRepositoryProvider),
+    assets: ref.watch(intelligenceAssetRepositoryProvider),
+    transcripts: ref.watch(transcriptServiceProvider),
+    ingest: ref.watch(subtitleIngestServiceProvider),
+    contentSegments: ref.watch(contentSegmentServiceProvider),
+    embeddings: ref.watch(localEmbeddingServiceProvider),
+  ),
+);
+
+final mediaContextServiceProvider = Provider<MediaContextService>(
+  (ref) => MediaContextService(
+    ref.watch(transcriptServiceProvider),
+    contentSegments: ref.watch(contentSegmentServiceProvider),
+  ),
+);
+
+// Keep named argument for readability at call sites.
 
 final subtitleGenerationServiceProvider = Provider<SubtitleGenerationService>(
   (ref) => SubtitleGenerationService(ref.watch(transcriptServiceProvider)),

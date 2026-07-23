@@ -55,6 +55,12 @@ class MePage extends StatelessWidget {
               ),
               _tile(
                 context,
+                icon: Icons.hub_outlined,
+                label: 'Media Intelligence',
+                onTap: () => context.push('/intelligence'),
+              ),
+              _tile(
+                context,
                 icon: Icons.smart_toy_outlined,
                 label: 'Media Agent',
                 onTap: () => context.push('/agent'),
