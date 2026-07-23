@@ -142,9 +142,17 @@ class LocalRuleAgentPlanner implements MediaAgentPlanner {
       );
     }
 
-    if (RegExp(r'对白|台词|场景|雨夜|哪一集|哪一段|dialogue|scene|timestamp').hasMatch(lower) ||
-        (RegExp(r'找|搜索|search').hasMatch(lower) &&
-            RegExp(r'说|讲|出现|片段').hasMatch(lower))) {
+    // Dialogue/scene search only when the user explicitly asks for dialogue,
+    // lines, scenes, or timestamps — never hardcode demo title words (e.g. 雨夜)
+    // or steal smart-collection / title-search intents.
+    final wantsCollection = RegExp(
+      r'智能合集|合集|collection|playlist|建一个|创建.*片',
+    ).hasMatch(lower);
+    if (!wantsCollection &&
+        (RegExp(r'对白|台词|场景|哪一集|哪一段|dialogue|scene|timestamp')
+                .hasMatch(lower) ||
+            (RegExp(r'找|搜索|search').hasMatch(lower) &&
+                RegExp(r'说|讲|出现|片段').hasMatch(lower)))) {
       final query = _extractQuery(
         text,
         strip: RegExp(

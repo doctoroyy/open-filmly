@@ -301,6 +301,50 @@ void main() {
     expect(intent.operation, MediaAgentOperation.findDuplicates);
   });
 
+  test(
+    'title words like 雨夜 do not steal collection or media-search intents',
+    () async {
+      const planner = LocalRuleAgentPlanner();
+
+      // Must not route to search_dialogue_scenes merely because the title
+      // fragment appears in the utterance.
+      expect(planner.tryToolIntent('建一个雨夜智能合集'), isNull);
+      final collection = planner.tryMatch('建一个雨夜智能合集');
+      expect(collection, isNotNull);
+      expect(collection!.operation, MediaAgentOperation.smartCollection);
+
+      final searchTool = planner.tryToolIntent('找雨夜长安');
+      expect(searchTool, isNotNull);
+      expect(searchTool!.tool, 'search_media');
+      expect(searchTool.arguments['searchTerm']?.toString(), contains('雨夜'));
+
+      // Explicit dialogue language still routes to scene search.
+      final dialogue = planner.tryToolIntent('搜索雨夜长安的对白');
+      expect(dialogue, isNotNull);
+      expect(dialogue!.tool, 'search_dialogue_scenes');
+
+      // Offline engine prefers tools first; collection NL must still plan.
+      final agentService = MediaAgentService(
+        mediaRepository: mediaRepository,
+        progressRepository: progressRepository,
+        runs: AgentRunRepository(intelligence),
+        collections: SmartCollectionRepository(intelligence),
+        planner: planner,
+      );
+      final offline = OfflineMediaAgentEngine(
+        mediaRepository: mediaRepository,
+        progressRepository: progressRepository,
+        agentService: agentService,
+        planner: planner,
+      );
+      final turn = await offline.tryHandle('建一个雨夜智能合集');
+      expect(turn, isNotNull);
+      expect(turn!.plan, isNotNull);
+      expect(turn.plan!.operation, MediaAgentOperation.smartCollection);
+      expect(turn.toolsUsed.first, isNot(contains('search_dialogue_scenes')));
+    },
+  );
+
   test('smart collection plan can execute and undo without touching media files',
       () async {
     final collections = SmartCollectionRepository(intelligence);
