@@ -17,6 +17,7 @@ import '../../features/intelligence/ask_filmly_page.dart';
 import '../../features/intelligence/media_agent_page.dart';
 import '../../features/intelligence/media_intelligence_page.dart';
 import '../../features/intelligence/personal_memory_page.dart';
+import '../../features/intelligence/smart_collections_page.dart';
 import '../../features/library/favorites_page.dart';
 import '../../features/library/library_page.dart';
 import '../../features/library/media_detail_page.dart';
@@ -236,6 +237,11 @@ GoRouter createAppRouter({String initialLocation = '/'}) => GoRouter(
           path: '/intelligence',
           pageBuilder: (context, state) =>
               _fadePage(state, const MediaIntelligencePage()),
+        ),
+        GoRoute(
+          path: '/collections',
+          pageBuilder: (context, state) =>
+              _fadePage(state, const SmartCollectionsPage()),
         ),
         GoRoute(
           path: '/agent',

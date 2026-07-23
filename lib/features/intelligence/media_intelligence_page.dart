@@ -213,6 +213,10 @@ class _MediaIntelligencePageState extends ConsumerState<MediaIntelligencePage> {
                               onPressed: () => context.push('/agent'),
                               child: const Text('Open Conversations'),
                             ),
+                            TextButton(
+                              onPressed: () => context.push('/collections'),
+                              child: const Text('Smart Collections'),
+                            ),
                           ],
                         ),
                         if (_progressLabel.isNotEmpty) ...[
